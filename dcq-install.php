@@ -94,6 +94,49 @@ function prompt_choice(string $path, bool $warnParity): string
     return $answer;
 }
 
+function prompt_yes_no(string $question, bool $defaultNo = true): bool
+{
+    $suffix = $defaultNo ? '[y/N]' : '[Y/n]';
+    fwrite(STDOUT, $question . ' ' . $suffix . ' ');
+    $answer = trim((string) fgets(STDIN));
+    if ($answer === '') {
+        return !$defaultNo;
+    }
+    return in_array(strtolower($answer), ['y', 'yes'], true);
+}
+
+function command_available(string $command): bool
+{
+    $path = trim((string) shell_exec('command -v ' . escapeshellarg($command)));
+    return $path !== '' && is_executable($path);
+}
+
+function composer_requires_core_dev(string $composerJson): bool
+{
+    if (!file_exists($composerJson)) {
+        return false;
+    }
+    $raw = file_get_contents($composerJson);
+    if ($raw === false) {
+        return false;
+    }
+    $data = json_decode($raw, true);
+    if (!is_array($data)) {
+        return false;
+    }
+    if (!isset($data['require-dev']) || !is_array($data['require-dev'])) {
+        return false;
+    }
+    return array_key_exists('drupal/core-dev', $data['require-dev']);
+}
+
+function run_command(string $command): int
+{
+    fwrite(STDOUT, "Running: {$command}\n");
+    passthru($command, $status);
+    return (int) $status;
+}
+
 $cwd = getcwd();
 if ($cwd === false) {
     fwrite(STDERR, "Unable to determine working directory.\n");
@@ -211,3 +254,74 @@ foreach ($iterator as $file) {
 }
 
 fwrite(STDOUT, "Done.\n");
+
+$vendorBin = rtrim($appRoot, '/') . '/vendor/bin';
+$missingTools = [];
+foreach (['phpstan', 'phpcs', 'phpcbf'] as $tool) {
+    if (!file_exists($vendorBin . '/' . $tool)) {
+        $missingTools[] = $tool;
+    }
+}
+
+if ($missingTools) {
+    $composerJson = rtrim($appRoot, '/') . '/composer.json';
+    $hasCoreDev = composer_requires_core_dev($composerJson);
+    $ddev = getenv('DDEV_EXECUTABLE') ?: 'ddev';
+    $depsModeRaw = strtolower(trim((string) getenv('DCQ_INSTALL_DEPS')));
+    if ($depsModeRaw === '') {
+        $depsMode = $nonInteractive ? 'skip' : 'prompt';
+    } elseif (in_array($depsModeRaw, ['1', 'true', 'yes', 'on', 'install', 'auto'], true)) {
+        $depsMode = 'install';
+    } elseif (in_array($depsModeRaw, ['0', 'false', 'no', 'off', 'skip'], true)) {
+        $depsMode = 'skip';
+    } else {
+        $depsMode = 'prompt';
+    }
+
+    fwrite(STDOUT, "Missing dev tools: " . implode(', ', $missingTools) . ".\n");
+    if (!file_exists($composerJson)) {
+        fwrite(STDOUT, "composer.json not found; skipping dependency install.\n");
+        exit(0);
+    }
+
+    if (!command_available($ddev)) {
+        fwrite(STDOUT, "ddev executable not found in PATH; skipping dependency install.\n");
+        exit(0);
+    }
+
+    $action = $hasCoreDev ? 'install' : 'require';
+    $installCmd = $action === 'install'
+        ? "{$ddev} composer install"
+        : "{$ddev} composer require --dev drupal/core-dev";
+    if ($nonInteractive) {
+        $installCmd .= ' --no-interaction';
+    }
+
+    $question = $action === 'install'
+        ? "Run '{$installCmd}' to install dev tools?"
+        : "Run '{$installCmd}' to add Drupal core-dev tools?";
+
+    $shouldInstall = false;
+    if ($depsMode === 'install') {
+        $shouldInstall = true;
+    } elseif ($depsMode === 'prompt') {
+        if (function_exists('posix_isatty') && !posix_isatty(STDIN)) {
+            $shouldInstall = false;
+        } else {
+            $shouldInstall = prompt_yes_no($question, true);
+        }
+    }
+
+    if (!$shouldInstall) {
+        fwrite(STDOUT, "Skipping dependency install. Run '{$installCmd}' later to enable PHPStan/PHPCS/PHPCBF.\n");
+        exit(0);
+    }
+
+    chdir($appRoot);
+    $status = run_command($installCmd);
+    if ($status !== 0) {
+        fwrite(STDERR, "Dependency install failed (exit {$status}).\n");
+        exit($status);
+    }
+    fwrite(STDOUT, "Dependencies installed.\n");
+}

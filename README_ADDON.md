@@ -32,6 +32,9 @@ During installation, the add-on copies CI-parity config files into the project
 root. If conflicts are detected, you can choose to back up and replace, skip,
 or abort. Skipping a config may reduce CI parity.
 
+If PHPStan/PHPCS/PHPCBF binaries are missing, the installer prompts to add
+`drupal/core-dev` (or to run `composer install` if it is already required).
+
 ## Usage
 
 Host shims are installed under `tooling/bin` by default (set `DCQ_SHIM_DIR` to
@@ -88,6 +91,8 @@ ddev checks-full
 - `DCQ_SHIM_DIR`: override shim install path (must be within the project root).
 - `DCQ_INSTALL_MODE`: `replace`, `skip`, or `abort` for conflict handling.
 - `DCQ_NONINTERACTIVE=true`: behave like `DCQ_INSTALL_MODE=replace`.
+- `DCQ_INSTALL_DEPS`: `install`/`true` to auto-install missing `drupal/core-dev`,
+  `skip`/`false` to skip, or unset to prompt when interactive.
 
 ## Uninstall
 

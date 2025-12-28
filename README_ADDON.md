@@ -74,7 +74,8 @@ ddev checks-full
 - DDEV project with Drupal core under `web/`.
 - Composer dependencies installed (`ddev composer install`).
 - Node toolchain for JS linting (recommended: enable corepack in DDEV and run
-  `yarn install` in `web/core`).
+  `yarn install` in `web/core`, or create a project-root `package.json` and
+  install dependencies there).
 
 ## Configuration notes
 
@@ -96,8 +97,10 @@ ddev checks-full
 - `DCQ_NONINTERACTIVE=true`: behave like `DCQ_INSTALL_MODE=replace`.
 - `DCQ_INSTALL_DEPS`: `install`/`true` to auto-install missing `drupal/core-dev`,
   `skip`/`false` to skip, or unset to prompt when interactive.
-- `DCQ_INSTALL_NODE_DEPS`: `install`/`true` to auto-install the core JS toolchain
-  (`web/core` yarn install), `skip`/`false` to skip, or unset to prompt.
+- `DCQ_INSTALL_NODE_DEPS`: `root` to install JS deps in the project root (creates
+  a root `package.json` from core if missing), `core` to install in `web/core`,
+  `install`/`true` to auto-install in root when possible (core otherwise),
+  `skip`/`false` to skip, or unset to prompt.
 
 ## Uninstall
 

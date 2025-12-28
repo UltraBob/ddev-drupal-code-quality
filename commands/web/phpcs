@@ -27,19 +27,23 @@ while [ "$index" -lt "$arg_count" ]; do
   case "$arg" in
     --standard=*)
       value="${arg#*=}"
+      # Rewrite host paths for standards into container paths.
       rewrite_args+=("--standard=$(map_path "$value")")
       ;;
     --standard)
       next_arg="${args[$((index + 1))]:-}"
+      # Rewrite host paths for standards into container paths.
       rewrite_args+=("--standard" "$(map_path "$next_arg")")
       index=$((index + 1))
       ;;
     --stdin-path=*)
       value="${arg#*=}"
+      # Rewrite stdin file paths so PHPCS can resolve them in the container.
       rewrite_args+=("--stdin-path=$(map_path "$value")")
       ;;
     --stdin-path)
       next_arg="${args[$((index + 1))]:-}"
+      # Rewrite stdin file paths so PHPCS can resolve them in the container.
       rewrite_args+=("--stdin-path" "$(map_path "$next_arg")")
       index=$((index + 1))
       ;;

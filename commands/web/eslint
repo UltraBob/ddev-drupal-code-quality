@@ -72,6 +72,7 @@ prefer_root=false
 if [ "$ESLINT_TOOLCHAIN" = "root" ]; then
   prefer_root=true
 elif [ "$ESLINT_TOOLCHAIN" = "auto" ]; then
+  # If the project ships ESLint configs, prefer the root toolchain.
   if [ -f "${PROJECT_ROOT}/.eslintrc.json" ] || [ -f "${PROJECT_ROOT}/.eslintrc.passing.json" ] || [ -f "${PROJECT_ROOT}/.eslintrc.jquery.json" ]; then
     prefer_root=true
   fi
@@ -107,9 +108,11 @@ fi
 
 CMD=(env "NODE_PATH=$NODE_PATH" node "$TOOLCHAIN_BIN" --quiet)
 if [ -n "$RESOLVE_PLUGINS_DIR" ]; then
+  # Ensure ESLint resolves plugins from the selected toolchain.
   CMD+=(--resolve-plugins-relative-to "$RESOLVE_PLUGINS_DIR")
 fi
 if [ "$has_config" = false ] && [ "$ESLINT_CONFIG_MODE" != "nearest" ]; then
+  # Fixed mode: force the passing config for CI parity when requested.
   if [ -f "${PROJECT_ROOT}/.eslintrc.passing.json" ]; then
     CMD+=(--config="${PROJECT_ROOT}/.eslintrc.passing.json")
   else
@@ -124,6 +127,7 @@ find_nearest_config() {
   local dir
   dir="$(dirname "$file_path")"
   while true; do
+    # Walk up the directory tree to find the closest ESLint config.
     for candidate in .eslintrc .eslintrc.json .eslintrc.yaml .eslintrc.yml .eslintrc.js .eslintrc.cjs; do
       if [ -f "$dir/$candidate" ]; then
         echo "$dir/$candidate"
@@ -144,6 +148,7 @@ resolve_plugins_dir() {
     echo ""
     return
   fi
+  # Prefer plugins colocated with the config, then fall back to project/core.
   if [[ "$config_dir" != /* ]]; then
     config_dir="${PROJECT_ROOT}/${config_dir}"
   fi
@@ -164,6 +169,7 @@ resolve_plugins_dir() {
 
 normalize_path() {
   local path="$1"
+  # Convert container/short paths into repo-relative paths for consistent matching.
   if [[ "$path" == /var/www/html/* ]]; then
     path="${path#/var/www/html/}"
   fi
@@ -180,6 +186,7 @@ normalize_path() {
 
 normalize_config_path() {
   local path="$1"
+  # ESLint --config paths need to be relative to the repo root in the container.
   if [[ "$path" == /var/www/html/* ]]; then
     path="${path#/var/www/html/}"
   fi
@@ -258,10 +265,12 @@ elif [ -f "${PROJECT_ROOT}/web/core/.eslintrc.passing.json" ]; then
 fi
 
 if [ "$ESLINT_CONFIG_MODE" = "nearest" ]; then
+  # Group files by nearest config to avoid plugin conflicts across modules/themes.
   declare -A ESLINT_GROUPS
   for file_path in "${FILES[@]}"; do
     config_path="$(find_nearest_config "$file_path")"
     if [ -z "$config_path" ]; then
+      # Fall back to the default passing config when nothing is found.
       config_path="$DEFAULT_CONFIG"
     fi
     ESLINT_GROUPS["$config_path"]+="$file_path"$'\n'

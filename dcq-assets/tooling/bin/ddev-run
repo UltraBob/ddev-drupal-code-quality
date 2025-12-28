@@ -32,6 +32,7 @@ case "$tool_name" in
     exec ddev exec php "$@"
     ;;
   styles)
+    # Convenience alias: run fix first, then report remaining issues.
     ddev stylelint-fix "$@"
     exec ddev stylelint "$@"
     ;;

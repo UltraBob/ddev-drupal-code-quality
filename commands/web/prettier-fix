@@ -32,6 +32,7 @@ for arg in "$@"; do
     continue
   fi
   if [ "$arg" = "--allow-dirty-outside-targets" ] || [ "$arg" = "--allow-dirty" ]; then
+    # Allow applying fixes even when unrelated files are dirty.
     allow_dirty_outside_targets=true
     continue
   fi
@@ -115,6 +116,7 @@ PATCH_FILE="${REPORT_DIR}/_prettier.patch"
 
 normalize_path() {
   local path="$1"
+  # Normalize paths into repo-relative paths for matching target prefixes.
   if [[ "$path" == /var/www/html/* ]]; then
     path="${path#/var/www/html/}"
   fi
@@ -165,6 +167,7 @@ if [ "${#RAW_PATHS[@]}" -gt 0 ]; then
     TARGET_PREFIXES+=("$(normalize_path "$raw")")
   done
 else
+  # Default to custom code when no explicit paths are provided.
   for candidate in web/modules/custom web/themes/custom web/profiles/custom; do
     if [ -d "$candidate" ]; then
       TARGET_PREFIXES+=("$candidate")
@@ -187,6 +190,7 @@ if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
       fi
     done
     if [ "$matched" = false ]; then
+      # Guard against applying fixes when unrelated changes are present.
       unrelated_changes=true
       break
     fi
@@ -195,6 +199,7 @@ fi
 
 CMD_BASE=(env "NODE_PATH=$NODE_PATH" "$PRETTIER_BIN")
 if [ "$has_config" = false ]; then
+  # Prefer project configs; warn when falling back to core.
   if [ -f "${PROJECT_ROOT}/.prettierrc.json" ]; then
     CMD_BASE+=(--config="${PROJECT_ROOT}/.prettierrc.json")
   else
@@ -211,6 +216,7 @@ fi
 
 DEFAULT_FILES=()
 if [ "$explicit_paths" = false ]; then
+  # Use docroot-relative paths for default discovery.
   cd web
   for candidate in modules/custom themes/custom profiles/custom; do
     if [ -d "$candidate" ]; then

@@ -63,6 +63,7 @@ while [ "$index" -lt "$arg_count" ]; do
       next_index=$((index + 1))
       config_value="${args[$next_index]:-}"
       if [ -n "$config_value" ]; then
+        # Normalize common host paths into container paths so IDEs can pass host config paths.
         if [ "${config_value#${CONTAINER_ROOT}/}" != "$config_value" ]; then
           :
         elif [[ "$config_value" == *"/tooling/"* ]]; then
@@ -80,6 +81,7 @@ while [ "$index" -lt "$arg_count" ]; do
       has_config=true
       config_value="${arg#*=}"
       if [ -n "$config_value" ]; then
+        # Same normalization as above, but for --configuration=<value>.
         if [ "${config_value#${CONTAINER_ROOT}/}" != "$config_value" ]; then
           :
         elif [[ "$config_value" == *"/tooling/"* ]]; then
@@ -145,6 +147,7 @@ EXCLUDE_PATHS=(
   "web/sites/*/files"
   "sites/*/files"
 )
+# Prefer explicit project configs before falling back to CI template config.
 for config_file in phpstan.neon phpstan.neon.dist phpstan.dist.neon; do
   if [ -f "$config_file" ]; then
     CONFIG_FILE="$config_file"
@@ -153,6 +156,7 @@ for config_file in phpstan.neon phpstan.neon.dist phpstan.dist.neon; do
 done
 
 if [ "$explicit_paths" = false ]; then
+  # Default to custom code only unless the user passes explicit paths.
   for candidate in web/modules/custom web/themes/custom web/profiles/custom; do
     if [ -d "$candidate" ]; then
       DEFAULT_PATHS+=("$candidate")
@@ -183,6 +187,7 @@ elif [ -f "$CI_CONFIG" ]; then
 fi
 
 if [ -n "$BASE_CONFIG" ] && [ "$BASE_CONFIG_IS_CI" = false ]; then
+  # Resolve config to an absolute path for includes processing.
   if [ "${BASE_CONFIG#/}" = "$BASE_CONFIG" ]; then
     BASE_CONFIG_ABS="$(pwd)/$BASE_CONFIG"
   else
@@ -201,6 +206,7 @@ fi
 resolve_ci_template() {
   local source_config="$1"
   local target_config="$2"
+  # Replace the CI placeholder if a baseline exists; otherwise drop the include.
   if [ -n "$BASELINE_INCLUDE" ]; then
     sed "s|BASELINE_PLACEHOLDER|$BASELINE_INCLUDE|" "$source_config" > "$target_config"
   else
@@ -214,6 +220,7 @@ if [ "$BASE_CONFIG_IS_CI" = true ]; then
   resolve_ci_template "$CI_CONFIG" "$RESOLVED_CI_CONFIG"
   trap cleanup EXIT
 elif [ -n "$BASE_CONFIG_ABS" ] && { [ "$BASE_CONFIG_ABS" = "$CI_CONFIG" ] || [ "${BASE_CONFIG_ABS##*/}" = "phpstan.neon" ] && [ "${BASE_CONFIG_ABS%/phpstan.neon}" = "/var/www/html/tooling/ci-config" ]; } ; then
+  # Treat explicit CI config selection as a template and resolve its placeholder.
   RESOLVED_CI_CONFIG="$(mktemp /tmp/phpstan-ci.XXXXXX.neon)"
   TMP_FILES+=("$RESOLVED_CI_CONFIG")
   resolve_ci_template "$BASE_CONFIG_ABS" "$RESOLVED_CI_CONFIG"
@@ -268,6 +275,7 @@ done
 
 if [ "$has_config" = false ]; then
   if [ "$explicit_paths" = false ]; then
+    # Build a minimal config that scopes analysis and excludes contrib/files.
     CONFIG_TO_USE="$(mktemp /tmp/phpstan-scope.XXXXXX.neon)"
     TMP_FILES+=("$CONFIG_TO_USE")
     if [ "$BASE_CONFIG_IS_CI" = true ]; then
@@ -303,10 +311,12 @@ if [ -n "$CONFIG_TO_USE" ]; then
 fi
 
 if [ "$has_level" = false ] && [ "$USING_CI_FALLBACK" = true ]; then
+  # Slightly stricter local default when using the CI template fallback.
   CMD+=(--level=3)
 fi
 
 if [ "$has_level" = false ] && [ -z "$CONFIG_FILE" ] && [ "$has_config" = false ] && [ ! -f "$CI_CONFIG" ]; then
+  # Match PHPStan's default when no config is present at all.
   CMD+=(--level=0)
 fi
 
@@ -323,6 +333,7 @@ if [ "$has_json_format" = true ]; then
   "${CMD[@]}" "${FINAL_ARGS[@]}" > "$JSON_OUTPUT"
   exit_code=$?
   if [ -n "$HOST_ROOT" ]; then
+    # Rewrite container file paths in JSON diagnostics so IDEs can open them.
     php -r '
 $path = $argv[1];
 $host = rtrim($argv[2], "/");

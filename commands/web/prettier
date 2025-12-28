@@ -88,10 +88,12 @@ if [ "$has_version" = true ]; then
   exit $?
 fi
 
+# Run from the Drupal docroot so config resolution matches CI expectations.
 cd web
 
 CMD=(env "NODE_PATH=$NODE_PATH" "$PRETTIER_BIN" --check)
 if [ "$has_config" = false ]; then
+  # Prefer project configs; warn when falling back to core.
   if [ -f "${PROJECT_ROOT}/.prettierrc.json" ]; then
     CMD+=(--config="${PROJECT_ROOT}/.prettierrc.json")
   else
@@ -107,6 +109,7 @@ if [ "$has_config" = false ]; then
 fi
 
 if [ "$explicit_paths" = false ]; then
+  # Default to custom code only when no explicit paths are passed.
   DEFAULT_FILES=()
   for candidate in modules/custom themes/custom profiles/custom; do
     if [ -d "$candidate" ]; then

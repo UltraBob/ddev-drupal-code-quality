@@ -85,10 +85,12 @@ if [ "$has_version" = true ]; then
   exit $?
 fi
 
+# Run from the Drupal docroot so paths align with CI defaults.
 cd web
 
 CMD=("$CSPELL_BIN")
 if [ "$has_config" = false ]; then
+  # Prefer project config; warn when falling back to core.
   if [ -f "${PROJECT_ROOT}/.cspell.json" ]; then
     CMD+=(-c "${PROJECT_ROOT}/.cspell.json")
   else
@@ -98,6 +100,7 @@ if [ "$has_config" = false ]; then
 fi
 
 if [ "$explicit_paths" = false ]; then
+  # Default to custom code when no explicit paths are provided.
   DEFAULT_PATHS=()
   DEFAULT_FILES=()
   for candidate in modules/custom themes/custom profiles/custom; do

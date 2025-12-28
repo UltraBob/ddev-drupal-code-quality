@@ -14,11 +14,13 @@ for arg in "$@"; do
   case "$arg" in
     -h|--help)
       print_help
+      # Pass through to composer for full option details.
       composer validate --help
       exit $?
       ;;
   esac
 done
 
+# Run in-container to match CI behavior.
 composer validate "$@"
 exit $?

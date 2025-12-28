@@ -26,6 +26,7 @@ done
 
 LINT_BIN=""
 if [ -x "vendor/bin/parallel-lint" ]; then
+  # Prefer the newer binary name when available.
   LINT_BIN="vendor/bin/parallel-lint"
 elif [ -x "vendor/bin/php-parallel-lint" ]; then
   LINT_BIN="vendor/bin/php-parallel-lint"
@@ -47,6 +48,7 @@ for candidate in web/modules/custom web/themes/custom web/profiles/custom; do
  done
 
 if [ "${#DEFAULT_FILES[@]}" -eq 0 ] && [ "$#" -eq 0 ]; then
+  # Skip quietly if no custom PHP files are present.
   echo "No custom PHP files found under web/modules/custom, web/themes/custom, or web/profiles/custom. Nothing to check." >&2
   exit 0
 fi

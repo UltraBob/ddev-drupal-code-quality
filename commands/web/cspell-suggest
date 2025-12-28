@@ -79,6 +79,7 @@ if ! mkdir -p "$REPORT_DIR"; then
   echo "Unable to create report directory: $REPORT_DIR" >&2
   exit 1
 fi
+# CI-style artifacts for review and optional dictionary updates.
 UNRECOGNIZED_FILE="${REPORT_DIR}/_cspell_unrecognized_words.txt"
 UPDATED_WORDS_FILE="${REPORT_DIR}/_cspell_updated_project_words.txt"
 : > "$UNRECOGNIZED_FILE"
@@ -104,10 +105,12 @@ if [ "$has_version" = true ]; then
   exit $?
 fi
 
+# Run from the Drupal docroot so paths align with CI defaults.
 cd web
 
 CMD=("$CSPELL_BIN")
 if [ "$has_config" = false ]; then
+  # Prefer project config; warn when falling back to core.
   if [ -f "${PROJECT_ROOT}/.cspell.json" ]; then
     CMD+=(-c "${PROJECT_ROOT}/.cspell.json")
   else
@@ -119,6 +122,7 @@ fi
 DEFAULT_PATHS=()
 DEFAULT_FILES=()
 if [ "$explicit_paths" = false ]; then
+  # Default to custom code when no explicit paths are provided.
   for candidate in modules/custom themes/custom profiles/custom; do
     if [ -d "$candidate" ]; then
       DEFAULT_PATHS+=("$candidate")
@@ -140,6 +144,7 @@ if [ "$explicit_paths" = false ]; then
 fi
 
 if [ "$explicit_paths" = false ]; then
+  # Collect unrecognized words for review without failing the run.
   "${CMD[@]}" --words-only "${DEFAULT_FILES[@]}" > "$UNRECOGNIZED_FILE" || true
 else
   "${CMD[@]}" --words-only "${clean_args[@]}" > "$UNRECOGNIZED_FILE" || true
@@ -153,6 +158,7 @@ fi
 
 PROJECT_DICTIONARY="${PROJECT_ROOT}/.cspell-project-words.txt"
 if [ -f "$PROJECT_DICTIONARY" ]; then
+  # Merge existing dictionary with new suggestions.
   cat "$PROJECT_DICTIONARY" "$UNRECOGNIZED_FILE" | sort -u > "$UPDATED_WORDS_FILE"
 else
   sort -u "$UNRECOGNIZED_FILE" > "$UPDATED_WORDS_FILE"

@@ -34,6 +34,7 @@ for arg in "$@"; do
     continue
   fi
   if [ "$arg" = "--allow-dirty-outside-targets" ] || [ "$arg" = "--allow-dirty" ]; then
+    # Allow applying fixes even if unrelated files are dirty.
     allow_dirty_outside_targets=true
     continue
   fi
@@ -133,6 +134,7 @@ PATCH_FILE="${REPORT_DIR}/_eslint.patch"
 
 normalize_path() {
   local path="$1"
+  # Normalize paths into repo-relative paths for matching target prefixes.
   if [[ "$path" == /var/www/html/* ]]; then
     path="${path#/var/www/html/}"
   fi
@@ -187,6 +189,7 @@ if [ "${#RAW_PATHS[@]}" -gt 0 ]; then
     TARGET_PREFIXES+=("$(normalize_path "$raw")")
   done
 else
+  # Default to custom code when no explicit paths are passed.
   for candidate in web/modules/custom web/themes/custom web/profiles/custom; do
     if [ -d "$candidate" ]; then
       TARGET_PREFIXES+=("$candidate")
@@ -209,6 +212,7 @@ if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
       fi
     done
     if [ "$matched" = false ]; then
+      # Guard against applying fixes when unrelated changes are present.
       unrelated_changes=true
       break
     fi
@@ -359,6 +363,7 @@ tmp_root="$(mktemp -d)"
 trap 'rm -rf "$tmp_root"' EXIT
 
 cd "$PROJECT_ROOT"
+# Create a temp copy to preview fixes and generate a patch without touching the worktree.
 tar -cf - \
   --exclude=./.git \
   --exclude=./.trunk \
@@ -371,10 +376,12 @@ tar -cf - \
   . | (cd "$tmp_root" && tar -xf -)
 
 if [ "$ESLINT_CONFIG_MODE" = "nearest" ]; then
+  # Group files by nearest config to avoid plugin conflicts across modules/themes.
   declare -A ESLINT_GROUPS
   for file_path in "${FILES[@]}"; do
     config_path="$(find_nearest_config "$file_path")"
     if [ -z "$config_path" ]; then
+      # Fall back to the default passing config when nothing is found.
       config_path="$DEFAULT_CONFIG"
     fi
     ESLINT_GROUPS["$config_path"]+="$file_path"$'\n'

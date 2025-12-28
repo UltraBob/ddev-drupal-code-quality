@@ -5,6 +5,7 @@ set -u
 REPORT_DIR="tooling/reports"
 mkdir -p "$REPORT_DIR"
 
+# Collect custom code paths once so tools can reuse them.
 CUSTOM_PATHS=()
 for candidate in web/modules/custom web/themes/custom web/profiles/custom; do
   if [ -d "$candidate" ]; then
@@ -12,6 +13,7 @@ for candidate in web/modules/custom web/themes/custom web/profiles/custom; do
   fi
 done
 
+# Ordered list of CI-parity tools to run.
 TOOLS=(
   "composer-validate"
   "php-parallel-lint"
@@ -51,12 +53,14 @@ for tool in "${TOOLS[@]}"; do
   if [ "$tool" = "php-parallel-lint" ] && \
     [ ! -x "vendor/bin/parallel-lint" ] && \
     [ ! -x "vendor/bin/php-parallel-lint" ]; then
+    # Skip when the binary isn't installed; keeps the run useful for new projects.
     echo "SKIP: php-parallel-lint is not installed in vendor/bin." | tee -a "$log_file"
     STATUS["$tool"]=SKIP
     continue
   fi
 
   if [ "$tool" = "phpcs" ] && [ "${#CUSTOM_PATHS[@]}" -eq 0 ]; then
+    # Avoid failing when there is no custom code to lint.
     echo "SKIP: no custom code directories found for phpcs." | tee -a "$log_file"
     STATUS["$tool"]=SKIP
     continue

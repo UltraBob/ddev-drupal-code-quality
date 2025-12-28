@@ -90,6 +90,7 @@ if [ "$has_version" = true ]; then
   exit $?
 fi
 
+# Run from the Drupal docroot so default configs resolve as expected.
 cd web
 
 find_stylelint_config() {
@@ -99,6 +100,7 @@ find_stylelint_config() {
     dir="$(dirname "$dir")"
   fi
   while [ "$dir" != "." ] && [ "$dir" != "/" ]; do
+    # Walk upward to find the closest Stylelint config.
     for candidate in .stylelintrc .stylelintrc.json .stylelintrc.yaml .stylelintrc.yml .stylelintrc.js; do
       if [ -f "$dir/$candidate" ]; then
         echo "$dir/$candidate"
@@ -119,6 +121,7 @@ find_scss_parser() {
     if [[ "$path" != /* ]]; then
       path="${PROJECT_ROOT}/web/${path}"
     fi
+    # Look for postcss-scss so SCSS/Sass files can be parsed safely.
     if [ -f "$path/postcss-scss/lib/scss-syntax.js" ]; then
       CUSTOM_SYNTAX_PATH="$path/postcss-scss/lib/scss-syntax.js"
       return 0
@@ -139,6 +142,7 @@ config_supports_scss() {
   if [ ! -f "$full_path" ]; then
     return 1
   fi
+  # Detect SCSS support by searching for known presets/plugins.
   if grep -E -q 'stylelint-scss|standard-scss|recommended-scss' "$full_path"; then
     return 0
   fi

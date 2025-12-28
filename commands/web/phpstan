@@ -1,0 +1,353 @@
+#!/bin/bash
+#ddev-generated
+set -u
+
+PHPSTAN_BIN="vendor/bin/phpstan"
+CI_CONFIG="tooling/ci-config/phpstan.neon"
+TMP_FILES=()
+source /mnt/ddev_config/commands/helpers/path-map.sh
+
+print_help() {
+  cat <<'USAGE'
+Usage: ddev phpstan [args]
+
+Runs PHPStan inside the DDEV web container. This wrapper forwards all arguments
+and applies Drupal CI config discovery when no explicit configuration is given.
+USAGE
+}
+
+if [ ! -x "$PHPSTAN_BIN" ]; then
+  echo "phpstan not found at $PHPSTAN_BIN. Run 'composer install' to install vendor/bin/phpstan." >&2
+  print_help
+  exit 127
+fi
+
+cleanup() {
+  for tmp_file in "${TMP_FILES[@]}"; do
+    if [ -n "$tmp_file" ] && [ -f "$tmp_file" ]; then
+      rm -f "$tmp_file"
+    fi
+  done
+}
+
+has_help=false
+has_version=false
+has_config=false
+has_level=false
+has_json_format=false
+explicit_paths=false
+config_value=""
+
+args=("$@")
+arg_count=${#args[@]}
+index=0
+seen_double_dash=false
+while [ "$index" -lt "$arg_count" ]; do
+  arg="${args[$index]}"
+  if [ "$seen_double_dash" = true ]; then
+    explicit_paths=true
+    break
+  fi
+  case "$arg" in
+    --)
+      seen_double_dash=true
+      ;;
+    -h|--help)
+      has_help=true
+      ;;
+    -V|--version)
+      has_version=true
+      ;;
+    -c|--configuration)
+      has_config=true
+      next_index=$((index + 1))
+      config_value="${args[$next_index]:-}"
+      if [ -n "$config_value" ]; then
+        if [ "${config_value#${CONTAINER_ROOT}/}" != "$config_value" ]; then
+          :
+        elif [[ "$config_value" == *"/tooling/"* ]]; then
+          suffix="/tooling/${config_value#*/tooling/}"
+          config_value="${CONTAINER_ROOT}${suffix}"
+          args[$next_index]="$config_value"
+        elif [ "$config_value" = "phpstan.neon" ] || [ "$config_value" = "phpstan.neon.dist" ] || [ "$config_value" = "phpstan.dist.neon" ]; then
+          config_value="${CONTAINER_ROOT}/${config_value}"
+          args[$next_index]="$config_value"
+        fi
+      fi
+      index=$((index + 1))
+      ;;
+    --configuration=*)
+      has_config=true
+      config_value="${arg#*=}"
+      if [ -n "$config_value" ]; then
+        if [ "${config_value#${CONTAINER_ROOT}/}" != "$config_value" ]; then
+          :
+        elif [[ "$config_value" == *"/tooling/"* ]]; then
+          suffix="/tooling/${config_value#*/tooling/}"
+          config_value="${CONTAINER_ROOT}${suffix}"
+          args[$index]="--configuration=$config_value"
+        elif [ "$config_value" = "phpstan.neon" ] || [ "$config_value" = "phpstan.neon.dist" ] || [ "$config_value" = "phpstan.dist.neon" ]; then
+          config_value="${CONTAINER_ROOT}/${config_value}"
+          args[$index]="--configuration=$config_value"
+        fi
+      fi
+      ;;
+    --error-format)
+      next_index=$((index + 1))
+      if [ "${args[$next_index]:-}" = "json" ]; then
+        has_json_format=true
+      fi
+      index=$((index + 1))
+      ;;
+    --error-format=json)
+      has_json_format=true
+      ;;
+    --error-format=*)
+      ;;
+    -l|--level)
+      has_level=true
+      index=$((index + 1))
+      ;;
+    --level=*)
+      has_level=true
+      ;;
+    analyze|analyse)
+      ;;
+    -*)
+      ;;
+    *)
+      explicit_paths=true
+      ;;
+  esac
+  if [ "$has_help" = true ] || [ "$has_version" = true ]; then
+    break
+  fi
+  index=$((index + 1))
+done
+
+if [ "$has_help" = true ]; then
+  print_help
+  "$PHPSTAN_BIN" --help
+  exit $?
+fi
+
+if [ "$has_version" = true ]; then
+  "$PHPSTAN_BIN" --version
+  exit $?
+fi
+
+CONFIG_FILE=""
+USING_CI_FALLBACK=false
+DEFAULT_PATHS=()
+EXCLUDE_PATHS=(
+  "web/modules/contrib"
+  "web/themes/contrib"
+  "web/sites/*/files"
+  "sites/*/files"
+)
+for config_file in phpstan.neon phpstan.neon.dist phpstan.dist.neon; do
+  if [ -f "$config_file" ]; then
+    CONFIG_FILE="$config_file"
+    break
+  fi
+done
+
+if [ "$explicit_paths" = false ]; then
+  for candidate in web/modules/custom web/themes/custom web/profiles/custom; do
+    if [ -d "$candidate" ]; then
+      DEFAULT_PATHS+=("$candidate")
+    fi
+  done
+  if [ -d web/sites ]; then
+    while IFS= read -r site_file; do
+      DEFAULT_PATHS+=("$site_file")
+    done < <(find web/sites -type f \( -name '*.php' -o -name '*.inc' -o -name '*.module' -o -name '*.install' -o -name '*.theme' -o -name '*.profile' \) ! -path '*/files/*')
+  fi
+fi
+
+BASE_CONFIG=""
+BASE_CONFIG_IS_CI=false
+RESOLVED_CI_CONFIG=""
+CONFIG_TO_USE=""
+BASE_CONFIG_ABS=""
+BASELINE_PATH="/var/www/html/phpstan-baseline.neon"
+
+if [ "$has_config" = true ]; then
+  BASE_CONFIG="$config_value"
+elif [ -n "$CONFIG_FILE" ]; then
+  BASE_CONFIG="$CONFIG_FILE"
+elif [ -f "$CI_CONFIG" ]; then
+  BASE_CONFIG="$CI_CONFIG"
+  BASE_CONFIG_IS_CI=true
+  USING_CI_FALLBACK=true
+fi
+
+if [ -n "$BASE_CONFIG" ] && [ "$BASE_CONFIG_IS_CI" = false ]; then
+  if [ "${BASE_CONFIG#/}" = "$BASE_CONFIG" ]; then
+    BASE_CONFIG_ABS="$(pwd)/$BASE_CONFIG"
+  else
+    BASE_CONFIG_ABS="$BASE_CONFIG"
+  fi
+fi
+
+if [ -f "$BASELINE_PATH" ]; then
+  BASELINE_INCLUDE="$BASELINE_PATH"
+elif [ -f phpstan-baseline.neon ]; then
+  BASELINE_INCLUDE="/var/www/html/phpstan-baseline.neon"
+else
+  BASELINE_INCLUDE=""
+fi
+
+resolve_ci_template() {
+  local source_config="$1"
+  local target_config="$2"
+  if [ -n "$BASELINE_INCLUDE" ]; then
+    sed "s|BASELINE_PLACEHOLDER|$BASELINE_INCLUDE|" "$source_config" > "$target_config"
+  else
+    awk 'BEGIN{skip=0} /^includes:/{skip=1;next} skip==1 && /^[^[:space:]]/{skip=0} skip==1{next} {print}' "$source_config" > "$target_config"
+  fi
+}
+
+if [ "$BASE_CONFIG_IS_CI" = true ]; then
+  RESOLVED_CI_CONFIG="$(mktemp /tmp/phpstan-ci.XXXXXX.neon)"
+  TMP_FILES+=("$RESOLVED_CI_CONFIG")
+  resolve_ci_template "$CI_CONFIG" "$RESOLVED_CI_CONFIG"
+  trap cleanup EXIT
+elif [ -n "$BASE_CONFIG_ABS" ] && { [ "$BASE_CONFIG_ABS" = "$CI_CONFIG" ] || [ "${BASE_CONFIG_ABS##*/}" = "phpstan.neon" ] && [ "${BASE_CONFIG_ABS%/phpstan.neon}" = "/var/www/html/tooling/ci-config" ]; } ; then
+  RESOLVED_CI_CONFIG="$(mktemp /tmp/phpstan-ci.XXXXXX.neon)"
+  TMP_FILES+=("$RESOLVED_CI_CONFIG")
+  resolve_ci_template "$BASE_CONFIG_ABS" "$RESOLVED_CI_CONFIG"
+  trap cleanup EXIT
+  BASE_CONFIG_ABS="$RESOLVED_CI_CONFIG"
+elif [ -n "$BASE_CONFIG_ABS" ] && grep -q 'BASELINE_PLACEHOLDER' "$BASE_CONFIG_ABS"; then
+  RESOLVED_CI_CONFIG="$(mktemp /tmp/phpstan-ci.XXXXXX.neon)"
+  TMP_FILES+=("$RESOLVED_CI_CONFIG")
+  resolve_ci_template "$BASE_CONFIG_ABS" "$RESOLVED_CI_CONFIG"
+  trap cleanup EXIT
+  BASE_CONFIG_ABS="$RESOLVED_CI_CONFIG"
+fi
+
+FINAL_ARGS=()
+index=0
+seen_double_dash=false
+while [ "$index" -lt "$arg_count" ]; do
+  arg="${args[$index]}"
+  if [ "$seen_double_dash" = true ]; then
+    FINAL_ARGS+=("$arg")
+    index=$((index + 1))
+    continue
+  fi
+  case "$arg" in
+    --)
+      seen_double_dash=true
+      FINAL_ARGS+=("$arg")
+      ;;
+    analyze|analyse)
+      ;;
+    -c|--configuration)
+      if [ "$has_config" = true ] && [ -n "$RESOLVED_CI_CONFIG" ]; then
+        FINAL_ARGS+=("$arg" "$RESOLVED_CI_CONFIG")
+      else
+        FINAL_ARGS+=("$arg" "${args[$((index + 1))]:-}")
+      fi
+      index=$((index + 1))
+      ;;
+    --configuration=*)
+      if [ "$has_config" = true ] && [ -n "$RESOLVED_CI_CONFIG" ]; then
+        FINAL_ARGS+=("--configuration=$RESOLVED_CI_CONFIG")
+      else
+        FINAL_ARGS+=("$arg")
+      fi
+      ;;
+    *)
+      FINAL_ARGS+=("$arg")
+      ;;
+  esac
+  index=$((index + 1))
+done
+
+if [ "$has_config" = false ]; then
+  if [ "$explicit_paths" = false ]; then
+    CONFIG_TO_USE="$(mktemp /tmp/phpstan-scope.XXXXXX.neon)"
+    TMP_FILES+=("$CONFIG_TO_USE")
+    if [ "$BASE_CONFIG_IS_CI" = true ]; then
+      printf "includes:\n  - %s\n" "$RESOLVED_CI_CONFIG" > "$CONFIG_TO_USE"
+    elif [ -n "$BASE_CONFIG_ABS" ]; then
+      printf "includes:\n  - %s\n" "$BASE_CONFIG_ABS" > "$CONFIG_TO_USE"
+    fi
+    project_root="$(pwd)"
+    cat <<'EOF' >> "$CONFIG_TO_USE"
+parameters:
+  excludePaths:
+    analyseAndScan:
+EOF
+    for exclude_path in "${EXCLUDE_PATHS[@]}"; do
+      if [ "${exclude_path#/}" = "$exclude_path" ]; then
+        exclude_path="${project_root}/${exclude_path}"
+      fi
+      printf "      - %s (?)\n" "$exclude_path" >> "$CONFIG_TO_USE"
+    done
+    trap cleanup EXIT
+  else
+    if [ "$BASE_CONFIG_IS_CI" = true ]; then
+      CONFIG_TO_USE="$RESOLVED_CI_CONFIG"
+    else
+      CONFIG_TO_USE="$BASE_CONFIG_ABS"
+    fi
+  fi
+fi
+
+CMD=("$PHPSTAN_BIN" analyze)
+if [ -n "$CONFIG_TO_USE" ]; then
+  CMD+=(--configuration "$CONFIG_TO_USE")
+fi
+
+if [ "$has_level" = false ] && [ "$USING_CI_FALLBACK" = true ]; then
+  CMD+=(--level=3)
+fi
+
+if [ "$has_level" = false ] && [ -z "$CONFIG_FILE" ] && [ "$has_config" = false ] && [ ! -f "$CI_CONFIG" ]; then
+  CMD+=(--level=0)
+fi
+
+if [ "$explicit_paths" = false ] && [ "${#DEFAULT_PATHS[@]}" -gt 0 ]; then
+  FINAL_ARGS+=("${DEFAULT_PATHS[@]}")
+fi
+
+if [ "$has_json_format" = true ]; then
+  if [ -n "${DDEV_HOST_PROJECT_ROOT:-}" ]; then
+    HOST_ROOT="$DDEV_HOST_PROJECT_ROOT"
+  fi
+  JSON_OUTPUT="$(mktemp /tmp/phpstan-json.XXXXXX)"
+  TMP_FILES+=("$JSON_OUTPUT")
+  "${CMD[@]}" "${FINAL_ARGS[@]}" > "$JSON_OUTPUT"
+  exit_code=$?
+  if [ -n "$HOST_ROOT" ]; then
+    php -r '
+$path = $argv[1];
+$host = rtrim($argv[2], "/");
+$container = rtrim($argv[3], "/");
+$raw = @file_get_contents($path);
+if ($raw === false) { exit(0); }
+$json = json_decode($raw, true);
+if (!is_array($json)) { echo $raw; exit(0); }
+if (isset($json["files"]) && is_array($json["files"])) {
+  $rewritten = [];
+  foreach ($json["files"] as $file => $info) {
+    if (strncmp($file, $container . "/", strlen($container) + 1) === 0) {
+      $file = $host . substr($file, strlen($container));
+    }
+    $rewritten[$file] = $info;
+  }
+  $json["files"] = $rewritten;
+}
+echo json_encode($json);
+' "$JSON_OUTPUT" "$HOST_ROOT" "$CONTAINER_ROOT"
+  else
+    cat "$JSON_OUTPUT"
+  fi
+  exit $exit_code
+fi
+
+"${CMD[@]}" "${FINAL_ARGS[@]}"
+exit $?

@@ -1,0 +1,24 @@
+#!/bin/bash
+#ddev-generated
+set -u
+
+print_help() {
+  cat <<'USAGE'
+Usage: ddev composer-validate [args]
+
+Runs composer validate inside the DDEV web container (CI parity).
+USAGE
+}
+
+for arg in "$@"; do
+  case "$arg" in
+    -h|--help)
+      print_help
+      composer validate --help
+      exit $?
+      ;;
+  esac
+done
+
+composer validate "$@"
+exit $?

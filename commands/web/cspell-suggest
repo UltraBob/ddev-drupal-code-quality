@@ -1,0 +1,182 @@
+#!/bin/bash
+#ddev-generated
+set -u
+
+print_help() {
+  cat <<'USAGE'
+Usage: ddev cspell-suggest [args]
+
+Generates CSpell suggestion artifacts and optionally updates the project word list.
+USAGE
+}
+
+has_help=false
+has_version=false
+has_positional=false
+has_config=false
+seen_double_dash=false
+explicit_paths=false
+auto_yes=false
+clean_args=()
+
+for arg in "$@"; do
+  if [ "$arg" = "--yes" ]; then
+    auto_yes=true
+    continue
+  fi
+  clean_args+=("$arg")
+done
+
+for arg in "${clean_args[@]}"; do
+  if [ "$seen_double_dash" = true ]; then
+    has_positional=true
+    explicit_paths=true
+    break
+  fi
+  case "$arg" in
+    --)
+      seen_double_dash=true
+      ;;
+    -h|--help)
+      has_help=true
+      ;;
+    -V|--version)
+      has_version=true
+      ;;
+    -c|--config|--config=*)
+      has_config=true
+      ;;
+    --)
+      ;;
+    -* )
+      ;;
+    *)
+      has_positional=true
+      explicit_paths=true
+      ;;
+  esac
+  if [ "$has_help" = true ] || [ "$has_version" = true ]; then
+    break
+  fi
+done
+
+if [ "$has_help" = true ]; then
+  print_help
+fi
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "Node.js is not available in the DDEV web container." >&2
+  echo "Install the Drupal core JS toolchain (web/core) to run CSpell." >&2
+  exit 127
+fi
+
+PROJECT_ROOT="/var/www/html"
+CORE_CSPELL="${PROJECT_ROOT}/web/core/node_modules/.bin/cspell"
+ROOT_CSPELL="${PROJECT_ROOT}/node_modules/.bin/cspell"
+CSPELL_BIN=""
+REPORT_DIR="${PROJECT_ROOT}/tooling/reports"
+if ! mkdir -p "$REPORT_DIR"; then
+  echo "Unable to create report directory: $REPORT_DIR" >&2
+  exit 1
+fi
+UNRECOGNIZED_FILE="${REPORT_DIR}/_cspell_unrecognized_words.txt"
+UPDATED_WORDS_FILE="${REPORT_DIR}/_cspell_updated_project_words.txt"
+: > "$UNRECOGNIZED_FILE"
+: > "$UPDATED_WORDS_FILE"
+
+if [ -x "$CORE_CSPELL" ]; then
+  CSPELL_BIN="$CORE_CSPELL"
+elif [ -x "$ROOT_CSPELL" ]; then
+  CSPELL_BIN="$ROOT_CSPELL"
+else
+  echo "CSpell is not installed in web/core/node_modules or node_modules." >&2
+  echo "Enable corepack and run 'yarn install' in web/core, or install cspell in the project root." >&2
+  exit 127
+fi
+
+if [ "$has_help" = true ]; then
+  "$CSPELL_BIN" --help
+  exit $?
+fi
+
+if [ "$has_version" = true ]; then
+  "$CSPELL_BIN" --version
+  exit $?
+fi
+
+cd web
+
+CMD=("$CSPELL_BIN")
+if [ "$has_config" = false ]; then
+  if [ -f "${PROJECT_ROOT}/.cspell.json" ]; then
+    CMD+=(-c "${PROJECT_ROOT}/.cspell.json")
+  else
+    CMD+=(-c "${PROJECT_ROOT}/web/core/.cspell.json")
+    echo "Warning: using core CSpell config (web/core/.cspell.json); project config not found." >&2
+  fi
+fi
+
+DEFAULT_PATHS=()
+DEFAULT_FILES=()
+if [ "$explicit_paths" = false ]; then
+  for candidate in modules/custom themes/custom profiles/custom; do
+    if [ -d "$candidate" ]; then
+      DEFAULT_PATHS+=("$candidate")
+    fi
+  done
+  if [ "${#DEFAULT_PATHS[@]}" -eq 0 ]; then
+    echo "No custom code directories found under modules/custom, themes/custom, or profiles/custom. Nothing to check." >&2
+    exit 0
+  fi
+  for candidate in "${DEFAULT_PATHS[@]}"; do
+    while IFS= read -r file_path; do
+      DEFAULT_FILES+=("$file_path")
+    done < <(find "$candidate" -path '*/node_modules/*' -prune -o -type f -print)
+  done
+  if [ "${#DEFAULT_FILES[@]}" -eq 0 ]; then
+    echo "No files found under modules/custom, themes/custom, or profiles/custom. Nothing to check." >&2
+    exit 0
+  fi
+fi
+
+if [ "$explicit_paths" = false ]; then
+  "${CMD[@]}" --words-only "${DEFAULT_FILES[@]}" > "$UNRECOGNIZED_FILE" || true
+else
+  "${CMD[@]}" --words-only "${clean_args[@]}" > "$UNRECOGNIZED_FILE" || true
+fi
+
+if [ -s "$UNRECOGNIZED_FILE" ]; then
+  sort -u "$UNRECOGNIZED_FILE" -o "$UNRECOGNIZED_FILE"
+else
+  : > "$UNRECOGNIZED_FILE"
+fi
+
+PROJECT_DICTIONARY="${PROJECT_ROOT}/.cspell-project-words.txt"
+if [ -f "$PROJECT_DICTIONARY" ]; then
+  cat "$PROJECT_DICTIONARY" "$UNRECOGNIZED_FILE" | sort -u > "$UPDATED_WORDS_FILE"
+else
+  sort -u "$UNRECOGNIZED_FILE" > "$UPDATED_WORDS_FILE"
+fi
+
+echo "Unrecognized words: $UNRECOGNIZED_FILE"
+echo "Updated project words: $UPDATED_WORDS_FILE"
+
+if [ -s "$UNRECOGNIZED_FILE" ]; then
+  if [ "$auto_yes" = false ]; then
+    if [ -t 0 ]; then
+      printf "Append suggested words to .cspell-project-words.txt? [y/N] "
+      read -r reply
+      case "$reply" in
+        y|Y) ;;
+        *) exit 0 ;;
+      esac
+    else
+      exit 0
+    fi
+  fi
+
+  cp "$UPDATED_WORDS_FILE" "$PROJECT_DICTIONARY"
+  echo "Updated .cspell-project-words.txt"
+fi
+
+exit 0

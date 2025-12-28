@@ -1,0 +1,31 @@
+#ddev-generated
+<?xml version="1.0" encoding="UTF-8"?>
+<ruleset name="drupal-contrib-project">
+  <description>Default PHP CodeSniffer configuration for a Drupal contrib project.</description>
+
+  <rule ref="Drupal"/>
+
+  <!-- Include all rules in the DrupalPractice ruleset. Uncomment if required -->
+  <!-- <rule ref="DrupalPractice"/> -->
+
+  <rule ref="Generic.PHP.ForbiddenFunctions">
+    <properties>
+      <property name="forbiddenFunctions" type="array">
+        <element key="sizeof" value="count"/>
+        <element key="delete" value="unset"/>
+        <element key="print" value="echo"/>
+        <element key="is_null" value="null"/>
+        <element key="create_function" value="null"/>
+      </property>
+    </properties>
+  </rule>
+  <rule ref="Generic.Commenting.Todo.CommentFound">
+    <message>Please review this TODO comment: %s</message>
+    <severity>3</severity>
+  </rule>
+
+  <exclude-pattern>**/node_modules/**</exclude-pattern>
+  <exclude-pattern>web/sites/*/files/**</exclude-pattern>
+
+  <arg name="extensions" value="engine,inc,info,install,module,php,profile,test,theme,yml"/>
+</ruleset>

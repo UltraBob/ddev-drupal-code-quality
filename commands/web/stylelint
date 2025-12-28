@@ -1,0 +1,371 @@
+#!/bin/bash
+#ddev-generated
+set -u
+
+print_help() {
+  cat <<'USAGE'
+Usage: ddev stylelint [args]
+
+Runs Stylelint inside the DDEV web container with Drupal CI parity config and defaults.
+USAGE
+}
+
+PROJECT_ROOT="/var/www/html"
+CORE_STYLELINT="${PROJECT_ROOT}/web/core/node_modules/stylelint/bin/stylelint.mjs"
+ROOT_STYLELINT="${PROJECT_ROOT}/node_modules/stylelint/bin/stylelint.mjs"
+TOOLCHAIN_BIN=""
+NODE_PATH=""
+
+has_help=false
+has_version=false
+has_positional=false
+has_config=false
+seen_double_dash=false
+explicit_paths=false
+
+for arg in "$@"; do
+  if [ "$seen_double_dash" = true ]; then
+    has_positional=true
+    explicit_paths=true
+    break
+  fi
+  case "$arg" in
+    --)
+      seen_double_dash=true
+      ;;
+    -h|--help)
+      has_help=true
+      ;;
+    -V|--version)
+      has_version=true
+      ;;
+    -c|--config|--config=*)
+      has_config=true
+      ;;
+    --)
+      ;;
+    -* )
+      ;;
+    *)
+      has_positional=true
+      explicit_paths=true
+      ;;
+  esac
+  if [ "$has_help" = true ] || [ "$has_version" = true ]; then
+    break
+  fi
+done
+
+if [ "$has_help" = true ]; then
+  print_help
+fi
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "Node.js is not available in the DDEV web container." >&2
+  echo "Install the Drupal core JS toolchain (web/core) to run Stylelint." >&2
+  exit 127
+fi
+
+if [ -f "$CORE_STYLELINT" ]; then
+  TOOLCHAIN_BIN="$CORE_STYLELINT"
+  NODE_PATH="${PROJECT_ROOT}/web/core/node_modules"
+elif [ -f "$ROOT_STYLELINT" ]; then
+  TOOLCHAIN_BIN="$ROOT_STYLELINT"
+  NODE_PATH="${PROJECT_ROOT}/node_modules"
+else
+  echo "Stylelint is not installed in web/core/node_modules or node_modules." >&2
+  echo "Enable corepack and run 'yarn install' in web/core, or install stylelint in the project root." >&2
+  exit 127
+fi
+
+PROJECT_ROOT="/var/www/html"
+
+if [ "$has_help" = true ]; then
+  node "$TOOLCHAIN_BIN" --help
+  exit $?
+fi
+
+if [ "$has_version" = true ]; then
+  node "$TOOLCHAIN_BIN" --version
+  exit $?
+fi
+
+cd web
+
+find_stylelint_config() {
+  local path="$1"
+  local dir="$path"
+  if [ -f "$dir" ]; then
+    dir="$(dirname "$dir")"
+  fi
+  while [ "$dir" != "." ] && [ "$dir" != "/" ]; do
+    for candidate in .stylelintrc .stylelintrc.json .stylelintrc.yaml .stylelintrc.yml .stylelintrc.js; do
+      if [ -f "$dir/$candidate" ]; then
+        echo "$dir/$candidate"
+        return 0
+      fi
+    done
+    dir="$(dirname "$dir")"
+  done
+  return 1
+}
+
+CUSTOM_SYNTAX_PATH=""
+find_scss_parser() {
+  local path
+  IFS=':' read -r -a paths <<< "$NODE_PATH"
+  for path in "${paths[@]}"; do
+    [ -z "$path" ] && continue
+    if [[ "$path" != /* ]]; then
+      path="${PROJECT_ROOT}/web/${path}"
+    fi
+    if [ -f "$path/postcss-scss/lib/scss-syntax.js" ]; then
+      CUSTOM_SYNTAX_PATH="$path/postcss-scss/lib/scss-syntax.js"
+      return 0
+    fi
+  done
+  return 1
+}
+
+config_supports_scss() {
+  local path="$1"
+  local full_path="$path"
+  if [ -z "$full_path" ]; then
+    return 1
+  fi
+  if [[ "$full_path" != /* ]]; then
+    full_path="${PROJECT_ROOT}/web/${full_path}"
+  fi
+  if [ ! -f "$full_path" ]; then
+    return 1
+  fi
+  if grep -E -q 'stylelint-scss|standard-scss|recommended-scss' "$full_path"; then
+    return 0
+  fi
+  return 1
+}
+
+CONFIG_PATH=""
+CMD=(env "NODE_PATH=$NODE_PATH" node "$TOOLCHAIN_BIN")
+DEFAULT_CONFIG_PATH=""
+if [ "$has_config" = false ]; then
+  if [ -f "${PROJECT_ROOT}/.stylelintrc.json" ]; then
+    CONFIG_PATH="${PROJECT_ROOT}/.stylelintrc.json"
+  else
+    CONFIG_PATH="${PROJECT_ROOT}/web/core/.stylelintrc.json"
+    echo "Warning: using core Stylelint config (web/core/.stylelintrc.json); project config not found." >&2
+  fi
+  DEFAULT_CONFIG_PATH="$CONFIG_PATH"
+  CMD+=(--config="$CONFIG_PATH")
+fi
+
+uses_scss=false
+has_scss_parser=false
+scss_allowed=false
+
+FINAL_ARGS=()
+if [ "$explicit_paths" = true ]; then
+  args=("$@")
+  arg_count=${#args[@]}
+  index=0
+  seen_double_dash=false
+  while [ "$index" -lt "$arg_count" ]; do
+    arg="${args[$index]}"
+    if [ "$seen_double_dash" = true ]; then
+      if [[ "$arg" == web/* ]]; then
+        arg="${arg#web/}"
+      elif [ "$arg" = "web" ]; then
+        arg="."
+      fi
+      FINAL_ARGS+=("$arg")
+      index=$((index + 1))
+      continue
+    fi
+    case "$arg" in
+      --)
+        seen_double_dash=true
+        FINAL_ARGS+=("$arg")
+        ;;
+      -c|--config)
+        next_arg="${args[$((index + 1))]:-}"
+        if [[ "$next_arg" == web/* ]]; then
+          next_arg="${next_arg#web/}"
+        elif [ "$next_arg" = "web" ]; then
+          next_arg="."
+        fi
+        FINAL_ARGS+=("$arg" "$next_arg")
+        index=$((index + 1))
+        ;;
+      --config=*)
+        config_value="${arg#*=}"
+        if [[ "$config_value" == web/* ]]; then
+          config_value="${config_value#web/}"
+        elif [ "$config_value" = "web" ]; then
+          config_value="."
+        fi
+        FINAL_ARGS+=("--config=$config_value")
+        ;;
+      -* )
+        FINAL_ARGS+=("$arg")
+        ;;
+      *)
+        if [[ "$arg" == web/* ]]; then
+          arg="${arg#web/}"
+        elif [ "$arg" = "web" ]; then
+          arg="."
+        fi
+        FINAL_ARGS+=("$arg")
+        ;;
+    esac
+    index=$((index + 1))
+  done
+
+  if [ "$has_config" = false ] && [ "$CONFIG_PATH" = "$DEFAULT_CONFIG_PATH" ]; then
+    for path in "${FINAL_ARGS[@]}"; do
+      if config_candidate="$(find_stylelint_config "$path")"; then
+        CONFIG_PATH="$config_candidate"
+        config_dir="$(dirname "$CONFIG_PATH")"
+        if [[ "$config_dir" != /* ]]; then
+          config_dir="${PROJECT_ROOT}/web/${config_dir}"
+        fi
+        if [ -d "$config_dir/node_modules" ]; then
+          NODE_PATH="${NODE_PATH}:${config_dir}/node_modules"
+        fi
+        CMD=(env "NODE_PATH=$NODE_PATH" node "$TOOLCHAIN_BIN" --config="$CONFIG_PATH" --config-basedir="$config_dir")
+        break
+      fi
+    done
+  fi
+
+  for path in "${FINAL_ARGS[@]}"; do
+    if [[ "$path" == *.scss || "$path" == *.sass ]]; then
+      uses_scss=true
+      break
+    fi
+    if [ -d "$path" ]; then
+      if find "$path" -type f \( -name '*.scss' -o -name '*.sass' \) -print -quit 2>/dev/null | grep -q .; then
+        uses_scss=true
+        break
+      fi
+    fi
+  done
+fi
+
+if [ "$explicit_paths" = false ]; then
+  DEFAULT_FILES=()
+  for candidate in modules/custom themes/custom profiles/custom; do
+    if [ -d "$candidate" ]; then
+      while IFS= read -r file_path; do
+        DEFAULT_FILES+=("$file_path")
+      done < <(find "$candidate" -type f \( -name '*.css' -o -name '*.scss' -o -name '*.sass' \))
+    fi
+  done
+  if [ "${#DEFAULT_FILES[@]}" -eq 0 ]; then
+    echo "No custom style files found under modules/custom, themes/custom, or profiles/custom. Nothing to lint." >&2
+    exit 2
+  fi
+  if [ "$has_config" = false ] && [ "$CONFIG_PATH" = "$DEFAULT_CONFIG_PATH" ]; then
+    for file_path in "${DEFAULT_FILES[@]}"; do
+      if config_candidate="$(find_stylelint_config "$file_path")"; then
+        CONFIG_PATH="$config_candidate"
+        config_dir="$(dirname "$CONFIG_PATH")"
+        if [[ "$config_dir" != /* ]]; then
+          config_dir="${PROJECT_ROOT}/web/${config_dir}"
+        fi
+        if [ -d "$config_dir/node_modules" ]; then
+          NODE_PATH="${NODE_PATH}:${config_dir}/node_modules"
+        fi
+        CMD=(env "NODE_PATH=$NODE_PATH" node "$TOOLCHAIN_BIN" --config="$CONFIG_PATH" --config-basedir="$config_dir")
+        break
+      fi
+    done
+  fi
+  for file_path in "${DEFAULT_FILES[@]}"; do
+    if [[ "$file_path" == *.scss || "$file_path" == *.sass ]]; then
+      uses_scss=true
+      break
+    fi
+  done
+  if [ "$uses_scss" = true ] && config_supports_scss "$CONFIG_PATH"; then
+    scss_allowed=true
+  fi
+  if [ "$uses_scss" = true ] && [ "$scss_allowed" = true ] && find_scss_parser; then
+    CMD+=(--custom-syntax="$CUSTOM_SYNTAX_PATH")
+    has_scss_parser=true
+  fi
+  if [ "$uses_scss" = true ] && [ "$scss_allowed" = false ]; then
+    FILTERED_FILES=()
+    for file_path in "${DEFAULT_FILES[@]}"; do
+      if [[ "$file_path" == *.scss || "$file_path" == *.sass ]]; then
+        continue
+      fi
+      FILTERED_FILES+=("$file_path")
+    done
+    if [ "${#FILTERED_FILES[@]}" -eq 0 ]; then
+      echo "No CSS files left to lint after excluding SCSS/Sass (config does not support SCSS)." >&2
+      exit 2
+    fi
+    "${CMD[@]}" "$@" "${FILTERED_FILES[@]}"
+    exit $?
+  fi
+  if [ "$uses_scss" = true ] && [ "$has_scss_parser" = false ]; then
+    FILTERED_FILES=()
+    for file_path in "${DEFAULT_FILES[@]}"; do
+      if [[ "$file_path" == *.scss || "$file_path" == *.sass ]]; then
+        continue
+      fi
+      FILTERED_FILES+=("$file_path")
+    done
+    if [ "${#FILTERED_FILES[@]}" -eq 0 ]; then
+      echo "No CSS files left to lint after excluding SCSS/Sass (no SCSS parser available)." >&2
+      exit 2
+    fi
+    "${CMD[@]}" "$@" "${FILTERED_FILES[@]}"
+    exit $?
+  fi
+  "${CMD[@]}" "$@" "${DEFAULT_FILES[@]}"
+  exit $?
+fi
+
+if [ "$uses_scss" = true ] && config_supports_scss "$CONFIG_PATH"; then
+  scss_allowed=true
+fi
+if [ "$uses_scss" = true ] && [ "$scss_allowed" = true ] && find_scss_parser; then
+  CMD+=(--custom-syntax="$CUSTOM_SYNTAX_PATH")
+  has_scss_parser=true
+fi
+
+if [ "$uses_scss" = true ] && [ "$scss_allowed" = false ]; then
+  FILTERED_ARGS=()
+  for arg in "${FINAL_ARGS[@]}"; do
+    if [[ "$arg" == *.scss || "$arg" == *.sass ]]; then
+      continue
+    fi
+    FILTERED_ARGS+=("$arg")
+  done
+  if [ "${#FILTERED_ARGS[@]}" -eq 0 ]; then
+    echo "No CSS files left to lint after excluding SCSS/Sass (config does not support SCSS)." >&2
+    exit 2
+  fi
+  "${CMD[@]}" "${FILTERED_ARGS[@]}"
+  exit $?
+fi
+
+if [ "$uses_scss" = true ] && [ "$has_scss_parser" = false ]; then
+  FILTERED_ARGS=()
+  for arg in "${FINAL_ARGS[@]}"; do
+    if [[ "$arg" == *.scss || "$arg" == *.sass ]]; then
+      continue
+    fi
+    FILTERED_ARGS+=("$arg")
+  done
+  if [ "${#FILTERED_ARGS[@]}" -eq 0 ]; then
+    echo "No CSS files left to lint after excluding SCSS/Sass (no SCSS parser available)." >&2
+    exit 2
+  fi
+  "${CMD[@]}" "${FILTERED_ARGS[@]}"
+  exit $?
+fi
+
+"${CMD[@]}" "${FINAL_ARGS[@]}"
+exit $?

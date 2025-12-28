@@ -1,0 +1,4 @@
+#ddev-generated
+# Default ignore list used by Drupal GitLab CI templates (include.drupalci.main.yml).
+# CI creates this file when missing; we vendor it here to keep local runs in parity.
+*.yml

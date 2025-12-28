@@ -1,0 +1,17 @@
+#ddev-generated
+{
+  "printWidth": 80,
+  "semi": true,
+  "singleQuote": true,
+  "trailingComma": "all",
+  "overrides": [
+    {
+      "files": ["*.css"],
+      "options": {
+        "parser": "css",
+        "printWidth": 10000,
+        "singleQuote": false
+      }
+    }
+  ]
+}

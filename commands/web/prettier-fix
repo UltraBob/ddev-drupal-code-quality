@@ -1,0 +1,332 @@
+#!/bin/bash
+#ddev-generated
+set -u
+
+print_help() {
+  cat <<'USAGE'
+Usage: ddev prettier-fix [args]
+
+Previews Prettier fixes and applies them only after confirmation.
+
+By default, fixes are not auto-applied when the working tree has changes
+outside the target paths. This prevents mixing unrelated work with automated
+fixes and makes it easier to review or revert. If you intentionally want to
+apply fixes with unrelated changes present, pass --allow-dirty-outside-targets
+(or --allow-dirty) to bypass this protection.
+USAGE
+}
+
+has_help=false
+has_version=false
+has_positional=false
+has_config=false
+seen_double_dash=false
+explicit_paths=false
+auto_yes=false
+allow_dirty_outside_targets=false
+clean_args=()
+
+for arg in "$@"; do
+  if [ "$arg" = "--yes" ]; then
+    auto_yes=true
+    continue
+  fi
+  if [ "$arg" = "--allow-dirty-outside-targets" ] || [ "$arg" = "--allow-dirty" ]; then
+    allow_dirty_outside_targets=true
+    continue
+  fi
+  clean_args+=("$arg")
+done
+
+for arg in "${clean_args[@]}"; do
+  if [ "$seen_double_dash" = true ]; then
+    has_positional=true
+    explicit_paths=true
+    break
+  fi
+  case "$arg" in
+    --)
+      seen_double_dash=true
+      ;;
+    -h|--help)
+      has_help=true
+      ;;
+    -V|--version)
+      has_version=true
+      ;;
+    -c|--config|--config=*)
+      has_config=true
+      ;;
+    --)
+      ;;
+    -* )
+      ;;
+    *)
+      has_positional=true
+      explicit_paths=true
+      ;;
+  esac
+  if [ "$has_help" = true ] || [ "$has_version" = true ]; then
+    break
+  fi
+done
+
+if [ "$has_help" = true ]; then
+  print_help
+fi
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "Node.js is not available in the DDEV web container." >&2
+  echo "Install the Drupal core JS toolchain (web/core) to run Prettier." >&2
+  exit 127
+fi
+
+PROJECT_ROOT="/var/www/html"
+CORE_PRETTIER="${PROJECT_ROOT}/web/core/node_modules/.bin/prettier"
+ROOT_PRETTIER="${PROJECT_ROOT}/node_modules/.bin/prettier"
+PRETTIER_BIN=""
+NODE_PATH=""
+
+if [ -x "$CORE_PRETTIER" ]; then
+  PRETTIER_BIN="$CORE_PRETTIER"
+  NODE_PATH="${PROJECT_ROOT}/web/core/node_modules"
+elif [ -x "$ROOT_PRETTIER" ]; then
+  PRETTIER_BIN="$ROOT_PRETTIER"
+  NODE_PATH="${PROJECT_ROOT}/node_modules"
+else
+  echo "Prettier is not installed in web/core/node_modules or node_modules." >&2
+  echo "Enable corepack and run 'yarn install' in web/core, or install prettier in the project root." >&2
+  exit 127
+fi
+
+if [ "$has_help" = true ]; then
+  "$PRETTIER_BIN" --help
+  exit $?
+fi
+
+if [ "$has_version" = true ]; then
+  "$PRETTIER_BIN" --version
+  exit $?
+fi
+
+REPORT_DIR="tooling/reports"
+mkdir -p "$REPORT_DIR"
+PATCH_FILE="${REPORT_DIR}/_prettier.patch"
+
+normalize_path() {
+  local path="$1"
+  if [[ "$path" == /var/www/html/* ]]; then
+    path="${path#/var/www/html/}"
+  fi
+  if [[ "$path" == web/* ]]; then
+    echo "$path"
+    return
+  fi
+  if [[ "$path" == modules/* || "$path" == themes/* || "$path" == profiles/* ]]; then
+    echo "web/$path"
+    return
+  fi
+  echo "$path"
+}
+
+TARGET_PREFIXES=()
+RAW_PATHS=()
+seen_double_dash=false
+args=("${clean_args[@]}")
+arg_count=${#args[@]}
+index=0
+while [ "$index" -lt "$arg_count" ]; do
+  arg="${args[$index]}"
+  if [ "$seen_double_dash" = true ]; then
+    RAW_PATHS+=("$arg")
+    index=$((index + 1))
+    continue
+  fi
+  case "$arg" in
+    --)
+      seen_double_dash=true
+      ;;
+    -c|--config)
+      index=$((index + 1))
+      ;;
+    --config=*)
+      ;;
+    -* )
+      ;;
+    *)
+      RAW_PATHS+=("$arg")
+      ;;
+  esac
+  index=$((index + 1))
+done
+
+if [ "${#RAW_PATHS[@]}" -gt 0 ]; then
+  for raw in "${RAW_PATHS[@]}"; do
+    TARGET_PREFIXES+=("$(normalize_path "$raw")")
+  done
+else
+  for candidate in web/modules/custom web/themes/custom web/profiles/custom; do
+    if [ -d "$candidate" ]; then
+      TARGET_PREFIXES+=("$candidate")
+    fi
+  done
+fi
+
+unrelated_changes=false
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  mapfile -t unstaged_files < <(git diff --name-only)
+  mapfile -t untracked_files < <(git ls-files --others --exclude-standard)
+  for file in "${unstaged_files[@]}" "${untracked_files[@]}"; do
+    [ -z "$file" ] && continue
+    matched=false
+    for prefix in "${TARGET_PREFIXES[@]}"; do
+      [ -z "$prefix" ] && continue
+      if [[ "$file" == "$prefix"* ]]; then
+        matched=true
+        break
+      fi
+    done
+    if [ "$matched" = false ]; then
+      unrelated_changes=true
+      break
+    fi
+  done
+fi
+
+CMD_BASE=(env "NODE_PATH=$NODE_PATH" "$PRETTIER_BIN")
+if [ "$has_config" = false ]; then
+  if [ -f "${PROJECT_ROOT}/.prettierrc.json" ]; then
+    CMD_BASE+=(--config="${PROJECT_ROOT}/.prettierrc.json")
+  else
+    CMD_BASE+=(--config="${PROJECT_ROOT}/web/core/.prettierrc.json")
+    echo "Warning: using core Prettier config (web/core/.prettierrc.json); project config not found." >&2
+  fi
+  if [ -f "${PROJECT_ROOT}/.prettierignore" ]; then
+    CMD_BASE+=(--ignore-path="${PROJECT_ROOT}/.prettierignore")
+  elif [ -f "${PROJECT_ROOT}/web/core/.prettierignore" ]; then
+    CMD_BASE+=(--ignore-path="${PROJECT_ROOT}/web/core/.prettierignore")
+    echo "Warning: using core Prettier ignore (web/core/.prettierignore); project ignore not found." >&2
+  fi
+fi
+
+DEFAULT_FILES=()
+if [ "$explicit_paths" = false ]; then
+  cd web
+  for candidate in modules/custom themes/custom profiles/custom; do
+    if [ -d "$candidate" ]; then
+      while IFS= read -r file_path; do
+        DEFAULT_FILES+=("$file_path")
+      done < <(find "$candidate" -type f \( -name '*.js' -o -name '*.yml' -o -name '*.yaml' -o -name '*.css' -o -name '*.scss' -o -name '*.sass' \))
+    fi
+  done
+  if [ "${#DEFAULT_FILES[@]}" -eq 0 ]; then
+    echo "No custom files found under modules/custom, themes/custom, or profiles/custom. Nothing to fix." >&2
+    exit 0
+  fi
+  cd "$PROJECT_ROOT"
+fi
+
+tmp_root="$(mktemp -d)"
+trap 'rm -rf "$tmp_root"' EXIT
+
+cd "$PROJECT_ROOT"
+tar -cf - \
+  --exclude=./.git \
+  --exclude=./.trunk \
+  --exclude=./node_modules \
+  --exclude=./vendor \
+  --exclude=./tooling/reports \
+  --exclude=./web/core/node_modules \
+  --exclude='*/.git' \
+  --exclude='*/.git/*' \
+  . | (cd "$tmp_root" && tar -xf -)
+
+if [ "$explicit_paths" = false ]; then
+  (cd "$tmp_root/web" && "${CMD_BASE[@]}" --write "${DEFAULT_FILES[@]}")
+else
+  (cd "$tmp_root/web" && "${CMD_BASE[@]}" --write "${args[@]}")
+fi
+
+: > "${PATCH_FILE}.raw"
+for prefix in "${TARGET_PREFIXES[@]}"; do
+  [ -z "$prefix" ] && continue
+  if [ ! -e "$PROJECT_ROOT/$prefix" ] && [ ! -e "$tmp_root/$prefix" ]; then
+    continue
+  fi
+  diff -ruN \
+    --exclude=.git \
+    --exclude='.git/*' \
+    "$PROJECT_ROOT/$prefix" "$tmp_root/$prefix" >> "${PATCH_FILE}.raw" || true
+done
+
+sed -E "s/diff -ruN( '--exclude=[^']+')+/diff -ruN/" "${PATCH_FILE}.raw" > "$PATCH_FILE"
+rm -f "${PATCH_FILE}.raw"
+
+change_count=$(grep -c '^diff -ruN ' "$PATCH_FILE" || true)
+fix_summary="fixes not applied"
+if [ "$change_count" -eq 0 ]; then
+  echo "No Prettier fixes to apply. Lint not run." >&2
+  echo "Prettier-fix summary: no fixes to apply; lint not run." >&2
+  exit 0
+fi
+
+echo "Preview: ${change_count} file(s) would change." >&2
+echo "Patch: ${PATCH_FILE}" >&2
+
+if [ "$unrelated_changes" = true ]; then
+  if [ "$allow_dirty_outside_targets" = false ]; then
+    echo "Unstaged changes detected outside target paths. Patch-only mode: not applying automatically." >&2
+    echo "Re-run with --allow-dirty-outside-targets (or --allow-dirty) to apply fixes anyway." >&2
+    echo "To apply the patch manually, run: git apply ${PATCH_FILE}" >&2
+    echo "Prettier-fix summary: fixes not applied (patch-only mode); lint not run." >&2
+    exit 0
+  fi
+  echo "Unstaged changes detected outside target paths; continuing because --allow-dirty-outside-targets was set." >&2
+fi
+
+if [ "$auto_yes" = false ]; then
+  if [ -t 0 ]; then
+    printf "Apply these changes? [y/N] "
+    read -r reply
+    case "$reply" in
+      y|Y) ;;
+      *) echo "Not applying changes." >&2; echo "Prettier-fix summary: fixes not applied (prompt declined); lint not run." >&2; exit 0 ;;
+    esac
+  else
+    echo "No TTY available. Not applying changes." >&2
+    echo "Prettier-fix summary: fixes not applied (no TTY); lint not run." >&2
+    exit 0
+  fi
+fi
+
+cd "$PROJECT_ROOT/web"
+if [ "$explicit_paths" = false ]; then
+  "${CMD_BASE[@]}" --write "${DEFAULT_FILES[@]}"
+else
+  "${CMD_BASE[@]}" --write "${args[@]}"
+fi
+fix_exit=$?
+
+cd "$PROJECT_ROOT"
+if [ "$fix_exit" -eq 0 ]; then
+  fix_summary="fixes applied"
+  echo "Prettier fixes applied." >&2
+else
+  fix_summary="fix step failed (exit ${fix_exit})"
+  echo "Prettier fix run exited with status ${fix_exit}." >&2
+fi
+echo "Running Prettier to report any remaining issues..." >&2
+./.ddev/commands/web/prettier "${clean_args[@]}"
+check_exit=$?
+
+if [ "$check_exit" -ne 0 ]; then
+  lint_summary="remaining issues (exit ${check_exit})"
+else
+  lint_summary="no remaining issues"
+fi
+echo "Prettier-fix summary: ${fix_summary}; lint ${lint_summary}." >&2
+
+if [ "$fix_exit" -ne 0 ]; then
+  exit "$fix_exit"
+fi
+exit "$check_exit"

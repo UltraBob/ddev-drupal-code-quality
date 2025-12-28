@@ -1,0 +1,62 @@
+#!/bin/bash
+#ddev-generated
+set -u
+
+PHPCS_BIN="vendor/bin/phpcs"
+source /mnt/ddev_config/commands/helpers/path-map.sh
+
+if [ ! -x "$PHPCS_BIN" ]; then
+  echo "phpcs not found at $PHPCS_BIN. Run 'composer install' to install vendor/bin/phpcs." >&2
+  exit 127
+fi
+
+has_config=false
+for config_file in .phpcs.xml phpcs.xml phpcs.xml.dist .phpcs.xml.dist; do
+  if [ -f "$config_file" ]; then
+    has_config=true
+    break
+  fi
+done
+
+rewrite_args=()
+args=("$@")
+arg_count=${#args[@]}
+index=0
+while [ "$index" -lt "$arg_count" ]; do
+  arg="${args[$index]}"
+  case "$arg" in
+    --standard=*)
+      value="${arg#*=}"
+      rewrite_args+=("--standard=$(map_path "$value")")
+      ;;
+    --standard)
+      next_arg="${args[$((index + 1))]:-}"
+      rewrite_args+=("--standard" "$(map_path "$next_arg")")
+      index=$((index + 1))
+      ;;
+    --stdin-path=*)
+      value="${arg#*=}"
+      rewrite_args+=("--stdin-path=$(map_path "$value")")
+      ;;
+    --stdin-path)
+      next_arg="${args[$((index + 1))]:-}"
+      rewrite_args+=("--stdin-path" "$(map_path "$next_arg")")
+      index=$((index + 1))
+      ;;
+    *)
+      rewrite_args+=("$arg")
+      ;;
+  esac
+  index=$((index + 1))
+done
+
+if [ "$has_config" = true ]; then
+  "$PHPCS_BIN" "${rewrite_args[@]}"
+  exit $?
+fi
+
+"$PHPCS_BIN" \
+  --standard=Drupal \
+  --extensions=php,module,inc,install,profile,theme,engine,yml \
+  "${rewrite_args[@]}"
+exit $?

@@ -1,0 +1,41 @@
+#ddev-generated
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+# Locate the DDEV project root even when invoked from an IDE with cwd=/.
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$script_dir"
+
+while [ "$repo_root" != "/" ] && [ ! -f "$repo_root/.ddev/config.yaml" ]; do
+  repo_root="$(dirname "$repo_root")"
+done
+
+if [ ! -f "$repo_root/.ddev/config.yaml" ]; then
+  echo "Unable to locate DDEV project root from $script_dir (missing .ddev/config.yaml)." >&2
+  exit 2
+fi
+
+cd "$repo_root"
+
+# The wrapper passes its own path as $1 so we can derive the tool name.
+tool_name="${1:-$0}"
+if [ "$tool_name" != "$0" ]; then
+  shift
+fi
+
+tool_name="$(basename "$tool_name")"
+
+# Map special cases; otherwise pass through to the matching DDEV command.
+case "$tool_name" in
+  php)
+    exec ddev exec php "$@"
+    ;;
+  styles)
+    ddev stylelint-fix "$@"
+    exec ddev stylelint "$@"
+    ;;
+  *)
+    exec ddev "$tool_name" "$@"
+    ;;
+esac

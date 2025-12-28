@@ -1,47 +1,99 @@
 [![add-on registry](https://img.shields.io/badge/DDEV-Add--on_Registry-blue)](https://addons.ddev.com)
-[![tests](https://github.com/ddev/ddev-addon-template/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/ddev/ddev-addon-template/actions/workflows/tests.yml?query=branch%3Amain)
-[![last commit](https://img.shields.io/github/last-commit/ddev/ddev-addon-template)](https://github.com/ddev/ddev-addon-template/commits)
-[![release](https://img.shields.io/github/v/release/ddev/ddev-addon-template)](https://github.com/ddev/ddev-addon-template/releases/latest)
 
-# DDEV Add-on Template
+# DDEV Drupal Code Quality
 
 ## Overview
 
-This add-on integrates Add-on Template into your [DDEV](https://ddev.com/) project.
+This add-on installs Drupal GitLab CI parity tooling for local development and IDE usage.
+It provides DDEV commands and host shims so developers can run the same checks
+locally that GitLab CI runs on Drupal.org.
+
+Tools covered:
+- PHPStan
+- PHPCS / PHPCBF
+- ESLint
+- Stylelint
+- Prettier
+- CSpell
+- Composer validate
+- php-parallel-lint (when installed)
 
 ## Installation
 
 ```bash
-ddev add-on get ddev/ddev-addon-template
+ddev add-on get ddev-drupal-code-quality
+# or, for local development
+ddev add-on get /path/to/ddev-drupal-code-quality
+
 ddev restart
 ```
 
-After installation, make sure to commit the `.ddev` directory to version control.
+During installation, the add-on copies CI-parity config files into the project
+root. If conflicts are detected, you can choose to back up and replace, skip,
+or abort. Skipping a config may reduce CI parity.
 
 ## Usage
 
-| Command | Description |
-| ------- | ----------- |
-| `ddev describe` | View service status and used ports for Add-on Template |
-| `ddev logs -s addon-template` | Check Add-on Template logs |
-
-## Advanced Customization
-
-To change the Docker image:
+Host shims are installed under `tooling/bin` by default (set `DCQ_SHIM_DIR` to
+change this within the project root). Point IDE tool paths at these shims:
 
 ```bash
-ddev dotenv set .ddev/.env.addon-template --addon-template-docker-image="ddev/ddev-utilities:latest"
-ddev add-on get ddev/ddev-addon-template
-ddev restart
+./tooling/bin/phpstan
+./tooling/bin/phpcs
+./tooling/bin/eslint
+./tooling/bin/stylelint
+./tooling/bin/prettier
+./tooling/bin/cspell
+./tooling/bin/checks
+./tooling/bin/checks-full
 ```
 
-Make sure to commit the `.ddev/.env.addon-template` file to version control.
+You can also use the DDEV commands directly:
 
-All customization options (use with caution):
+```bash
+ddev phpstan
+ddev phpcs
+ddev phpcbf
+ddev eslint
+ddev stylelint
+ddev prettier
+ddev cspell
+ddev composer-validate
+ddev checks
+ddev checks-full
+```
 
-| Variable | Flag | Default |
-| -------- | ---- | ------- |
-| `ADDON_TEMPLATE_DOCKER_IMAGE` | `--addon-template-docker-image` | `ddev/ddev-utilities:latest` |
+## Requirements
+
+- DDEV project with Drupal core under `web/`.
+- Composer dependencies installed (`composer install`).
+- Node toolchain for JS linting (recommended: enable corepack in DDEV and run
+  `yarn install` in `web/core`).
+
+## Configuration notes
+
+- ESLint toolchain selection:
+  - `ESLINT_TOOLCHAIN=auto` (default) prefers root toolchain when root configs exist.
+  - `ESLINT_TOOLCHAIN=core` forces Drupal core JS toolchain.
+  - `ESLINT_TOOLCHAIN=root` forces project root toolchain.
+- ESLint config mode:
+  - `ESLINT_CONFIG_MODE=nearest` (default) groups by nearest config file.
+  - `ESLINT_CONFIG_MODE=fixed` forces `.eslintrc.passing.json`.
+- CSpell parity:
+  - Run `php tooling/scripts/prepare-cspell.php -s .prepared` once and replace
+    `.cspell.json` after reviewing the diff.
+
+## Installer environment variables
+
+- `DCQ_SHIM_DIR`: override shim install path (must be within the project root).
+- `DCQ_INSTALL_MODE`: `replace`, `skip`, or `abort` for conflict handling.
+- `DCQ_NONINTERACTIVE=true`: behave like `DCQ_INSTALL_MODE=replace`.
+
+## Uninstall
+
+Removing the add-on cleans up `.ddev` commands and assets, but project-root
+configs and `tooling/bin` shims are left in place intentionally. Remove them
+manually if desired.
 
 ## Credits
 

@@ -1,0 +1,8 @@
+#ddev-generated
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+# Thin shim so IDEs can invoke a tool by its usual name while we route to DDEV.
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+exec "$script_dir/ddev-run" "$0" "$@"

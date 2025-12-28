@@ -1,0 +1,94 @@
+#!/bin/bash
+#ddev-generated
+set -u
+
+REPORT_DIR="tooling/reports"
+mkdir -p "$REPORT_DIR"
+
+CUSTOM_PATHS=()
+for candidate in web/modules/custom web/themes/custom web/profiles/custom; do
+  if [ -d "$candidate" ]; then
+    CUSTOM_PATHS+=("$candidate")
+  fi
+done
+
+TOOLS=(
+  "composer-validate"
+  "php-parallel-lint"
+  "phpcs"
+  "phpstan"
+  "eslint"
+  "stylelint"
+  "prettier"
+  "cspell"
+)
+
+declare -A TOOL_PATHS=(
+  ["composer-validate"]="./.ddev/commands/web/composer-validate"
+  ["php-parallel-lint"]="./.ddev/commands/web/php-parallel-lint"
+  ["phpcs"]="./.ddev/commands/web/phpcs"
+  ["phpstan"]="./.ddev/commands/web/phpstan"
+  ["eslint"]="./.ddev/commands/web/eslint"
+  ["stylelint"]="./.ddev/commands/web/stylelint"
+  ["prettier"]="./.ddev/commands/web/prettier"
+  ["cspell"]="./.ddev/commands/web/cspell"
+)
+
+declare -A STATUS
+
+echo "Running checks (fast mode)..."
+
+for tool in "${TOOLS[@]}"; do
+  log_file="${REPORT_DIR}/${tool}.log"
+  echo "==> ${tool}" | tee "$log_file"
+  tool_path="${TOOL_PATHS[$tool]}"
+  if [ -z "$tool_path" ] || [ ! -x "$tool_path" ]; then
+    echo "SKIP: ${tool} command not available in container." | tee -a "$log_file"
+    STATUS["$tool"]=SKIP
+    continue
+  fi
+
+  if [ "$tool" = "php-parallel-lint" ] && \
+    [ ! -x "vendor/bin/parallel-lint" ] && \
+    [ ! -x "vendor/bin/php-parallel-lint" ]; then
+    echo "SKIP: php-parallel-lint is not installed in vendor/bin." | tee -a "$log_file"
+    STATUS["$tool"]=SKIP
+    continue
+  fi
+
+  if [ "$tool" = "phpcs" ] && [ "${#CUSTOM_PATHS[@]}" -eq 0 ]; then
+    echo "SKIP: no custom code directories found for phpcs." | tee -a "$log_file"
+    STATUS["$tool"]=SKIP
+    continue
+  fi
+
+  if [ "$tool" = "phpcs" ]; then
+    "$tool_path" "${CUSTOM_PATHS[@]}" >"$log_file" 2>&1
+  else
+    "$tool_path" >"$log_file" 2>&1
+  fi
+  exit_code=$?
+  if [ "$exit_code" -eq 0 ]; then
+    STATUS["$tool"]=PASS
+  else
+    STATUS["$tool"]=FAIL
+  fi
+  echo "(exit ${exit_code})" >> "$log_file"
+  if [ "$exit_code" -ne 0 ]; then
+    cat "$log_file"
+  fi
+ done
+
+printf "\nSummary:\n"
+for tool in "${TOOLS[@]}"; do
+  status="${STATUS[$tool]:-SKIP}"
+  printf '%s\n' "- ${tool}: ${status} (log: ${REPORT_DIR}/${tool}.log)"
+ done
+
+for tool in "${TOOLS[@]}"; do
+  if [ "${STATUS[$tool]:-}" = "FAIL" ]; then
+    exit 1
+  fi
+ done
+
+exit 0

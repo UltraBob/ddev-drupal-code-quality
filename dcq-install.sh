@@ -67,6 +67,9 @@ create_root_package_json() {
   local output
   local status
   local php_script="${cwd}/.dcq-create-package.php"
+  local script_path="/var/www/html/.ddev/.dcq-create-package.php"
+  local attempts=0
+  local max_attempts=5
 
   cat > "$php_script" <<'PHP'
 <?php
@@ -76,8 +79,21 @@ if (!is_array($data)) {
   fwrite(STDERR, "Failed to read core package.json\n");
   exit(1);
 }
+$projectName = null;
+$configPath = "/var/www/html/.ddev/config.yaml";
+if (is_readable($configPath)) {
+  $lines = file($configPath, FILE_IGNORE_NEW_LINES);
+  if ($lines !== false) {
+    foreach ($lines as $line) {
+      if (preg_match('/^\s*name:\s*(.+?)\s*$/', $line, $matches)) {
+        $projectName = trim($matches[1], " \t\"'");
+        break;
+      }
+    }
+  }
+}
 $out = [
-  "name" => $data["name"] ?? "drupal-project",
+  "name" => $projectName ?: ($data["name"] ?? "drupal-project"),
   "private" => true,
 ];
 if (isset($data["description"])) {
@@ -101,7 +117,15 @@ if (isset($data["devDependencies"])) {
 echo json_encode($out, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . PHP_EOL;
 PHP
 
-  output="$("$ddev_cmd" exec php "/var/www/html/.ddev/.dcq-create-package.php" 2>&1)"
+  while [ "$attempts" -lt "$max_attempts" ]; do
+    if "$ddev_cmd" exec test -f "$script_path" >/dev/null 2>&1; then
+      break
+    fi
+    attempts=$((attempts + 1))
+    sleep 0.2
+  done
+
+  output="$("$ddev_cmd" exec php "$script_path" 2>&1)"
   status=$?
   rm -f "$php_script"
 

@@ -98,7 +98,8 @@ ddev checks-full
 - `DCQ_INSTALL_DEPS`: `install`/`true` to auto-install missing `drupal/core-dev`,
   `skip`/`false` to skip, or unset to prompt when interactive.
 - `DCQ_INSTALL_NODE_DEPS`: `root` to install JS deps in the project root (creates
-  a root `package.json` from core if missing), `core` to install in `web/core`,
+  a root `package.json` from core if missing; name uses the DDEV project name),
+  `core` to install in `web/core`,
   `install`/`true` to auto-install in the project root, `skip`/`false` to skip,
   or unset to prompt (default: root).
 

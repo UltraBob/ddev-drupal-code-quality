@@ -520,7 +520,7 @@ if [ -f "$core_package_json" ]; then
     fi
 
     if [ "$node_mode" != "skip" ]; then
-      printf 'Node toolchain for Drupal core not detected.\n'
+      printf 'Preparing JS toolchain install.\n'
       if ! command_available "$ddev_cmd"; then
         printf 'ddev executable not found in PATH; skipping Node toolchain install.\n'
         node_mode="skip"

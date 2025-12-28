@@ -33,7 +33,9 @@ root. If conflicts are detected, you can choose to back up and replace, skip,
 or abort. Skipping a config may reduce CI parity.
 
 If PHPStan/PHPCS/PHPCBF binaries are missing, the installer prompts to add
-`drupal/core-dev` (or to run `composer install` if it is already required).
+`drupal/core-dev` using the same constraint as `drupal/core-recommended` (or to
+run `composer install` if it is already required). It uses
+`composer require --with-all-dependencies` to avoid lockfile conflicts.
 
 ## Usage
 

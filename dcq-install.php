@@ -130,6 +130,32 @@ function composer_requires_core_dev(string $composerJson): bool
     return array_key_exists('drupal/core-dev', $data['require-dev']);
 }
 
+function detect_core_constraint(string $composerJson): ?string
+{
+    if (!file_exists($composerJson)) {
+        return null;
+    }
+    $raw = file_get_contents($composerJson);
+    if ($raw === false) {
+        return null;
+    }
+    $data = json_decode($raw, true);
+    if (!is_array($data)) {
+        return null;
+    }
+    $candidates = [
+        ['require-dev', 'drupal/core-dev'],
+        ['require', 'drupal/core-recommended'],
+        ['require', 'drupal/core'],
+    ];
+    foreach ($candidates as [$section, $package]) {
+        if (isset($data[$section]) && is_array($data[$section]) && isset($data[$section][$package])) {
+            return (string) $data[$section][$package];
+        }
+    }
+    return null;
+}
+
 function run_command(string $command): int
 {
     fwrite(STDOUT, "Running: {$command}\n");
@@ -290,9 +316,12 @@ if ($missingTools) {
     }
 
     $action = $hasCoreDev ? 'install' : 'require';
+    $ddevCmd = escapeshellcmd($ddev);
+    $coreConstraint = detect_core_constraint($composerJson);
+    $package = $coreConstraint ? "drupal/core-dev:{$coreConstraint}" : "drupal/core-dev";
     $installCmd = $action === 'install'
-        ? "{$ddev} composer install"
-        : "{$ddev} composer require --dev drupal/core-dev";
+        ? "{$ddevCmd} composer install"
+        : "{$ddevCmd} composer require --dev " . escapeshellarg($package) . " --with-all-dependencies";
     if ($nonInteractive) {
         $installCmd .= ' --no-interaction';
     }

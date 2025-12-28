@@ -17,7 +17,7 @@ USAGE
 }
 
 if [ ! -x "$PHPSTAN_BIN" ]; then
-  echo "phpstan not found at $PHPSTAN_BIN. Run 'composer install' to install vendor/bin/phpstan." >&2
+  echo "phpstan not found at $PHPSTAN_BIN. Run 'ddev composer install' to install vendor/bin/phpstan." >&2
   print_help
   exit 127
 fi

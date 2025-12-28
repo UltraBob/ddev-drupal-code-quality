@@ -6,7 +6,7 @@ PHPCBF_BIN="vendor/bin/phpcbf"
 source /mnt/ddev_config/commands/helpers/path-map.sh
 
 if [ ! -x "$PHPCBF_BIN" ]; then
-  echo "phpcbf not found at $PHPCBF_BIN. Run 'composer install' to install vendor/bin/phpcbf." >&2
+  echo "phpcbf not found at $PHPCBF_BIN. Run 'ddev composer install' to install vendor/bin/phpcbf." >&2
   exit 127
 fi
 

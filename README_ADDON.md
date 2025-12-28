@@ -31,11 +31,12 @@ ddev restart
 During installation, the add-on copies CI-parity config files into the project
 root. If conflicts are detected, you can choose to back up and replace, skip,
 or abort. Skipping a config may reduce CI parity.
+The installer runs in bash so it does not require host PHP.
 
 If PHPStan/PHPCS/PHPCBF binaries are missing, the installer prompts to add
-`drupal/core-dev` using the same constraint as `drupal/core-recommended` (or to
-run `composer install` if it is already required). It uses
-`composer require --with-all-dependencies` to avoid lockfile conflicts.
+`drupal/core-dev` (or to run `ddev composer install` if it is already required).
+It uses `ddev composer require --with-all-dependencies` to avoid lockfile
+conflicts.
 
 ## Usage
 
@@ -71,7 +72,7 @@ ddev checks-full
 ## Requirements
 
 - DDEV project with Drupal core under `web/`.
-- Composer dependencies installed (`composer install`).
+- Composer dependencies installed (`ddev composer install`).
 - Node toolchain for JS linting (recommended: enable corepack in DDEV and run
   `yarn install` in `web/core`).
 
@@ -85,8 +86,8 @@ ddev checks-full
   - `ESLINT_CONFIG_MODE=nearest` (default) groups by nearest config file.
   - `ESLINT_CONFIG_MODE=fixed` forces `.eslintrc.passing.json`.
 - CSpell parity:
-  - Run `php tooling/scripts/prepare-cspell.php -s .prepared` once and replace
-    `.cspell.json` after reviewing the diff.
+  - Run `ddev exec php tooling/scripts/prepare-cspell.php -s .prepared` once and
+    replace `.cspell.json` after reviewing the diff.
 
 ## Installer environment variables
 

@@ -34,7 +34,7 @@ fi
 
 if [ -z "$LINT_BIN" ]; then
   echo "php-parallel-lint is not installed in vendor/bin." >&2
-  echo "Install php-parallel-lint/php-parallel-lint via Composer to enable this check." >&2
+  echo "Install php-parallel-lint/php-parallel-lint via 'ddev composer require --dev php-parallel-lint/php-parallel-lint' to enable this check." >&2
   exit 127
 fi
 

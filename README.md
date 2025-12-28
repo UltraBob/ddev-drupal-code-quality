@@ -7,7 +7,7 @@ Stylelint, Prettier, CSpell) for local CLI/IDE usage.
 
 - `commands/`: DDEV web commands copied into the project `.ddev/commands` directory.
 - `dcq-assets/`: project-root configs and host shims copied by the installer.
-- `dcq-install.php`: conflict-aware installer invoked by `install.yaml`.
+- `dcq-install.sh`: conflict-aware installer invoked by `install.yaml`.
 - `install.yaml`: DDEV add-on install definition.
 
 ## Local testing

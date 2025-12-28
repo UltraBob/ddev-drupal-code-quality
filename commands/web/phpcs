@@ -6,7 +6,7 @@ PHPCS_BIN="vendor/bin/phpcs"
 source /mnt/ddev_config/commands/helpers/path-map.sh
 
 if [ ! -x "$PHPCS_BIN" ]; then
-  echo "phpcs not found at $PHPCS_BIN. Run 'composer install' to install vendor/bin/phpcs." >&2
+  echo "phpcs not found at $PHPCS_BIN. Run 'ddev composer install' to install vendor/bin/phpcs." >&2
   exit 127
 fi
 

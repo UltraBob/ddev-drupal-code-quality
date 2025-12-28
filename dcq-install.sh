@@ -66,8 +66,10 @@ create_root_package_json() {
   local app_root="$2"
   local output
   local status
+  local php_script="${cwd}/.dcq-create-package.php"
 
-  output="$("$ddev_cmd" exec php -r '
+  cat > "$php_script" <<'PHP'
+<?php
 $path = "/var/www/html/web/core/package.json";
 $data = json_decode(file_get_contents($path), true);
 if (!is_array($data)) {
@@ -97,8 +99,11 @@ if (isset($data["devDependencies"])) {
   $out["devDependencies"] = $data["devDependencies"];
 }
 echo json_encode($out, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . PHP_EOL;
-' 2>&1)"
+PHP
+
+  output="$("$ddev_cmd" exec php "/var/www/html/.ddev/.dcq-create-package.php" 2>&1)"
   status=$?
+  rm -f "$php_script"
 
   if [ "$status" -ne 0 ] || [ -z "$output" ]; then
     printf 'Unable to create project package.json from core.\n' >&2

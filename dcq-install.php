@@ -122,7 +122,7 @@ if ($shimDirCheck !== $appRootCheck && strpos($shimDirCheck, $appRootCheck . '/'
     exit(1);
 }
 
-$nonInteractive = truthy(getenv('DDEV_NONINTERACTIVE') ?: getenv('DCQ_NONINTERACTIVE'));
+$nonInteractive = truthy(getenv('DDEV_NONINTERACTIVE') ?: getenv('DCQ_NONINTERACTIVE') ?: null);
 $installMode = strtolower(trim((string) getenv('DCQ_INSTALL_MODE')));
 if ($nonInteractive && $installMode === '') {
     $installMode = 'replace';

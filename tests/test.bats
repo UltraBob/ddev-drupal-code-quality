@@ -56,7 +56,7 @@ health_checks() {
 
 assert_addon_installed() {
   assert_file_exist ".ddev/commands/web/phpstan"
-  assert_file_exist "tooling/bin/phpstan"
+  assert_file_exist "dcq-tooling/bin/phpstan"
   assert_file_exist "tooling/ci-config/phpstan.neon"
   assert_file_exist ".eslintrc.json"
   assert_file_exist ".phpcs.xml"
@@ -119,10 +119,10 @@ teardown() {
   assert_success
   assert_addon_installed
 
-  run ./tooling/bin/phpstan --version
+  run ./dcq-tooling/bin/phpstan --version
   assert_success
-  run ./tooling/bin/phpcs --version
+  run ./dcq-tooling/bin/phpcs --version
   assert_success
-  run ./tooling/bin/phpcbf --version
+  run ./dcq-tooling/bin/phpcbf --version
   assert_success
 }

@@ -40,18 +40,18 @@ conflicts.
 
 ## Usage
 
-Host shims are installed under `tooling/bin` by default (set `DCQ_SHIM_DIR` to
+Host shims are installed under `dcq-tooling/bin` by default (set `DCQ_SHIM_DIR` to
 change this within the project root). Point IDE tool paths at these shims:
 
 ```bash
-./tooling/bin/phpstan
-./tooling/bin/phpcs
-./tooling/bin/eslint
-./tooling/bin/stylelint
-./tooling/bin/prettier
-./tooling/bin/cspell
-./tooling/bin/checks
-./tooling/bin/checks-full
+./dcq-tooling/bin/phpstan
+./dcq-tooling/bin/phpcs
+./dcq-tooling/bin/eslint
+./dcq-tooling/bin/stylelint
+./dcq-tooling/bin/prettier
+./dcq-tooling/bin/cspell
+./dcq-tooling/bin/checks
+./dcq-tooling/bin/checks-full
 ```
 
 You can also use the DDEV commands directly:
@@ -74,8 +74,8 @@ ddev checks-full
 - DDEV project with Drupal core under `web/`.
 - Composer dependencies installed (`ddev composer install`).
 - Node toolchain for JS linting (recommended: enable corepack in DDEV and run
-  `yarn install` in `web/core`, or create a project-root `package.json` and
-  install dependencies there).
+  `yarn install` in the project root; the installer can create a root
+  `package.json` based on Drupal core when missing).
 
 ## Configuration notes
 
@@ -99,13 +99,13 @@ ddev checks-full
   `skip`/`false` to skip, or unset to prompt when interactive.
 - `DCQ_INSTALL_NODE_DEPS`: `root` to install JS deps in the project root (creates
   a root `package.json` from core if missing), `core` to install in `web/core`,
-  `install`/`true` to auto-install in root when possible (core otherwise),
-  `skip`/`false` to skip, or unset to prompt.
+  `install`/`true` to auto-install in the project root, `skip`/`false` to skip,
+  or unset to prompt (default: root).
 
 ## Uninstall
 
 Removing the add-on cleans up `.ddev` commands and assets, but project-root
-configs and `tooling/bin` shims are left in place intentionally. Remove them
+configs and `dcq-tooling/bin` shims are left in place intentionally. Remove them
 manually if desired.
 
 ## Credits

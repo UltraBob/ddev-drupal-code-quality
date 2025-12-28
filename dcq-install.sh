@@ -61,6 +61,110 @@ prompt_choice() {
   printf '%s' "$answer"
 }
 
+create_root_package_json() {
+  local ddev_cmd="$1"
+  local app_root="$2"
+  local output
+  local status
+
+  output="$("$ddev_cmd" exec php -r '
+$path = "/var/www/html/web/core/package.json";
+$data = json_decode(file_get_contents($path), true);
+if (!is_array($data)) {
+  fwrite(STDERR, "Failed to read core package.json\n");
+  exit(1);
+}
+$out = [
+  "name" => $data["name"] ?? "drupal-project",
+  "private" => true,
+];
+if (isset($data["description"])) {
+  $out["description"] = $data["description"];
+}
+if (isset($data["license"])) {
+  $out["license"] = $data["license"];
+}
+if (isset($data["engines"])) {
+  $out["engines"] = $data["engines"];
+}
+if (isset($data["packageManager"])) {
+  $out["packageManager"] = $data["packageManager"];
+}
+if (isset($data["dependencies"])) {
+  $out["dependencies"] = $data["dependencies"];
+}
+if (isset($data["devDependencies"])) {
+  $out["devDependencies"] = $data["devDependencies"];
+}
+echo json_encode($out, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . PHP_EOL;
+' 2>&1)"
+  status=$?
+
+  if [ "$status" -ne 0 ] || [ -z "$output" ]; then
+    printf 'Unable to create project package.json from core.\n' >&2
+    if [ -n "$output" ]; then
+      printf '%s\n' "$output" >&2
+    fi
+    return 1
+  fi
+
+  if ! printf '%s' "$output" | grep -q '^{'; then
+    printf 'Unable to create project package.json from core (invalid output).\n' >&2
+    printf '%s\n' "$output" >&2
+    return 1
+  fi
+
+  printf '%s\n' "$output" > "${app_root%/}/package.json"
+  printf 'WRITE: %s\n' "${app_root%/}/package.json"
+
+  if [ -f "${app_root%/}/web/core/.yarnrc.yml" ] && [ ! -f "${app_root%/}/.yarnrc.yml" ]; then
+    cp "${app_root%/}/web/core/.yarnrc.yml" "${app_root%/}/.yarnrc.yml"
+    printf 'WRITE: %s\n' "${app_root%/}/.yarnrc.yml"
+  fi
+
+  printf 'Created package.json from Drupal core devDependencies; review and customize as needed.\n'
+  return 0
+}
+
+prompt_node_target() {
+  local has_root="$1"
+  local choice
+
+  if [ "${PROMPT_AVAILABLE:-0}" -ne 1 ]; then
+    printf 'skip'
+    return
+  fi
+
+  if [ "$has_root" -eq 1 ]; then
+    printf 'Choose JS toolchain target: [r]oot (project package.json), [c]ore (web/core), [s]kip (default: root): ' >&"$PROMPT_OUT_FD"
+    if ! IFS= read -r -u "$PROMPT_IN_FD" choice; then
+      choice=""
+    fi
+    choice="$(string_lower "$choice")"
+    if [ -z "$choice" ]; then
+      printf 'root'
+      return
+    fi
+  else
+    printf 'No project package.json found. Choose JS toolchain target: [r]oot (create from core), [c]ore (web/core), [s]kip (default: root): ' >&"$PROMPT_OUT_FD"
+    if ! IFS= read -r -u "$PROMPT_IN_FD" choice; then
+      choice=""
+    fi
+    choice="$(string_lower "$choice")"
+    if [ -z "$choice" ]; then
+      printf 'root'
+      return
+    fi
+  fi
+
+  case "$choice" in
+    r|root) printf 'root' ;;
+    c|core) printf 'core' ;;
+    s|skip) printf 'skip' ;;
+    *) printf 'skip' ;;
+  esac
+}
+
 prompt_yes_no() {
   local question="$1"
   local default_no="$2"
@@ -157,99 +261,6 @@ node_toolchain_present() {
   return 1
 }
 
-create_root_package_json() {
-  local ddev_cmd="$1"
-  local app_root="$2"
-  local output
-
-  output="$("$ddev_cmd" exec php -r '
-$path = "/var/www/html/web/core/package.json";
-$data = json_decode(file_get_contents($path), true);
-if (!is_array($data)) {
-  fwrite(STDERR, "Failed to read core package.json\n");
-  exit(1);
-}
-$out = [
-  "name" => $data["name"] ?? "drupal-project",
-  "private" => true,
-];
-if (isset($data["description"])) {
-  $out["description"] = $data["description"];
-}
-if (isset($data["license"])) {
-  $out["license"] = $data["license"];
-}
-if (isset($data["engines"])) {
-  $out["engines"] = $data["engines"];
-}
-if (isset($data["packageManager"])) {
-  $out["packageManager"] = $data["packageManager"];
-}
-if (isset($data["dependencies"])) {
-  $out["dependencies"] = $data["dependencies"];
-}
-if (isset($data["devDependencies"])) {
-  $out["devDependencies"] = $data["devDependencies"];
-}
-echo json_encode($out, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . PHP_EOL;
-' 2>/dev/null)"
-
-  if [ -z "$output" ]; then
-    printf 'Unable to create project package.json from core.\n' >&2
-    return 1
-  fi
-
-  printf '%s\n' "$output" > "${app_root%/}/package.json"
-  printf 'WRITE: %s\n' "${app_root%/}/package.json"
-
-  if [ -f "${app_root%/}/web/core/.yarnrc.yml" ] && [ ! -f "${app_root%/}/.yarnrc.yml" ]; then
-    cp "${app_root%/}/web/core/.yarnrc.yml" "${app_root%/}/.yarnrc.yml"
-    printf 'WRITE: %s\n' "${app_root%/}/.yarnrc.yml"
-  fi
-
-  printf 'Created package.json from Drupal core devDependencies; review and customize as needed.\n'
-  return 0
-}
-
-prompt_node_target() {
-  local has_root="$1"
-  local choice
-
-  if [ "${PROMPT_AVAILABLE:-0}" -ne 1 ]; then
-    printf 'skip'
-    return
-  fi
-
-  if [ "$has_root" -eq 1 ]; then
-    printf 'Choose JS toolchain target: [r]oot (project package.json), [c]ore (web/core), [s]kip (default: root): ' >&"$PROMPT_OUT_FD"
-    if ! IFS= read -r -u "$PROMPT_IN_FD" choice; then
-      choice=""
-    fi
-    choice="$(string_lower "$choice")"
-    if [ -z "$choice" ]; then
-      printf 'root'
-      return
-    fi
-  else
-    printf 'No project package.json found. Choose JS toolchain target: [r]oot (create from core), [c]ore (web/core), [s]kip (default: core): ' >&"$PROMPT_OUT_FD"
-    if ! IFS= read -r -u "$PROMPT_IN_FD" choice; then
-      choice=""
-    fi
-    choice="$(string_lower "$choice")"
-    if [ -z "$choice" ]; then
-      printf 'core'
-      return
-    fi
-  fi
-
-  case "$choice" in
-    r|root) printf 'root' ;;
-    c|core) printf 'core' ;;
-    s|skip) printf 'skip' ;;
-    *) printf 'skip' ;;
-  esac
-}
-
 run_command() {
   local arg
   printf 'Running:'
@@ -274,7 +285,7 @@ if [ ! -d "$assets_root" ]; then
   exit 1
 fi
 
-shim_dir_env="${DCQ_SHIM_DIR:-tooling/bin}"
+shim_dir_env="${DCQ_SHIM_DIR:-dcq-tooling/bin}"
 if [[ "$shim_dir_env" = /* ]]; then
   shim_dir="$shim_dir_env"
 else
@@ -477,68 +488,72 @@ if [ "${#missing_tools[@]}" -gt 0 ]; then
 fi
 
 core_package_json="${app_root%/}/web/core/package.json"
-if [ -f "$core_package_json" ] && ! node_toolchain_present "$app_root"; then
-  ddev_cmd="${DDEV_EXECUTABLE:-ddev}"
-  root_package_json="${app_root%/}/package.json"
-  has_root_package_json=0
-  if [ -f "$root_package_json" ]; then
-    has_root_package_json=1
-  fi
+if [ -f "$core_package_json" ]; then
   node_mode_raw="$(string_lower "${DCQ_INSTALL_NODE_DEPS:-}")"
-  if [ -z "$node_mode_raw" ]; then
-    if [ "$non_interactive" -eq 1 ]; then
+  if [ -z "$node_mode_raw" ] && node_toolchain_present "$app_root"; then
+    node_mode_raw="skip"
+  fi
+
+  if [ "$node_mode_raw" != "skip" ]; then
+    ddev_cmd="${DDEV_EXECUTABLE:-ddev}"
+    root_package_json="${app_root%/}/package.json"
+    has_root_package_json=0
+    if [ -f "$root_package_json" ]; then
+      has_root_package_json=1
+    fi
+    if [ -z "$node_mode_raw" ]; then
+      if [ "$non_interactive" -eq 1 ]; then
+        node_mode="skip"
+      else
+        node_mode="prompt"
+      fi
+    elif [ "$node_mode_raw" = "1" ] || [ "$node_mode_raw" = "true" ] || [ "$node_mode_raw" = "yes" ] || [ "$node_mode_raw" = "on" ] || [ "$node_mode_raw" = "install" ] || [ "$node_mode_raw" = "auto" ]; then
+      node_mode="install"
+    elif [ "$node_mode_raw" = "0" ] || [ "$node_mode_raw" = "false" ] || [ "$node_mode_raw" = "no" ] || [ "$node_mode_raw" = "off" ] || [ "$node_mode_raw" = "skip" ]; then
       node_mode="skip"
+    elif [ "$node_mode_raw" = "root" ] || [ "$node_mode_raw" = "project" ]; then
+      node_mode="root"
+    elif [ "$node_mode_raw" = "core" ]; then
+      node_mode="core"
     else
       node_mode="prompt"
     fi
-  elif [ "$node_mode_raw" = "1" ] || [ "$node_mode_raw" = "true" ] || [ "$node_mode_raw" = "yes" ] || [ "$node_mode_raw" = "on" ] || [ "$node_mode_raw" = "install" ] || [ "$node_mode_raw" = "auto" ]; then
-    node_mode="install"
-  elif [ "$node_mode_raw" = "0" ] || [ "$node_mode_raw" = "false" ] || [ "$node_mode_raw" = "no" ] || [ "$node_mode_raw" = "off" ] || [ "$node_mode_raw" = "skip" ]; then
-    node_mode="skip"
-  elif [ "$node_mode_raw" = "root" ] || [ "$node_mode_raw" = "project" ]; then
-    node_mode="root"
-  elif [ "$node_mode_raw" = "core" ]; then
-    node_mode="core"
-  else
-    node_mode="prompt"
-  fi
 
-  printf 'Node toolchain for Drupal core not detected.\n'
-  if ! command_available "$ddev_cmd"; then
-    printf 'ddev executable not found in PATH; skipping Node toolchain install.\n'
-    node_mode="skip"
-  fi
+    if [ "$node_mode" != "skip" ]; then
+      printf 'Node toolchain for Drupal core not detected.\n'
+      if ! command_available "$ddev_cmd"; then
+        printf 'ddev executable not found in PATH; skipping Node toolchain install.\n'
+        node_mode="skip"
+      fi
 
-  target="skip"
-  if [ "$node_mode" = "install" ]; then
-    if [ "$has_root_package_json" -eq 1 ]; then
-      target="root"
-    else
-      target="core"
-    fi
-  elif [ "$node_mode" = "root" ] || [ "$node_mode" = "core" ]; then
-    target="$node_mode"
-  elif [ "$node_mode" = "prompt" ]; then
-    target="$(prompt_node_target "$has_root_package_json")"
-  fi
-
-  if [ "$target" = "root" ] && [ "$has_root_package_json" -eq 0 ]; then
-    if ! create_root_package_json "$ddev_cmd" "$app_root"; then
       target="skip"
-    else
-      has_root_package_json=1
-    fi
-  fi
+      if [ "$node_mode" = "install" ]; then
+        target="root"
+      elif [ "$node_mode" = "root" ] || [ "$node_mode" = "core" ]; then
+        target="$node_mode"
+      elif [ "$node_mode" = "prompt" ]; then
+        target="$(prompt_node_target "$has_root_package_json")"
+      fi
 
-  if [ "$target" = "core" ]; then
-    cmd=( "$ddev_cmd" "exec" "bash" "-lc" "cd web/core && yarn install" )
-    run_command "${cmd[@]}"
-    printf 'Node toolchain installed (core).\n'
-  elif [ "$target" = "root" ]; then
-    cmd=( "$ddev_cmd" "exec" "bash" "-lc" "cd /var/www/html && yarn install" )
-    run_command "${cmd[@]}"
-    printf 'Node toolchain installed (project root).\n'
-  else
-    printf 'Skipping Node toolchain install. Use DCQ_INSTALL_NODE_DEPS=root or DCQ_INSTALL_NODE_DEPS=core to enable later.\n'
+      if [ "$target" = "root" ] && [ "$has_root_package_json" -eq 0 ]; then
+        if ! create_root_package_json "$ddev_cmd" "$app_root"; then
+          target="skip"
+        else
+          has_root_package_json=1
+        fi
+      fi
+
+      if [ "$target" = "core" ]; then
+        cmd=( "$ddev_cmd" "exec" "bash" "-lc" "cd web/core && yarn install" )
+        run_command "${cmd[@]}"
+        printf 'Node toolchain installed (core).\n'
+      elif [ "$target" = "root" ]; then
+        cmd=( "$ddev_cmd" "exec" "bash" "-lc" "cd /var/www/html && yarn install" )
+        run_command "${cmd[@]}"
+        printf 'Node toolchain installed (project root).\n'
+      else
+        printf 'Skipping Node toolchain install. Use DCQ_INSTALL_NODE_DEPS=root or DCQ_INSTALL_NODE_DEPS=core to enable later.\n'
+      fi
+    fi
   fi
 fi

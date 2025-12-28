@@ -9,6 +9,8 @@
 #   bats ./tests/test.bats
 # To exclude release tests:
 #   bats ./tests/test.bats --filter-tags '!release'
+# To run the full Drupal install test:
+#   DCQ_FULL_TESTS=1 bats ./tests/test.bats --filter-tags 'full'
 # For debugging:
 #   bats ./tests/test.bats --show-output-of-passing-tests --verbose-run --print-output-on-failure
 
@@ -16,7 +18,7 @@ setup() {
   set -eu -o pipefail
 
   # Override this variable for your add-on:
-  export GITHUB_REPO=ddev/ddev-drupal-code-quality
+  export GITHUB_REPO=UltraBob/ddev-drupal-code-quality
 
   TEST_BREW_PREFIX="$(brew --prefix 2>/dev/null || true)"
   export BATS_LIB_PATH="${BATS_LIB_PATH}:${TEST_BREW_PREFIX}/lib:/usr/lib/bats"
@@ -32,7 +34,7 @@ setup() {
   export DDEV_NO_INSTRUMENTATION=true
   ddev delete -Oy "${PROJNAME}" >/dev/null 2>&1 || true
   cd "${TESTDIR}"
-  run ddev config --project-name="${PROJNAME}" --project-tld=ddev.site
+  run ddev config --project-name="${PROJNAME}" --project-tld=ddev.site --project-type=drupal11 --docroot=web
   assert_success
   run ddev start -y
   assert_success
@@ -50,6 +52,14 @@ health_checks() {
   DDEV_DEBUG=true run ddev launch
   assert_success
   assert_output --partial "FULLURL https://${PROJNAME}.ddev.site"
+}
+
+assert_addon_installed() {
+  assert_file_exist ".ddev/commands/web/phpstan"
+  assert_file_exist "tooling/bin/phpstan"
+  assert_file_exist "tooling/ci-config/phpstan.neon"
+  assert_file_exist ".eslintrc.json"
+  assert_file_exist ".phpcs.xml"
 }
 
 teardown() {
@@ -71,6 +81,7 @@ teardown() {
   assert_success
   run ddev restart -y
   assert_success
+  assert_addon_installed
   health_checks
 }
 
@@ -82,5 +93,36 @@ teardown() {
   assert_success
   run ddev restart -y
   assert_success
+  assert_addon_installed
   health_checks
+}
+
+# bats test_tags=full
+@test "fresh install (full)" {
+  set -eu -o pipefail
+  if [ "${DCQ_FULL_TESTS:-}" != "1" ]; then
+    skip "Set DCQ_FULL_TESTS=1 to run the full Drupal install test."
+  fi
+
+  run ddev composer create-project "drupal/recommended-project:^11" .
+  assert_success
+  run ddev composer require drush/drush
+  assert_success
+  run ddev drush site:install --account-name=admin --account-pass=admin -y
+  assert_success
+
+  export DCQ_INSTALL_DEPS=install
+  export DCQ_INSTALL_NODE_DEPS=skip
+  run ddev add-on get "${DIR}"
+  assert_success
+  run ddev restart -y
+  assert_success
+  assert_addon_installed
+
+  run ./tooling/bin/phpstan --version
+  assert_success
+  run ./tooling/bin/phpcs --version
+  assert_success
+  run ./tooling/bin/phpcbf --version
+  assert_success
 }

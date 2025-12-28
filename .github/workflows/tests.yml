@@ -18,6 +18,11 @@ on:
         description: Debug with tmate
         required: false
         default: false
+      full_tests:
+        type: boolean
+        description: Run full Drupal install test (slow)
+        required: false
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -43,3 +48,5 @@ jobs:
           debug_enabled: ${{ github.event.inputs.debug_enabled }}
           addon_repository: ${{ env.GITHUB_REPOSITORY }}
           addon_ref: ${{ env.GITHUB_REF }}
+        env:
+          DCQ_FULL_TESTS: ${{ github.event.inputs.full_tests }}

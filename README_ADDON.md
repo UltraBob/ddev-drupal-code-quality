@@ -95,6 +95,8 @@ ddev checks-full
 - `DCQ_NONINTERACTIVE=true`: behave like `DCQ_INSTALL_MODE=replace`.
 - `DCQ_INSTALL_DEPS`: `install`/`true` to auto-install missing `drupal/core-dev`,
   `skip`/`false` to skip, or unset to prompt when interactive.
+- `DCQ_INSTALL_NODE_DEPS`: `install`/`true` to auto-install the core JS toolchain
+  (`web/core` yarn install), `skip`/`false` to skip, or unset to prompt.
 
 ## Uninstall
 

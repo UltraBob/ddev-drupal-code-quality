@@ -111,6 +111,22 @@ function command_available(string $command): bool
     return $path !== '' && is_executable($path);
 }
 
+function node_toolchain_present(string $appRoot): bool
+{
+    $paths = [
+        $appRoot . '/web/core/node_modules/.bin/eslint',
+        $appRoot . '/web/core/node_modules/eslint/bin/eslint.js',
+        $appRoot . '/node_modules/.bin/eslint',
+        $appRoot . '/node_modules/eslint/bin/eslint.js',
+    ];
+    foreach ($paths as $path) {
+        if (file_exists($path)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 function composer_requires_core_dev(string $composerJson): bool
 {
     if (!file_exists($composerJson)) {
@@ -307,33 +323,87 @@ if ($missingTools) {
     fwrite(STDOUT, "Missing dev tools: " . implode(', ', $missingTools) . ".\n");
     if (!file_exists($composerJson)) {
         fwrite(STDOUT, "composer.json not found; skipping dependency install.\n");
-        exit(0);
+        $missingTools = [];
     }
 
-    if (!command_available($ddev)) {
+    if ($missingTools && !command_available($ddev)) {
         fwrite(STDOUT, "ddev executable not found in PATH; skipping dependency install.\n");
-        exit(0);
+        $missingTools = [];
     }
 
-    $action = $hasCoreDev ? 'install' : 'require';
+    if ($missingTools) {
+        $action = $hasCoreDev ? 'install' : 'require';
+        $ddevCmd = escapeshellcmd($ddev);
+        $coreConstraint = detect_core_constraint($composerJson);
+        $package = $coreConstraint ? "drupal/core-dev:{$coreConstraint}" : "drupal/core-dev";
+        $installCmd = $action === 'install'
+            ? "{$ddevCmd} composer install"
+            : "{$ddevCmd} composer require --dev " . escapeshellarg($package) . " --with-all-dependencies";
+        if ($nonInteractive) {
+            $installCmd .= ' --no-interaction';
+        }
+
+        $question = $action === 'install'
+            ? "Run '{$installCmd}' to install dev tools?"
+            : "Run '{$installCmd}' to add Drupal core-dev tools?";
+
+        $shouldInstall = false;
+        if ($depsMode === 'install') {
+            $shouldInstall = true;
+        } elseif ($depsMode === 'prompt') {
+            if (function_exists('posix_isatty') && !posix_isatty(STDIN)) {
+                $shouldInstall = false;
+            } else {
+                $shouldInstall = prompt_yes_no($question, true);
+            }
+        }
+
+        if (!$shouldInstall) {
+            fwrite(STDOUT, "Skipping dependency install. Run '{$installCmd}' later to enable PHPStan/PHPCS/PHPCBF.\n");
+        } else {
+            chdir($appRoot);
+            $status = run_command($installCmd);
+            if ($status !== 0) {
+                fwrite(STDERR, "Dependency install failed (exit {$status}).\n");
+                exit($status);
+            }
+            fwrite(STDOUT, "Dependencies installed.\n");
+        }
+    }
+}
+
+$corePackageJson = rtrim($appRoot, '/') . '/web/core/package.json';
+if (file_exists($corePackageJson) && !node_toolchain_present($appRoot)) {
+    $ddev = getenv('DDEV_EXECUTABLE') ?: 'ddev';
+    $nodeModeRaw = strtolower(trim((string) getenv('DCQ_INSTALL_NODE_DEPS')));
+    if ($nodeModeRaw === '') {
+        $nodeMode = $nonInteractive ? 'skip' : 'prompt';
+    } elseif (in_array($nodeModeRaw, ['1', 'true', 'yes', 'on', 'install', 'auto'], true)) {
+        $nodeMode = 'install';
+    } elseif (in_array($nodeModeRaw, ['0', 'false', 'no', 'off', 'skip'], true)) {
+        $nodeMode = 'skip';
+    } else {
+        $nodeMode = 'prompt';
+    }
+
+    fwrite(STDOUT, "Node toolchain for Drupal core not detected.\n");
+    if (!command_available($ddev)) {
+        fwrite(STDOUT, "ddev executable not found in PATH; skipping Node toolchain install.\n");
+        $nodeMode = 'skip';
+    }
+
     $ddevCmd = escapeshellcmd($ddev);
-    $coreConstraint = detect_core_constraint($composerJson);
-    $package = $coreConstraint ? "drupal/core-dev:{$coreConstraint}" : "drupal/core-dev";
-    $installCmd = $action === 'install'
-        ? "{$ddevCmd} composer install"
-        : "{$ddevCmd} composer require --dev " . escapeshellarg($package) . " --with-all-dependencies";
+    $installCmd = "{$ddevCmd} exec bash -lc " . escapeshellarg('cd web/core && yarn install');
     if ($nonInteractive) {
         $installCmd .= ' --no-interaction';
     }
 
-    $question = $action === 'install'
-        ? "Run '{$installCmd}' to install dev tools?"
-        : "Run '{$installCmd}' to add Drupal core-dev tools?";
+    $question = "Run '{$installCmd}' to install the core JS toolchain?";
 
     $shouldInstall = false;
-    if ($depsMode === 'install') {
+    if ($nodeMode === 'install') {
         $shouldInstall = true;
-    } elseif ($depsMode === 'prompt') {
+    } elseif ($nodeMode === 'prompt') {
         if (function_exists('posix_isatty') && !posix_isatty(STDIN)) {
             $shouldInstall = false;
         } else {
@@ -342,15 +412,14 @@ if ($missingTools) {
     }
 
     if (!$shouldInstall) {
-        fwrite(STDOUT, "Skipping dependency install. Run '{$installCmd}' later to enable PHPStan/PHPCS/PHPCBF.\n");
-        exit(0);
+        fwrite(STDOUT, "Skipping Node toolchain install. Enable corepack and run '{$installCmd}' later for ESLint/Stylelint/Prettier/CSpell.\n");
+    } else {
+        $status = run_command($installCmd);
+        if ($status !== 0) {
+            fwrite(STDERR, "Node toolchain install failed (exit {$status}).\n");
+            fwrite(STDERR, "If yarn is missing, set corepack_enable: true in .ddev/config.yaml and run 'ddev restart'.\n");
+            exit($status);
+        }
+        fwrite(STDOUT, "Node toolchain installed.\n");
     }
-
-    chdir($appRoot);
-    $status = run_command($installCmd);
-    if ($status !== 0) {
-        fwrite(STDERR, "Dependency install failed (exit {$status}).\n");
-        exit($status);
-    }
-    fwrite(STDOUT, "Dependencies installed.\n");
 }

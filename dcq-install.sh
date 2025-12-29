@@ -28,10 +28,11 @@ prompt_setup() {
   fi
 
   if [ -e /dev/tty ]; then
-    exec 3</dev/tty 4>/dev/tty
-    PROMPT_IN_FD=3
-    PROMPT_OUT_FD=4
-    PROMPT_AVAILABLE=1
+    if exec 3</dev/tty 4>/dev/tty 2>/dev/null; then
+      PROMPT_IN_FD=3
+      PROMPT_OUT_FD=4
+      PROMPT_AVAILABLE=1
+    fi
   fi
 }
 

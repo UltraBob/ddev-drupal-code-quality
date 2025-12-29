@@ -416,11 +416,35 @@ teardown() {
 
   export DCQ_INSTALL_DEPS=install
   export DCQ_INSTALL_NODE_DEPS=install
+  export DCQ_INSTALL_IDE_SETTINGS=overwrite
   run ddev add-on get "${DIR}"
   assert_success
   restart_or_start_ddev
   assert_addon_installed
   ensure_node_toolchain
+  assert_file_exist ".vscode/settings.json"
+  assert_file_exist ".vscode/extensions.json"
+  assert_log_contains '"php.validate.executablePath": "./dcq-tooling/bin/php"' ".vscode/settings.json"
+  assert_log_contains '"phpsab.executablePathCS": "./dcq-tooling/bin/phpcs"' ".vscode/settings.json"
+  assert_log_contains '"phpsab.executablePathCBF": "./dcq-tooling/bin/phpcbf"' ".vscode/settings.json"
+  assert_log_contains "dcq-tooling/bin/phpstan" ".vscode/settings.json"
+  assert_log_contains '"stylelint.stylelintPath": "./node_modules/stylelint"' ".vscode/settings.json"
+  assert_log_contains '"prettier.prettierPath": "./node_modules/prettier"' ".vscode/settings.json"
+  assert_log_contains '"cSpell.path": "./node_modules/cspell"' ".vscode/settings.json"
+  assert_log_contains '"eslint.nodePath": "node_modules"' ".vscode/settings.json"
+  assert_log_contains '"resolvePluginsRelativeTo": "."' ".vscode/settings.json"
+
+  run bash -lc "cd \"${PWD}/.ddev\" && DCQ_INSTALL_IDE_SETTINGS=overwrite DCQ_INSTALL_NODE_DEPS=core DCQ_INSTALL_DEPS=skip DDEV_EXECUTABLE=true bash ./dcq-install.sh"
+  assert_success
+  assert_log_contains '"php.validate.executablePath": "./dcq-tooling/bin/php"' ".vscode/settings.json"
+  assert_log_contains '"phpsab.executablePathCS": "./dcq-tooling/bin/phpcs"' ".vscode/settings.json"
+  assert_log_contains '"phpsab.executablePathCBF": "./dcq-tooling/bin/phpcbf"' ".vscode/settings.json"
+  assert_log_contains "dcq-tooling/bin/phpstan" ".vscode/settings.json"
+  assert_log_contains '"stylelint.stylelintPath": "./web/core/node_modules/stylelint"' ".vscode/settings.json"
+  assert_log_contains '"prettier.prettierPath": "./web/core/node_modules/prettier"' ".vscode/settings.json"
+  assert_log_contains '"cSpell.path": "./web/core/node_modules/cspell"' ".vscode/settings.json"
+  assert_log_contains '"eslint.nodePath": "web/core/node_modules"' ".vscode/settings.json"
+  assert_log_contains '"resolvePluginsRelativeTo": "./web/core"' ".vscode/settings.json"
 
   run ./dcq-tooling/bin/phpstan --version
   assert_success

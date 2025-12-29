@@ -40,21 +40,7 @@ conflicts.
 
 ## Usage
 
-Host shims are installed under `dcq-tooling/bin` by default (set `DCQ_SHIM_DIR` to
-change this within the project root). Point IDE tool paths at these shims:
-
-```bash
-./dcq-tooling/bin/phpstan
-./dcq-tooling/bin/phpcs
-./dcq-tooling/bin/eslint
-./dcq-tooling/bin/stylelint
-./dcq-tooling/bin/prettier
-./dcq-tooling/bin/cspell
-./dcq-tooling/bin/checks
-./dcq-tooling/bin/checks-full
-```
-
-You can also use the DDEV commands directly:
+For CLI usage, prefer the DDEV commands:
 
 ```bash
 ddev phpstan
@@ -68,6 +54,34 @@ ddev composer-validate
 ddev checks
 ddev checks-full
 ```
+
+Host shims are installed under `dcq-tooling/bin` by default (set `DCQ_SHIM_DIR`
+to change this within the project root). These are intended for IDE tool paths
+or tools that require a local binary path:
+
+```bash
+./dcq-tooling/bin/phpstan
+./dcq-tooling/bin/phpcs
+./dcq-tooling/bin/eslint
+./dcq-tooling/bin/stylelint
+./dcq-tooling/bin/prettier
+./dcq-tooling/bin/cspell
+./dcq-tooling/bin/checks
+./dcq-tooling/bin/checks-full
+```
+
+## IDE settings (VS Code/Codium)
+
+Starter settings live in `dcq-ide-settings/vscode`. During install, you can
+choose to merge them into `.vscode/settings.json` and
+`.vscode/extensions.json`, back up and overwrite, or skip and handle them
+manually.
+
+The template points PHP tooling at `dcq-tooling/bin` and JS tooling at local
+`node_modules`. If you override `DCQ_SHIM_DIR`, update the PHP tool paths
+accordingly. The installer uses the Node toolchain choice (prompt or
+`DCQ_INSTALL_NODE_DEPS`) to set JS paths to root or `web/core`. Override the
+paths if you prefer a different location.
 
 ## Requirements
 
@@ -89,6 +103,13 @@ ddev checks-full
 - CSpell parity:
   - Run `ddev exec php tooling/scripts/prepare-cspell.php -s .prepared` once and
     replace `.cspell.json` after reviewing the diff.
+- PHPStan baseline:
+  - Generate a baseline with `ddev phpstan --generate-baseline`.
+  - This writes `phpstan-baseline.neon` at the project root; the wrapper will
+    include it automatically when present.
+  - Use a baseline to suppress known issues in legacy code or core defaults
+    (for example, the shipped `settings.php` files), then work it down over
+    time. Avoid using it to hide new regressions.
 
 ## Installer environment variables
 
@@ -102,6 +123,9 @@ ddev checks-full
   `core` to install in `web/core`,
   `install`/`true` to auto-install in the project root, `skip`/`false` to skip,
   or unset to prompt (default: root).
+- `DCQ_INSTALL_IDE_SETTINGS`: `merge` to add missing VS Code settings and
+  extension recommendations, `overwrite` to back up and replace, `skip` to
+  handle manually, or unset to prompt.
 
 ## Uninstall
 

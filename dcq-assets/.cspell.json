@@ -6,7 +6,11 @@
     "globRoot": ".",
     "minWordLength": 4,
     "ignorePaths": [
-        "web",
+        "web/core",
+        "web/modules/contrib",
+        "web/themes/contrib",
+        "web/profiles/contrib",
+        "web/sites/*/files",
         "vendor",
         "node_modules",
         ".git",

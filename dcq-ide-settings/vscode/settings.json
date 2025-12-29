@@ -1,0 +1,39 @@
+{
+  "php.validate.enable": true,
+  "php.validate.executablePath": "__DCQ_SHIM_DIR__/php",
+  "phpsab.executablePathCS": "__DCQ_SHIM_DIR__/phpcs",
+  "phpsab.executablePathCBF": "__DCQ_SHIM_DIR__/phpcbf",
+  "phpsab.snifferEnable": true,
+  "phpsab.fixerEnable": true,
+  "phpsab.fixerArguments": [],
+  "phpsab.snifferShowSources": true,
+  "phpsab.debug": true,
+  "phpstan.binPath": "${workspaceFolder}/__DCQ_SHIM_DIR__/phpstan",
+  "phpstan.rootDir": "${workspaceFolder}",
+  "phpstan.configFile": "${workspaceFolder}/tooling/ci-config/phpstan.neon",
+  "phpstan.path": "${workspaceFolder}/__DCQ_SHIM_DIR__/phpstan",
+  "intelephense.environment.phpVersion": "8.3",
+  "eslint.enable": true,
+  "eslint.workingDirectories": [
+    {
+      "directory": ".",
+      "changeProcessCWD": true
+    }
+  ],
+  "eslint.options": {
+    "cwd": ".",
+    "overrideConfigFile": ".eslintrc.passing.json",
+    "useEslintrc": false,
+    "resolvePluginsRelativeTo": "__DCQ_ESLINT_RESOLVE_PLUGINS__"
+  },
+  "eslint.nodePath": "__DCQ_ESLINT_NODE_PATH__",
+  "eslint.runtime": "node",
+  "eslint.validate": [
+    "javascript",
+    "javascriptreact",
+    "yaml"
+  ],
+  "stylelint.stylelintPath": "__DCQ_STYLELINT_PATH__",
+  "prettier.prettierPath": "__DCQ_PRETTIER_PATH__",
+  "cSpell.path": "__DCQ_CSPELL_PATH__"
+}

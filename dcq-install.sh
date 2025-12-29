@@ -230,6 +230,32 @@ prompt_yes_no() {
   return 1
 }
 
+prompt_ide_settings_mode() {
+  local choice
+
+  if [ "${PROMPT_AVAILABLE:-0}" -ne 1 ]; then
+    printf 'skip'
+    return
+  fi
+
+  printf 'VS Code/Codium settings/extensions: [m]erge, [o]verwrite (backup), [s]kip (default: skip): ' >&"$PROMPT_OUT_FD"
+  if ! IFS= read -r -u "$PROMPT_IN_FD" choice; then
+    choice=""
+  fi
+  choice="$(string_lower "$choice")"
+  if [ -z "$choice" ]; then
+    printf 'skip'
+    return
+  fi
+
+  case "$choice" in
+    m|merge) printf 'merge' ;;
+    o|overwrite|replace) printf 'overwrite' ;;
+    s|skip|manual) printf 'skip' ;;
+    *) printf 'skip' ;;
+  esac
+}
+
 strip_generated_header() {
   local source="$1"
   local dest="$2"
@@ -273,6 +299,150 @@ command_available() {
   command -v "$1" >/dev/null 2>&1
 }
 
+escape_sed_replacement() {
+  printf '%s' "${1:-}" | sed 's/[&|]/\\&/g'
+}
+
+render_ide_template() {
+  local template="$1"
+  local output="$2"
+  local shim_setting="$3"
+  local stylelint_path="$4"
+  local prettier_path="$5"
+  local cspell_path="$6"
+  local eslint_node_path="$7"
+  local eslint_resolve_plugins="$8"
+  local escaped_shim
+  local escaped_stylelint
+  local escaped_prettier
+  local escaped_cspell
+  local escaped_node_path
+  local escaped_resolve_plugins
+
+  escaped_shim="$(escape_sed_replacement "$shim_setting")"
+  escaped_stylelint="$(escape_sed_replacement "$stylelint_path")"
+  escaped_prettier="$(escape_sed_replacement "$prettier_path")"
+  escaped_cspell="$(escape_sed_replacement "$cspell_path")"
+  escaped_node_path="$(escape_sed_replacement "$eslint_node_path")"
+  escaped_resolve_plugins="$(escape_sed_replacement "$eslint_resolve_plugins")"
+
+  sed \
+    -e "s|__DCQ_SHIM_DIR__|${escaped_shim}|g" \
+    -e "s|__DCQ_STYLELINT_PATH__|${escaped_stylelint}|g" \
+    -e "s|__DCQ_PRETTIER_PATH__|${escaped_prettier}|g" \
+    -e "s|__DCQ_CSPELL_PATH__|${escaped_cspell}|g" \
+    -e "s|__DCQ_ESLINT_NODE_PATH__|${escaped_node_path}|g" \
+    -e "s|__DCQ_ESLINT_RESOLVE_PLUGINS__|${escaped_resolve_plugins}|g" \
+    "$template" >"$output"
+}
+
+merge_json_settings() {
+  local existing="$1"
+  local template="$2"
+  local dest="$3"
+  local python_bin=""
+
+  if command_available python3; then
+    python_bin="python3"
+  elif command_available python; then
+    python_bin="python"
+  else
+    return 2
+  fi
+
+  if ! "$python_bin" - "$existing" "$template" "$dest" <<'PY'
+import json
+import sys
+
+existing_path, template_path, dest_path = sys.argv[1:4]
+with open(existing_path, encoding="utf-8") as f:
+    existing = json.load(f)
+with open(template_path, encoding="utf-8") as f:
+    template = json.load(f)
+
+if not isinstance(existing, dict) or not isinstance(template, dict):
+    raise SystemExit("settings JSON must be objects")
+
+for key, value in template.items():
+    if key not in existing:
+        existing[key] = value
+
+with open(dest_path, "w", encoding="utf-8") as f:
+    json.dump(existing, f, indent=2, ensure_ascii=True)
+    f.write("\n")
+PY
+  then
+    return 1
+  fi
+}
+
+merge_json_extensions() {
+  local existing="$1"
+  local template="$2"
+  local dest="$3"
+  local python_bin=""
+
+  if command_available python3; then
+    python_bin="python3"
+  elif command_available python; then
+    python_bin="python"
+  else
+    return 2
+  fi
+
+  if ! "$python_bin" - "$existing" "$template" "$dest" <<'PY'
+import json
+import sys
+
+existing_path, template_path, dest_path = sys.argv[1:4]
+with open(existing_path, encoding="utf-8") as f:
+    existing = json.load(f)
+with open(template_path, encoding="utf-8") as f:
+    template = json.load(f)
+
+if not isinstance(existing, dict) or not isinstance(template, dict):
+    raise SystemExit("extensions JSON must be objects")
+
+merged = dict(existing)
+
+def merge_list(key):
+    existing_list = existing.get(key, [])
+    template_list = template.get(key, [])
+    if not isinstance(existing_list, list):
+        existing_list = []
+    if not isinstance(template_list, list):
+        template_list = []
+    merged_list = []
+    seen = set()
+    for item in existing_list + template_list:
+        if isinstance(item, str) and item not in seen:
+            merged_list.append(item)
+            seen.add(item)
+    if merged_list:
+        merged[key] = merged_list
+    elif key in existing:
+        merged[key] = existing_list
+    elif key in template:
+        merged[key] = template_list
+
+merge_list("recommendations")
+merge_list("unwantedRecommendations")
+
+for key, value in template.items():
+    if key in ("recommendations", "unwantedRecommendations"):
+        continue
+    if key not in merged:
+        merged[key] = value
+
+with open(dest_path, "w", encoding="utf-8") as f:
+    json.dump(merged, f, indent=2, ensure_ascii=True)
+    f.write("\n")
+PY
+  then
+    return 1
+  fi
+}
+
 node_toolchain_present() {
   local app_root="$1"
   local paths=(
@@ -307,6 +477,8 @@ app_root="${DDEV_APPROOT:-}"
 if [ -z "$app_root" ]; then
   app_root="$(cd "$cwd/.." && pwd)"
 fi
+
+node_target_choice=""
 
 assets_root="${cwd}/dcq-assets"
 if [ ! -d "$assets_root" ]; then
@@ -572,6 +744,10 @@ if [ -f "$core_package_json" ]; then
         fi
       fi
 
+      if [ "$target" = "root" ] || [ "$target" = "core" ]; then
+        node_target_choice="$target"
+      fi
+
       if [ "$target" = "core" ]; then
         cmd=( "$ddev_cmd" "exec" "bash" "-lc" "cd web/core && yarn install" )
         run_command "${cmd[@]}"
@@ -582,6 +758,125 @@ if [ -f "$core_package_json" ]; then
         printf 'Node toolchain installed (project root).\n'
       else
         printf 'Skipping Node toolchain install. Use DCQ_INSTALL_NODE_DEPS=root or DCQ_INSTALL_NODE_DEPS=core to enable later.\n'
+      fi
+    fi
+  fi
+fi
+
+ide_settings_root="${cwd}/dcq-ide-settings/vscode"
+ide_settings_template="${ide_settings_root}/settings.json"
+ide_extensions_template="${ide_settings_root}/extensions.json"
+ide_settings_doc="${ide_settings_root}/README.md"
+if [ -f "$ide_settings_template" ] || [ -f "$ide_extensions_template" ]; then
+  ide_mode_raw="$(string_lower "${DCQ_INSTALL_IDE_SETTINGS:-}")"
+  if [ -z "$ide_mode_raw" ]; then
+    if [ "$non_interactive" -eq 1 ]; then
+      ide_mode="skip"
+    else
+      ide_mode="prompt"
+    fi
+  else
+    case "$ide_mode_raw" in
+      merge|m) ide_mode="merge" ;;
+      overwrite|replace|o) ide_mode="overwrite" ;;
+      manual|skip|s) ide_mode="skip" ;;
+      *) ide_mode="prompt" ;;
+    esac
+  fi
+
+  if [ "$ide_mode" = "prompt" ]; then
+    ide_mode="$(prompt_ide_settings_mode)"
+  fi
+
+  if [ "$ide_mode" = "skip" ]; then
+    printf 'Skipping IDE settings/extensions install. See %s for manual setup.\n' "$ide_settings_doc"
+  else
+    ide_target_dir="${app_root%/}/.vscode"
+    ide_target_settings="${ide_target_dir}/settings.json"
+    ide_target_extensions="${ide_target_dir}/extensions.json"
+
+    if [ -f "$ide_settings_template" ]; then
+      ide_tmp="$(mktemp "${TMPDIR:-/tmp}/dcq-ide-XXXXXX")"
+
+      shim_setting="$shim_dir_env"
+      if [[ "$shim_setting" != /* ]]; then
+        shim_setting="./${shim_setting}"
+      fi
+      ide_node_mode=""
+      ide_node_mode_raw="$(string_lower "${DCQ_INSTALL_NODE_DEPS:-}")"
+      if [ -n "$node_target_choice" ]; then
+        ide_node_mode="$node_target_choice"
+      else
+        case "$ide_node_mode_raw" in
+          core) ide_node_mode="core" ;;
+          root|project) ide_node_mode="root" ;;
+          1|true|yes|on|install|auto) ide_node_mode="root" ;;
+        esac
+      fi
+
+      if [ -z "$ide_node_mode" ]; then
+        if [ -d "${app_root%/}/web/core/node_modules" ] && [ ! -d "${app_root%/}/node_modules" ]; then
+          ide_node_mode="core"
+        elif [ -d "${app_root%/}/node_modules" ]; then
+          ide_node_mode="root"
+        elif [ -d "${app_root%/}/web/core/node_modules" ]; then
+          ide_node_mode="core"
+        else
+          ide_node_mode="root"
+        fi
+      fi
+
+      if [ "$ide_node_mode" = "core" ]; then
+        js_modules="./web/core/node_modules"
+        eslint_node_path="web/core/node_modules"
+        eslint_resolve_plugins="./web/core"
+      else
+        js_modules="./node_modules"
+        eslint_node_path="node_modules"
+        eslint_resolve_plugins="."
+      fi
+
+      stylelint_path="${js_modules}/stylelint"
+      prettier_path="${js_modules}/prettier"
+      cspell_path="${js_modules}/cspell"
+
+      render_ide_template "$ide_settings_template" "$ide_tmp" "$shim_setting" \
+        "$stylelint_path" "$prettier_path" "$cspell_path" "$eslint_node_path" "$eslint_resolve_plugins"
+
+      if [ "$ide_mode" = "merge" ] && [ -f "$ide_target_settings" ]; then
+        if merge_json_settings "$ide_target_settings" "$ide_tmp" "$ide_target_settings"; then
+          printf 'MERGE: %s\n' "$ide_target_settings"
+        else
+          printf 'Unable to merge IDE settings; install manually from %s.\n' "$ide_settings_doc" >&2
+        fi
+      else
+        ensure_dir "$ide_target_dir"
+        if [ -f "$ide_target_settings" ]; then
+          backup="$(backup_file "$ide_target_settings")"
+          printf 'BACKUP: %s\n' "$backup"
+        fi
+        cat "$ide_tmp" >"$ide_target_settings"
+        printf 'WRITE: %s\n' "$ide_target_settings"
+      fi
+
+      rm -f "$ide_tmp"
+    fi
+
+    if [ -f "$ide_extensions_template" ]; then
+      if [ "$ide_mode" = "merge" ] && [ -f "$ide_target_extensions" ]; then
+        if merge_json_extensions "$ide_target_extensions" "$ide_extensions_template" "$ide_target_extensions"; then
+          printf 'MERGE: %s\n' "$ide_target_extensions"
+        else
+          printf 'Unable to merge IDE extensions; install manually from %s.\n' "$ide_settings_doc" >&2
+        fi
+      else
+        ensure_dir "$ide_target_dir"
+        if [ -f "$ide_target_extensions" ]; then
+          backup="$(backup_file "$ide_target_extensions")"
+          printf 'BACKUP: %s\n' "$backup"
+        fi
+        cat "$ide_extensions_template" >"$ide_target_extensions"
+        printf 'WRITE: %s\n' "$ide_target_extensions"
       fi
     fi
   fi

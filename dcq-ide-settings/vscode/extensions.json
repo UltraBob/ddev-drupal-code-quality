@@ -1,0 +1,11 @@
+{
+  "recommendations": [
+    "bmewburn.vscode-intelephense-client",
+    "dbaeumer.vscode-eslint",
+    "esbenp.prettier-vscode",
+    "sanderronde.phpstan-vscode",
+    "streetsidesoftware.code-spell-checker",
+    "stylelint.vscode-stylelint",
+    "valeryanm.vscode-phpsab"
+  ]
+}

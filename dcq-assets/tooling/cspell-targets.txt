@@ -1,0 +1,6 @@
+# CSpell targets (paths relative to the project root).
+# Directories are scanned recursively. Use "./*" or "ROOT_FILES" for root files only (no recursion).
+web/modules/custom
+web/themes/custom
+web/profiles/custom
+./*

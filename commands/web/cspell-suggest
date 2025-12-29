@@ -128,6 +128,20 @@ normalize_path() {
   echo "$path"
 }
 
+trim_line() {
+  local line="$1"
+  line="${line%%#*}"
+  line="${line#"${line%%[![:space:]]*}"}"
+  line="${line%"${line##*[![:space:]]}"}"
+  printf '%s' "$line"
+}
+
+collect_root_files() {
+  while IFS= read -r file_path; do
+    DEFAULT_FILES+=("$file_path")
+  done < <(find "$PROJECT_ROOT" -maxdepth 1 -type f -print)
+}
+
 FLAG_ARGS=()
 POSITIONAL_ARGS=()
 args=("${clean_args[@]}")
@@ -166,35 +180,62 @@ done
 DEFAULT_PATHS=()
 DEFAULT_FILES=()
 if [ "$explicit_paths" = false ]; then
-  # Default to custom code (docroot) plus root README files.
-  for candidate in web/modules/custom web/themes/custom web/profiles/custom; do
-    if [ -d "$candidate" ]; then
-      DEFAULT_PATHS+=("$candidate")
-    fi
-  done
-  for candidate in "${DEFAULT_PATHS[@]}"; do
-    while IFS= read -r file_path; do
-      DEFAULT_FILES+=("$file_path")
-    done < <(find "$candidate" -path '*/node_modules/*' -prune -o -type f -print)
-  done
+  TARGETS_FILE="${PROJECT_ROOT}/tooling/cspell-targets.txt"
+  DEFAULT_PATTERNS=()
+  root_files=false
+  has_targets=false
 
-  shopt -s nullglob
-  for readme in README* readme*; do
-    if [ -f "$readme" ]; then
-      DEFAULT_FILES+=("$readme")
-    fi
-  done
-  shopt -u nullglob
+  if [ -f "$TARGETS_FILE" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+      line="$(trim_line "$line")"
+      [ -n "$line" ] || continue
+      if [ "$line" = "./*" ] || [ "$line" = "ROOT_FILES" ]; then
+        root_files=true
+        has_targets=true
+        continue
+      fi
+      line="$(normalize_path "$line")"
+      if [[ "$line" == *"*"* || "$line" == *"?"* || "$line" == *"["* ]]; then
+        DEFAULT_PATTERNS+=("$line")
+        has_targets=true
+        continue
+      fi
+      if [ -d "$line" ]; then
+        while IFS= read -r file_path; do
+          DEFAULT_FILES+=("$file_path")
+        done < <(find "$line" -path '*/node_modules/*' -prune -o -type f -print)
+        has_targets=true
+      elif [ -f "$line" ]; then
+        DEFAULT_FILES+=("$line")
+        has_targets=true
+      fi
+    done < "$TARGETS_FILE"
+  fi
 
-  if [ "${#DEFAULT_FILES[@]}" -eq 0 ]; then
-    echo "No custom code or README files found. Nothing to check." >&2
+  if [ "$root_files" = true ]; then
+    collect_root_files
+  fi
+
+  if [ "$has_targets" = false ]; then
+    for candidate in web/modules/custom web/themes/custom web/profiles/custom; do
+      if [ -d "$candidate" ]; then
+        while IFS= read -r file_path; do
+          DEFAULT_FILES+=("$file_path")
+        done < <(find "$candidate" -path '*/node_modules/*' -prune -o -type f -print)
+      fi
+    done
+    collect_root_files
+  fi
+
+  if [ "${#DEFAULT_FILES[@]}" -eq 0 ] && [ "${#DEFAULT_PATTERNS[@]}" -eq 0 ]; then
+    echo "No target files found for CSpell. Nothing to check." >&2
     exit 0
   fi
 fi
 
 if [ "$explicit_paths" = false ]; then
   # Collect unrecognized words for review without failing the run.
-  "${CMD[@]}" "${FLAG_ARGS[@]}" --words-only "${DEFAULT_FILES[@]}" > "$UNRECOGNIZED_FILE" || true
+  "${CMD[@]}" "${FLAG_ARGS[@]}" --words-only "${DEFAULT_PATTERNS[@]}" "${DEFAULT_FILES[@]}" > "$UNRECOGNIZED_FILE" || true
 else
   "${CMD[@]}" "${FLAG_ARGS[@]}" --words-only "${POSITIONAL_ARGS[@]}" > "$UNRECOGNIZED_FILE" || true
 fi

@@ -103,7 +103,10 @@ paths if you prefer a different location.
 - CSpell parity:
   - Run `ddev exec php tooling/scripts/prepare-cspell.php -s .prepared` once and
     replace `.cspell.json` after reviewing the diff.
-- PHPStan baseline:
+  - Default scan targets live in `tooling/cspell-targets.txt`. Edit this file to
+    control what `ddev cspell` checks by default (directories are recursive; use
+    `./*` for root files only).
+  - PHPStan baseline:
   - Generate a baseline with `ddev phpstan --generate-baseline`.
   - This writes `phpstan-baseline.neon` at the project root; the wrapper will
     include it automatically when present.

@@ -152,6 +152,7 @@ assert_addon_installed() {
   assert_file_exist ".ddev/commands/web/phpstan"
   assert_file_exist "dcq-tooling/bin/phpstan"
   assert_file_exist "tooling/ci-config/phpstan.neon"
+  assert_file_exist "tooling/cspell-targets.txt"
   assert_file_exist ".eslintrc.json"
   assert_file_exist ".phpcs.xml"
 }
@@ -294,14 +295,9 @@ PHP
   cat > "${module_dir}/README.md" <<'MD'
 This modlue has a deliberate speling mistake for CSpell.
 MD
-
-  if [ -f README.md ]; then
-    printf '\nThis readmne line should be flagged by CSpell.\n' >> README.md
-  else
-    cat > "README.md" <<'MD'
-This readmne line should be flagged by CSpell.
+  cat > "cspell-test.md" <<'MD'
+This roottypo line should be flagged by CSpell.
 MD
-  fi
 
   mkdir -p "${theme_dir}/js" "${theme_dir}/css"
   cat > "${theme_dir}/dcq_theme.info.yml" <<'YAML'
@@ -476,7 +472,7 @@ teardown() {
   create_fixture_code
   run wait_for_container_path "/var/www/html/web/cspell-test.json"
   assert_success
-  run wait_for_container_path "/var/www/html/README.md"
+  run wait_for_container_path "/var/www/html/cspell-test.md"
   assert_success
   run wait_for_container_path "/var/www/html/web/modules/custom/dcq_test/README.md"
   assert_success
@@ -506,7 +502,7 @@ teardown() {
 
   run ./dcq-tooling/bin/cspell
   assert_failure
-  assert_output --partial "readmne"
+  assert_output --partial "roottypo"
 
   before_phpcbf="$(read_container_file /var/www/html/web/modules/custom/dcq_test/dcq_fixable.php)"
   run ./dcq-tooling/bin/phpcbf web/modules/custom/dcq_test/dcq_fixable.php

@@ -518,6 +518,9 @@ sed -E "s/diff -ruN( '--exclude=[^']+')+/diff -ruN/" "${PATCH_FILE}.raw" > "$PAT
 rm -f "${PATCH_FILE}.raw"
 
 change_count=$(grep -c '^diff -ruN ' "$PATCH_FILE" || true)
+if [ "$change_count" -eq 0 ]; then
+  change_count=$(grep -c '^--- ' "$PATCH_FILE" || true)
+fi
 skip_fix_apply=false
 fix_exit=0
 fix_summary="fixes not applied"

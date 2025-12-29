@@ -108,6 +108,61 @@ if [ "$has_config" = false ]; then
   fi
 fi
 
+normalize_prettier_path() {
+  local path="$1"
+  if [[ "$path" == /var/www/html/* ]]; then
+    path="${path#/var/www/html/}"
+  fi
+  if [ "$path" = "web" ]; then
+    echo "."
+    return
+  fi
+  if [[ "$path" == web/* ]]; then
+    path="${path#web/}"
+  fi
+  echo "$path"
+}
+
+FINAL_ARGS=()
+if [ "$explicit_paths" = true ]; then
+  args=("$@")
+  arg_count=${#args[@]}
+  index=0
+  seen_double_dash=false
+  while [ "$index" -lt "$arg_count" ]; do
+    arg="${args[$index]}"
+    if [ "$seen_double_dash" = true ]; then
+      FINAL_ARGS+=("$(normalize_prettier_path "$arg")")
+      index=$((index + 1))
+      continue
+    fi
+    case "$arg" in
+      --)
+        seen_double_dash=true
+        FINAL_ARGS+=("$arg")
+        ;;
+      -c|--config|--ignore-path)
+        FINAL_ARGS+=("$arg")
+        next_arg="${args[$((index + 1))]:-}"
+        if [ -n "$next_arg" ]; then
+          FINAL_ARGS+=("$next_arg")
+          index=$((index + 1))
+        fi
+        ;;
+      --config=*|--ignore-path=*)
+        FINAL_ARGS+=("$arg")
+        ;;
+      -*)
+        FINAL_ARGS+=("$arg")
+        ;;
+      *)
+        FINAL_ARGS+=("$(normalize_prettier_path "$arg")")
+        ;;
+    esac
+    index=$((index + 1))
+  done
+fi
+
 if [ "$explicit_paths" = false ]; then
   # Default to custom code only when no explicit paths are passed.
   DEFAULT_FILES=()
@@ -126,5 +181,5 @@ if [ "$explicit_paths" = false ]; then
   exit $?
 fi
 
-"${CMD[@]}" "$@"
+"${CMD[@]}" "${FINAL_ARGS[@]}"
 exit $?

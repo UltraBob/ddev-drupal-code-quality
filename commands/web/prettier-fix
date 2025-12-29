@@ -131,6 +131,21 @@ normalize_path() {
   echo "$path"
 }
 
+normalize_prettier_path() {
+  local path="$1"
+  if [[ "$path" == /var/www/html/* ]]; then
+    path="${path#/var/www/html/}"
+  fi
+  if [ "$path" = "web" ]; then
+    echo "."
+    return
+  fi
+  if [[ "$path" == web/* ]]; then
+    path="${path#web/}"
+  fi
+  echo "$path"
+}
+
 TARGET_PREFIXES=()
 RAW_PATHS=()
 seen_double_dash=false
@@ -161,6 +176,46 @@ while [ "$index" -lt "$arg_count" ]; do
   esac
   index=$((index + 1))
 done
+
+FINAL_ARGS=()
+if [ "$explicit_paths" = true ]; then
+  args=("${clean_args[@]}")
+  arg_count=${#args[@]}
+  index=0
+  seen_double_dash=false
+  while [ "$index" -lt "$arg_count" ]; do
+    arg="${args[$index]}"
+    if [ "$seen_double_dash" = true ]; then
+      FINAL_ARGS+=("$(normalize_prettier_path "$arg")")
+      index=$((index + 1))
+      continue
+    fi
+    case "$arg" in
+      --)
+        seen_double_dash=true
+        FINAL_ARGS+=("$arg")
+        ;;
+      -c|--config|--ignore-path)
+        FINAL_ARGS+=("$arg")
+        next_arg="${args[$((index + 1))]:-}"
+        if [ -n "$next_arg" ]; then
+          FINAL_ARGS+=("$next_arg")
+          index=$((index + 1))
+        fi
+        ;;
+      --config=*|--ignore-path=*)
+        FINAL_ARGS+=("$arg")
+        ;;
+      -*)
+        FINAL_ARGS+=("$arg")
+        ;;
+      *)
+        FINAL_ARGS+=("$(normalize_prettier_path "$arg")")
+        ;;
+    esac
+    index=$((index + 1))
+  done
+fi
 
 if [ "${#RAW_PATHS[@]}" -gt 0 ]; then
   for raw in "${RAW_PATHS[@]}"; do
@@ -250,7 +305,7 @@ tar -cf - \
 if [ "$explicit_paths" = false ]; then
   (cd "$tmp_root/web" && "${CMD_BASE[@]}" --write "${DEFAULT_FILES[@]}")
 else
-  (cd "$tmp_root/web" && "${CMD_BASE[@]}" --write "${args[@]}")
+  (cd "$tmp_root/web" && "${CMD_BASE[@]}" --write "${FINAL_ARGS[@]}")
 fi
 
 : > "${PATCH_FILE}.raw"
@@ -269,6 +324,9 @@ sed -E "s/diff -ruN( '--exclude=[^']+')+/diff -ruN/" "${PATCH_FILE}.raw" > "$PAT
 rm -f "${PATCH_FILE}.raw"
 
 change_count=$(grep -c '^diff -ruN ' "$PATCH_FILE" || true)
+if [ "$change_count" -eq 0 ]; then
+  change_count=$(grep -c '^--- ' "$PATCH_FILE" || true)
+fi
 fix_summary="fixes not applied"
 if [ "$change_count" -eq 0 ]; then
   echo "No Prettier fixes to apply. Lint not run." >&2
@@ -309,7 +367,7 @@ cd "$PROJECT_ROOT/web"
 if [ "$explicit_paths" = false ]; then
   "${CMD_BASE[@]}" --write "${DEFAULT_FILES[@]}"
 else
-  "${CMD_BASE[@]}" --write "${args[@]}"
+  "${CMD_BASE[@]}" --write "${FINAL_ARGS[@]}"
 fi
 fix_exit=$?
 

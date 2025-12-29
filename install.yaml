@@ -32,3 +32,41 @@ post_install_actions:
   - |
       #ddev-description: Install Drupal CI parity configs and host shims
       bash dcq-install.sh
+
+removal_actions:
+  - |
+      #ddev-description Remove dcq-tooling shims
+      shim_dir="dcq-tooling/bin"
+      if [ -f .dcq-shim-dir ]; then
+        shim_dir="$(cat .dcq-shim-dir)"
+      fi
+      if [ -z "$shim_dir" ] || [ "$shim_dir" = "." ]; then
+        echo "Skipping shim removal; invalid shim path."
+        exit 0
+      fi
+      if [[ "$shim_dir" = /* ]]; then
+        target="$shim_dir"
+      else
+        target="../$shim_dir"
+      fi
+      project_root="$(cd .. && pwd)"
+      case "$target" in
+        "$project_root"/*) ;;
+        *)
+          echo "Skipping shim removal; path outside project root: $target"
+          exit 0
+          ;;
+      esac
+      if [ -d "$target" ]; then
+        for file in "$target"/*; do
+          [ -e "$file" ] || continue
+          if head -n 1 "$file" | grep -q '^#ddev-generated'; then
+            rm -f "$file"
+            echo "Removed shim: $file"
+          else
+            echo "Skipping $file (not generated)"
+          fi
+        done
+        find "$target" -type d -empty -delete
+      fi
+      rm -f .dcq-shim-dir

@@ -504,6 +504,14 @@ case "$shim_dir_check" in
     ;;
 esac
 
+shim_record="$shim_dir_env"
+if [[ "$shim_dir" == "$app_root_check"/* ]]; then
+  shim_record="${shim_dir#${app_root_check}/}"
+fi
+if [ -n "$shim_record" ] && [ "$shim_record" != "." ]; then
+  printf '%s\n' "$shim_record" > "${cwd}/.dcq-shim-dir"
+fi
+
 non_interactive=0
 if truthy "${DDEV_NONINTERACTIVE:-}"; then
   non_interactive=1

@@ -434,9 +434,13 @@ teardown() {
   restart_or_start_ddev
   assert_addon_installed
   ensure_node_toolchain
-  run ddev exec bash -lc $'mkdir -p /var/www/html/web/core/node_modules/.bin\ncat > /var/www/html/web/core/node_modules/.bin/cspell <<\'SH\'\n#!/bin/sh\necho \"core cspell should not be used\" >&2\nexit 99\nSH\nchmod +x /var/www/html/web/core/node_modules/.bin/cspell'
+  run ddev exec bash -lc $'mkdir -p /var/www/html/web/core/node_modules/.bin\ncat > /var/www/html/web/core/node_modules/.bin/cspell <<\'SH\'\n#!/bin/sh\necho \"core cspell should not be used\" >&2\nexit 99\nSH\nchmod +x /var/www/html/web/core/node_modules/.bin/cspell\nmkdir -p /var/www/html/web/core/node_modules/stylelint/bin\ncat > /var/www/html/web/core/node_modules/stylelint/bin/stylelint.mjs <<\'JS\'\nconsole.error(\"core stylelint should not be used\");\nprocess.exit(99);\nJS\ncat > /var/www/html/web/core/node_modules/.bin/prettier <<\'SH\'\n#!/bin/sh\necho \"core prettier should not be used\" >&2\nexit 99\nSH\nchmod +x /var/www/html/web/core/node_modules/.bin/prettier'
   assert_success
   run ./dcq-tooling/bin/cspell --version
+  assert_success
+  run ./dcq-tooling/bin/stylelint --version
+  assert_success
+  run ./dcq-tooling/bin/prettier --version
   assert_success
   assert_file_exist ".vscode/settings.json"
   assert_file_exist ".vscode/extensions.json"
@@ -496,7 +500,7 @@ teardown() {
   assert_output --partial "==> cspell"
   assert_output --partial "Summary:"
 
-  run ./dcq-tooling/bin/cspell lint --no-config-search -c cspell-test.json modules/custom/dcq_test/README.md
+  run ./dcq-tooling/bin/cspell lint --no-config-search -c web/cspell-test.json modules/custom/dcq_test/README.md
   assert_failure
   assert_output --partial "modlue"
 

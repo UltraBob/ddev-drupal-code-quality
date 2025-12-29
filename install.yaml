@@ -21,7 +21,6 @@ project_files:
   - commands/web/stylelint
   - commands/web/stylelint-fix
   - dcq-assets
-  - dcq-ide-settings
   - dcq-install.sh
 
 # DDEV version constraint for the add-on.

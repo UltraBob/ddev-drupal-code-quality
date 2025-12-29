@@ -72,7 +72,7 @@ or tools that require a local binary path:
 
 ## IDE settings (VS Code/Codium)
 
-Starter settings live in `dcq-ide-settings/vscode`. During install, you can
+Starter settings live in `dcq-assets/ide-settings/vscode`. During install, you can
 choose to merge them into `.vscode/settings.json` and
 `.vscode/extensions.json`, back up and overwrite, or skip and handle them
 manually.
@@ -103,9 +103,8 @@ paths if you prefer a different location.
 - CSpell parity:
   - Run `ddev exec php tooling/scripts/prepare-cspell.php -s .prepared` once and
     replace `.cspell.json` after reviewing the diff.
-  - Default scan targets live in `tooling/cspell-targets.txt`. Edit this file to
-    control what `ddev cspell` checks by default (directories are recursive; use
-    `./*` for root files only).
+  - `ddev cspell` runs from the repo root (`.`) by default; scope is controlled
+    by `.cspell.json` `ignorePaths`. Narrow the scan by passing explicit paths.
   - PHPStan baseline:
   - Generate a baseline with `ddev phpstan --generate-baseline`.
   - This writes `phpstan-baseline.neon` at the project root; the wrapper will

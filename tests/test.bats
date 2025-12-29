@@ -152,7 +152,6 @@ assert_addon_installed() {
   assert_file_exist ".ddev/commands/web/phpstan"
   assert_file_exist "dcq-tooling/bin/phpstan"
   assert_file_exist "tooling/ci-config/phpstan.neon"
-  assert_file_exist "tooling/cspell-targets.txt"
   assert_file_exist ".eslintrc.json"
   assert_file_exist ".phpcs.xml"
 }
@@ -502,6 +501,7 @@ teardown() {
 
   run ./dcq-tooling/bin/cspell
   assert_failure
+  assert_output --partial "modlue"
   assert_output --partial "roottypo"
 
   before_phpcbf="$(read_container_file /var/www/html/web/modules/custom/dcq_test/dcq_fixable.php)"

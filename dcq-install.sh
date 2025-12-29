@@ -772,7 +772,7 @@ if [ -f "$core_package_json" ]; then
   fi
 fi
 
-ide_settings_root="${cwd}/dcq-ide-settings/vscode"
+ide_settings_root="${cwd}/dcq-assets/ide-settings/vscode"
 ide_settings_template="${ide_settings_root}/settings.json"
 ide_extensions_template="${ide_settings_root}/extensions.json"
 ide_settings_doc="${ide_settings_root}/README.md"

@@ -108,20 +108,6 @@ normalize_path() {
   echo "$path"
 }
 
-trim_line() {
-  local line="$1"
-  line="${line%%#*}"
-  line="${line#"${line%%[![:space:]]*}"}"
-  line="${line%"${line##*[![:space:]]}"}"
-  printf '%s' "$line"
-}
-
-collect_root_files() {
-  while IFS= read -r file_path; do
-    DEFAULT_FILES+=("$file_path")
-  done < <(find "$PROJECT_ROOT" -maxdepth 1 -type f -print)
-}
-
 FLAG_ARGS=()
 POSITIONAL_ARGS=()
 args=("$@")
@@ -158,59 +144,7 @@ while [ "$index" -lt "$arg_count" ]; do
 done
 
 if [ "$explicit_paths" = false ]; then
-  TARGETS_FILE="${PROJECT_ROOT}/tooling/cspell-targets.txt"
-  DEFAULT_FILES=()
-  DEFAULT_PATTERNS=()
-  root_files=false
-  has_targets=false
-
-  if [ -f "$TARGETS_FILE" ]; then
-    while IFS= read -r line || [ -n "$line" ]; do
-      line="$(trim_line "$line")"
-      [ -n "$line" ] || continue
-      if [ "$line" = "./*" ] || [ "$line" = "ROOT_FILES" ]; then
-        root_files=true
-        has_targets=true
-        continue
-      fi
-      line="$(normalize_path "$line")"
-      if [[ "$line" == *"*"* || "$line" == *"?"* || "$line" == *"["* ]]; then
-        DEFAULT_PATTERNS+=("$line")
-        has_targets=true
-        continue
-      fi
-      if [ -d "$line" ]; then
-        while IFS= read -r file_path; do
-          DEFAULT_FILES+=("$file_path")
-        done < <(find "$line" -path '*/node_modules/*' -prune -o -type f -print)
-        has_targets=true
-      elif [ -f "$line" ]; then
-        DEFAULT_FILES+=("$line")
-        has_targets=true
-      fi
-    done < "$TARGETS_FILE"
-  fi
-
-  if [ "$root_files" = true ]; then
-    collect_root_files
-  fi
-
-  if [ "$has_targets" = false ]; then
-    for candidate in web/modules/custom web/themes/custom web/profiles/custom; do
-      if [ -d "$candidate" ]; then
-        while IFS= read -r file_path; do
-          DEFAULT_FILES+=("$file_path")
-        done < <(find "$candidate" -path '*/node_modules/*' -prune -o -type f -print)
-      fi
-    done
-    collect_root_files
-  fi
-
-  if [ "${#DEFAULT_FILES[@]}" -eq 0 ] && [ "${#DEFAULT_PATTERNS[@]}" -eq 0 ]; then
-    echo "No target files found for CSpell. Nothing to check." >&2
-    exit 0
-  fi
-  "${CMD[@]}" "${FLAG_ARGS[@]}" "${DEFAULT_PATTERNS[@]}" "${DEFAULT_FILES[@]}"
+  "${CMD[@]}" "${FLAG_ARGS[@]}" "."
   exit $?
 fi
 

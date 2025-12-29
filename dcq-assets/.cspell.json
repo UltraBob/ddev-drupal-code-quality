@@ -7,9 +7,8 @@
     "minWordLength": 4,
     "ignorePaths": [
         "web/core",
-        "web/modules/contrib",
-        "web/themes/contrib",
-        "web/profiles/contrib",
+        "web/*/contrib/**",
+        "web/libraries/!(custom)/**",
         "web/sites/*/files",
         "vendor",
         "node_modules",

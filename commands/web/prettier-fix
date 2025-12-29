@@ -88,12 +88,12 @@ ROOT_PRETTIER="${PROJECT_ROOT}/node_modules/.bin/prettier"
 PRETTIER_BIN=""
 NODE_PATH=""
 
-if [ -x "$CORE_PRETTIER" ]; then
-  PRETTIER_BIN="$CORE_PRETTIER"
-  NODE_PATH="${PROJECT_ROOT}/web/core/node_modules"
-elif [ -x "$ROOT_PRETTIER" ]; then
+if [ -x "$ROOT_PRETTIER" ]; then
   PRETTIER_BIN="$ROOT_PRETTIER"
   NODE_PATH="${PROJECT_ROOT}/node_modules"
+elif [ -x "$CORE_PRETTIER" ]; then
+  PRETTIER_BIN="$CORE_PRETTIER"
+  NODE_PATH="${PROJECT_ROOT}/web/core/node_modules"
 else
   echo "Prettier is not installed in web/core/node_modules or node_modules." >&2
   echo "Enable corepack and run 'yarn install' in web/core, or install prettier in the project root." >&2

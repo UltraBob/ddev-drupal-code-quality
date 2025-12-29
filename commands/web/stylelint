@@ -66,12 +66,12 @@ if ! command -v node >/dev/null 2>&1; then
   exit 127
 fi
 
-if [ -f "$CORE_STYLELINT" ]; then
-  TOOLCHAIN_BIN="$CORE_STYLELINT"
-  NODE_PATH="${PROJECT_ROOT}/web/core/node_modules"
-elif [ -f "$ROOT_STYLELINT" ]; then
+if [ -f "$ROOT_STYLELINT" ]; then
   TOOLCHAIN_BIN="$ROOT_STYLELINT"
   NODE_PATH="${PROJECT_ROOT}/node_modules"
+elif [ -f "$CORE_STYLELINT" ]; then
+  TOOLCHAIN_BIN="$CORE_STYLELINT"
+  NODE_PATH="${PROJECT_ROOT}/web/core/node_modules"
 else
   echo "Stylelint is not installed in web/core/node_modules or node_modules." >&2
   echo "Enable corepack and run 'yarn install' in web/core, or install stylelint in the project root." >&2

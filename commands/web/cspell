@@ -65,10 +65,10 @@ CORE_CSPELL="${PROJECT_ROOT}/web/core/node_modules/.bin/cspell"
 ROOT_CSPELL="${PROJECT_ROOT}/node_modules/.bin/cspell"
 CSPELL_BIN=""
 
-if [ -x "$CORE_CSPELL" ]; then
-  CSPELL_BIN="$CORE_CSPELL"
-elif [ -x "$ROOT_CSPELL" ]; then
+if [ -x "$ROOT_CSPELL" ]; then
   CSPELL_BIN="$ROOT_CSPELL"
+elif [ -x "$CORE_CSPELL" ]; then
+  CSPELL_BIN="$CORE_CSPELL"
 else
   echo "CSpell is not installed in web/core/node_modules or node_modules." >&2
   echo "Enable corepack and run 'yarn install' in web/core, or install cspell in the project root." >&2
@@ -85,9 +85,6 @@ if [ "$has_version" = true ]; then
   exit $?
 fi
 
-# Run from the Drupal docroot so paths align with CI defaults.
-cd web
-
 CMD=("$CSPELL_BIN")
 if [ "$has_config" = false ]; then
   # Prefer project config; warn when falling back to core.
@@ -99,31 +96,83 @@ if [ "$has_config" = false ]; then
   fi
 fi
 
+normalize_path() {
+  local path="$1"
+  if [[ "$path" == /var/www/html/* ]]; then
+    path="${path#/var/www/html/}"
+  fi
+  if [[ "$path" == modules/* || "$path" == themes/* || "$path" == profiles/* ]]; then
+    echo "web/$path"
+    return
+  fi
+  echo "$path"
+}
+
+FLAG_ARGS=()
+POSITIONAL_ARGS=()
+args=("$@")
+arg_count=${#args[@]}
+index=0
+seen_double_dash=false
+while [ "$index" -lt "$arg_count" ]; do
+  arg="${args[$index]}"
+  if [ "$seen_double_dash" = true ]; then
+    POSITIONAL_ARGS+=("$(normalize_path "$arg")")
+    index=$((index + 1))
+    continue
+  fi
+  case "$arg" in
+    --)
+      seen_double_dash=true
+      FLAG_ARGS+=("$arg")
+      ;;
+    -c|--config)
+      FLAG_ARGS+=("$arg" "${args[$((index + 1))]:-}")
+      index=$((index + 1))
+      ;;
+    --config=*)
+      FLAG_ARGS+=("$arg")
+      ;;
+    -*)
+      FLAG_ARGS+=("$arg")
+      ;;
+    *)
+      POSITIONAL_ARGS+=("$(normalize_path "$arg")")
+      ;;
+  esac
+  index=$((index + 1))
+done
+
 if [ "$explicit_paths" = false ]; then
-  # Default to custom code when no explicit paths are provided.
+  # Default to custom code (docroot) plus root README files.
   DEFAULT_PATHS=()
   DEFAULT_FILES=()
-  for candidate in modules/custom themes/custom profiles/custom; do
+  for candidate in web/modules/custom web/themes/custom web/profiles/custom; do
     if [ -d "$candidate" ]; then
       DEFAULT_PATHS+=("$candidate")
     fi
   done
-  if [ "${#DEFAULT_PATHS[@]}" -eq 0 ]; then
-    echo "No custom code directories found under modules/custom, themes/custom, or profiles/custom. Nothing to check." >&2
-    exit 0
-  fi
   for candidate in "${DEFAULT_PATHS[@]}"; do
     while IFS= read -r file_path; do
       DEFAULT_FILES+=("$file_path")
     done < <(find "$candidate" -path '*/node_modules/*' -prune -o -type f -print)
   done
+
+  shopt -s nullglob
+  for readme in README* readme*; do
+    if [ -f "$readme" ]; then
+      DEFAULT_FILES+=("$readme")
+    fi
+  done
+  shopt -u nullglob
+
   if [ "${#DEFAULT_FILES[@]}" -eq 0 ]; then
-    echo "No files found under modules/custom, themes/custom, or profiles/custom. Nothing to check." >&2
+    echo "No custom code or README files found. Nothing to check." >&2
     exit 0
   fi
-  "${CMD[@]}" "$@" "${DEFAULT_FILES[@]}"
+  "${CMD[@]}" "${FLAG_ARGS[@]}" "${DEFAULT_FILES[@]}"
   exit $?
 fi
 
-"${CMD[@]}" "$@"
+"${CMD[@]}" "${FLAG_ARGS[@]}" "${POSITIONAL_ARGS[@]}"
 exit $?

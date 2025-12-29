@@ -295,6 +295,14 @@ PHP
 This modlue has a deliberate speling mistake for CSpell.
 MD
 
+  if [ -f README.md ]; then
+    printf '\nThis readmne line should be flagged by CSpell.\n' >> README.md
+  else
+    cat > "README.md" <<'MD'
+This readmne line should be flagged by CSpell.
+MD
+  fi
+
   mkdir -p "${theme_dir}/js" "${theme_dir}/css"
   cat > "${theme_dir}/dcq_theme.info.yml" <<'YAML'
 name: DCQ Theme
@@ -426,6 +434,10 @@ teardown() {
   restart_or_start_ddev
   assert_addon_installed
   ensure_node_toolchain
+  run ddev exec bash -lc $'mkdir -p /var/www/html/web/core/node_modules/.bin\ncat > /var/www/html/web/core/node_modules/.bin/cspell <<\'SH\'\n#!/bin/sh\necho \"core cspell should not be used\" >&2\nexit 99\nSH\nchmod +x /var/www/html/web/core/node_modules/.bin/cspell'
+  assert_success
+  run ./dcq-tooling/bin/cspell --version
+  assert_success
   assert_file_exist ".vscode/settings.json"
   assert_file_exist ".vscode/extensions.json"
   assert_log_contains '"php.validate.executablePath": "./dcq-tooling/bin/php"' ".vscode/settings.json"
@@ -460,6 +472,8 @@ teardown() {
   create_fixture_code
   run wait_for_container_path "/var/www/html/web/cspell-test.json"
   assert_success
+  run wait_for_container_path "/var/www/html/README.md"
+  assert_success
   run wait_for_container_path "/var/www/html/web/modules/custom/dcq_test/README.md"
   assert_success
   run wait_for_container_path "/var/www/html/web/modules/custom/dcq_test/dcq_fixable.php"
@@ -485,6 +499,10 @@ teardown() {
   run ./dcq-tooling/bin/cspell lint --no-config-search -c cspell-test.json modules/custom/dcq_test/README.md
   assert_failure
   assert_output --partial "modlue"
+
+  run ./dcq-tooling/bin/cspell
+  assert_failure
+  assert_output --partial "readmne"
 
   before_phpcbf="$(read_container_file /var/www/html/web/modules/custom/dcq_test/dcq_fixable.php)"
   run ./dcq-tooling/bin/phpcbf web/modules/custom/dcq_test/dcq_fixable.php

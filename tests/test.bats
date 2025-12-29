@@ -382,18 +382,15 @@ teardown() {
 # bats test_tags=release
 @test "install from release" {
   set -u -o pipefail
-  if ! command -v gh >/dev/null 2>&1; then
-    skip "GitHub CLI not available; skipping release install test."
-  fi
-  if ! gh release list --repo "${GITHUB_REPO}" >/dev/null 2>&1; then
-    skip "GitHub CLI not available; skipping release install test."
-  fi
-  releases="$(gh release list --repo "${GITHUB_REPO}" --limit 1 --json tagName -q '.[].tagName' 2>/dev/null || true)"
-  if [ -z "${releases:-}" ]; then
-    skip "No releases found for ${GITHUB_REPO}; skipping release install test."
-  fi
   echo "# ddev add-on get ${GITHUB_REPO} with project ${PROJNAME} in $(pwd)" >&3
   run ddev add-on get "${GITHUB_REPO}"
+  if [ "$status" -ne 0 ]; then
+    case "$output" in
+      *"no releases found"*)
+        skip "No releases found for ${GITHUB_REPO}; skipping release install test."
+        ;;
+    esac
+  fi
   assert_success
   run ddev restart -y
   assert_success

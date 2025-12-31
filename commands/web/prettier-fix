@@ -110,7 +110,7 @@ if [ "$has_version" = true ]; then
   exit $?
 fi
 
-REPORT_DIR="tooling/reports"
+REPORT_DIR="dcq-tooling/reports"
 mkdir -p "$REPORT_DIR"
 PATCH_FILE="${REPORT_DIR}/_prettier.patch"
 
@@ -296,7 +296,7 @@ tar -cf - \
   --exclude=./.trunk \
   --exclude=./node_modules \
   --exclude=./vendor \
-  --exclude=./tooling/reports \
+  --exclude=./dcq-tooling/reports \
   --exclude=./web/core/node_modules \
   --exclude='*/.git' \
   --exclude='*/.git/*' \

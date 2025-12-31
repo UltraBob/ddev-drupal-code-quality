@@ -41,7 +41,7 @@ prompt_choice() {
   local warn_parity="$2"
 
   if [ "${PROMPT_AVAILABLE:-0}" -ne 1 ]; then
-    printf 'No interactive terminal detected; skipping conflict prompt for %s.\n' "$path" >&2
+    printf 'No interactive terminal detected; skipping conflict prompt for %s (default: skip). Set DCQ_INSTALL_MODE=replace|skip|abort to control behavior.\n' "$path" >&2
     printf 's'
     return
   fi
@@ -49,7 +49,7 @@ prompt_choice() {
   if [ "$warn_parity" = "true" ]; then
     printf 'Skipping this file may reduce CI parity for your local tooling.\n' >&"$PROMPT_OUT_FD"
   fi
-  printf 'Conflict at %s. Choose: [r]eplace (backup), [s]kip, [a]bort, [ra] replace all, [sa] skip all: ' "$path" >&"$PROMPT_OUT_FD"
+  printf 'Conflict at %s. Choose: [r]eplace (backup), [s]kip, [a]bort, [ra] replace all, [sa] skip all (default: skip): ' "$path" >&"$PROMPT_OUT_FD"
   local answer=""
   if ! IFS= read -r -u "$PROMPT_IN_FD" answer; then
     answer=""
@@ -443,7 +443,7 @@ prompt_yes_no() {
   local suffix
 
   if [ "${PROMPT_AVAILABLE:-0}" -ne 1 ]; then
-    printf 'No interactive terminal detected; skipping prompt. Use DCQ_INSTALL_DEPS=install or DCQ_INSTALL_NODE_DEPS=install to auto-approve.\n' >&2
+    printf 'No interactive terminal detected; skipping prompt. Use DCQ_INSTALL_DEPS=install to auto-approve.\n' >&2
     if [ "$default_no" -eq 1 ]; then
       return 1
     fi
@@ -570,6 +570,7 @@ render_ide_template() {
   escaped_resolve_plugins="$(escape_sed_replacement "$eslint_resolve_plugins")"
 
   sed \
+    -e '1{/^#ddev-generated$/d;}' \
     -e "s|__DCQ_SHIM_DIR__|${escaped_shim}|g" \
     -e "s|__DCQ_STYLELINT_PATH__|${escaped_stylelint}|g" \
     -e "s|__DCQ_PRETTIER_PATH__|${escaped_prettier}|g" \
@@ -598,10 +599,16 @@ import json
 import sys
 
 existing_path, template_path, dest_path = sys.argv[1:4]
-with open(existing_path, encoding="utf-8") as f:
-    existing = json.load(f)
-with open(template_path, encoding="utf-8") as f:
-    template = json.load(f)
+def load_json(path):
+    with open(path, encoding="utf-8") as f:
+        content = f.read()
+    lines = content.splitlines()
+    if lines and lines[0].strip() == "#ddev-generated":
+        content = "\n".join(lines[1:])
+    return json.loads(content)
+
+existing = load_json(existing_path)
+template = load_json(template_path)
 
 if not isinstance(existing, dict) or not isinstance(template, dict):
     raise SystemExit("settings JSON must be objects")
@@ -638,10 +645,16 @@ import json
 import sys
 
 existing_path, template_path, dest_path = sys.argv[1:4]
-with open(existing_path, encoding="utf-8") as f:
-    existing = json.load(f)
-with open(template_path, encoding="utf-8") as f:
-    template = json.load(f)
+def load_json(path):
+    with open(path, encoding="utf-8") as f:
+        content = f.read()
+    lines = content.splitlines()
+    if lines and lines[0].strip() == "#ddev-generated":
+        content = "\n".join(lines[1:])
+    return json.loads(content)
+
+existing = load_json(existing_path)
+template = load_json(template_path)
 
 if not isinstance(existing, dict) or not isinstance(template, dict):
     raise SystemExit("extensions JSON must be objects")
@@ -780,14 +793,23 @@ printf 'Installing Drupal CI parity assets...\n'
 
 while IFS= read -r -d '' source; do
   rel="${source#$assets_root/}"
-  if [[ "$rel" == tooling/bin/* ]]; then
-    target="${shim_dir%/}/${rel#tooling/bin/}"
+  if [[ "$rel" == ide-settings/* ]]; then
+    continue
+  fi
+  is_shim=0
+  if [[ "$rel" == dcq-tooling/bin/* ]]; then
+    target="${shim_dir%/}/${rel#dcq-tooling/bin/}"
+    is_shim=1
   else
     target="${app_root%/}/${rel}"
   fi
 
   tmp="$(mktemp "${TMPDIR:-/tmp}/dcq-src-XXXXXX")"
-  strip_generated_header "$source" "$tmp"
+  if [ "$is_shim" -eq 1 ]; then
+    cat "$source" >"$tmp"
+  else
+    strip_generated_header "$source" "$tmp"
+  fi
 
   if [ -e "$target" ]; then
     if cmp -s "$target" "$tmp"; then
@@ -1150,7 +1172,7 @@ if [ -f "$ide_settings_template" ] || [ -f "$ide_extensions_template" ]; then
           backup="$(backup_file "$ide_target_extensions")"
           printf 'BACKUP: %s\n' "$backup"
         fi
-        cat "$ide_extensions_template" >"$ide_target_extensions"
+        strip_generated_header "$ide_extensions_template" "$ide_target_extensions"
         printf 'WRITE: %s\n' "$ide_target_extensions"
       fi
     fi

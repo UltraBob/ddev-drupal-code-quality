@@ -21,8 +21,13 @@ Tools covered:
 ## Installation
 
 ```bash
-ddev add-on get ddev-drupal-code-quality
-# or, for local development
+# Install from GitHub (current)
+ddev add-on get UltraBob/ddev-drupal-code-quality
+
+# If/when published to the add-on registry:
+# ddev add-on get ddev-drupal-code-quality
+
+# Or, for local development
 ddev add-on get /path/to/ddev-drupal-code-quality
 
 ddev restart
@@ -106,11 +111,11 @@ paths if you prefer a different location.
   - `ESLINT_CONFIG_MODE=nearest` (default) groups by nearest config file.
   - `ESLINT_CONFIG_MODE=fixed` forces `.eslintrc.passing.json`.
 - CSpell parity:
-  - Run `ddev exec php tooling/scripts/prepare-cspell.php -s .prepared` once and
+  - Run `ddev exec php dcq-tooling/scripts/prepare-cspell.php -s .prepared` once and
     replace `.cspell.json` after reviewing the diff.
   - `ddev cspell` runs from the repo root (`.`) by default; scope is controlled
     by `.cspell.json` `ignorePaths`. Narrow the scan by passing explicit paths.
-  - PHPStan baseline:
+- PHPStan baseline:
   - Generate a baseline with `ddev phpstan --generate-baseline`.
   - This writes `phpstan-baseline.neon` at the project root; the wrapper will
     include it automatically when present.

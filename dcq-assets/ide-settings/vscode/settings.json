@@ -1,3 +1,4 @@
+#ddev-generated
 {
   "php.validate.enable": true,
   "php.validate.executablePath": "__DCQ_SHIM_DIR__/php",
@@ -10,7 +11,7 @@
   "phpsab.debug": true,
   "phpstan.binPath": "${workspaceFolder}/__DCQ_SHIM_DIR__/phpstan",
   "phpstan.rootDir": "${workspaceFolder}",
-  "phpstan.configFile": "${workspaceFolder}/tooling/ci-config/phpstan.neon",
+  "phpstan.configFile": "${workspaceFolder}/dcq-tooling/ci-config/phpstan.neon",
   "phpstan.path": "${workspaceFolder}/__DCQ_SHIM_DIR__/phpstan",
   "intelephense.environment.phpVersion": "8.3",
   "eslint.enable": true,

@@ -88,6 +88,13 @@ load_bats_helpers() {
     fi
   }
 
+  assert_file_not_exist() {
+    if [ -e "${1:-}" ]; then
+      echo "Expected file to be absent: ${1:-}"
+      return 1
+    fi
+  }
+
   assert_not_equal() {
     if [ "${1:-}" = "${2:-}" ]; then
       echo "Expected values to differ"
@@ -151,9 +158,10 @@ health_checks() {
 assert_addon_installed() {
   assert_file_exist ".ddev/commands/web/phpstan"
   assert_file_exist "dcq-tooling/bin/phpstan"
-  assert_file_exist "tooling/ci-config/phpstan.neon"
+  assert_file_exist "dcq-tooling/ci-config/phpstan.neon"
   assert_file_exist ".eslintrc.json"
   assert_file_exist ".phpcs.xml"
+  assert_file_not_exist "ide-settings"
 }
 
 restart_or_start_ddev() {
@@ -377,6 +385,21 @@ teardown() {
   assert_success
   assert_addon_installed
   health_checks
+}
+
+@test "remove cleans ddev assets and shims" {
+  set -u -o pipefail
+  run ddev add-on get "${DIR}"
+  assert_success
+  run ddev restart -y
+  assert_success
+  assert_addon_installed
+
+  run ddev add-on remove "${DIR}"
+  assert_success
+  assert_file_not_exist ".ddev/dcq-assets"
+  assert_file_not_exist ".ddev/.dcq-shim-dir"
+  assert_file_not_exist "dcq-tooling/bin/phpstan"
 }
 
 # bats test_tags=release

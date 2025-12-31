@@ -2,7 +2,7 @@
 #ddev-generated
 set -u
 
-REPORT_DIR="tooling/reports"
+REPORT_DIR="dcq-tooling/reports"
 mkdir -p "$REPORT_DIR"
 
 # Collect custom code paths once so tools can reuse them.

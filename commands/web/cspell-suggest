@@ -74,7 +74,7 @@ PROJECT_ROOT="/var/www/html"
 CORE_CSPELL="${PROJECT_ROOT}/web/core/node_modules/.bin/cspell"
 ROOT_CSPELL="${PROJECT_ROOT}/node_modules/.bin/cspell"
 CSPELL_BIN=""
-REPORT_DIR="${PROJECT_ROOT}/tooling/reports"
+REPORT_DIR="${PROJECT_ROOT}/dcq-tooling/reports"
 if ! mkdir -p "$REPORT_DIR"; then
   echo "Unable to create report directory: $REPORT_DIR" >&2
   exit 1

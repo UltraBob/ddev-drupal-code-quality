@@ -1,3 +1,4 @@
+#ddev-generated
 # VS Code / VSCodium settings
 
 This folder contains starter VS Code settings and extension recommendations.

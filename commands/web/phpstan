@@ -3,7 +3,7 @@
 set -u
 
 PHPSTAN_BIN="vendor/bin/phpstan"
-CI_CONFIG="tooling/ci-config/phpstan.neon"
+CI_CONFIG="dcq-tooling/ci-config/phpstan.neon"
 TMP_FILES=()
 source /mnt/ddev_config/commands/helpers/path-map.sh
 
@@ -66,8 +66,8 @@ while [ "$index" -lt "$arg_count" ]; do
         # Normalize common host paths into container paths so IDEs can pass host config paths.
         if [ "${config_value#${CONTAINER_ROOT}/}" != "$config_value" ]; then
           :
-        elif [[ "$config_value" == *"/tooling/"* ]]; then
-          suffix="/tooling/${config_value#*/tooling/}"
+        elif [[ "$config_value" == *"/dcq-tooling/"* ]]; then
+          suffix="/dcq-tooling/${config_value#*/dcq-tooling/}"
           config_value="${CONTAINER_ROOT}${suffix}"
           args[$next_index]="$config_value"
         elif [ "$config_value" = "phpstan.neon" ] || [ "$config_value" = "phpstan.neon.dist" ] || [ "$config_value" = "phpstan.dist.neon" ]; then
@@ -84,8 +84,8 @@ while [ "$index" -lt "$arg_count" ]; do
         # Same normalization as above, but for --configuration=<value>.
         if [ "${config_value#${CONTAINER_ROOT}/}" != "$config_value" ]; then
           :
-        elif [[ "$config_value" == *"/tooling/"* ]]; then
-          suffix="/tooling/${config_value#*/tooling/}"
+        elif [[ "$config_value" == *"/dcq-tooling/"* ]]; then
+          suffix="/dcq-tooling/${config_value#*/dcq-tooling/}"
           config_value="${CONTAINER_ROOT}${suffix}"
           args[$index]="--configuration=$config_value"
         elif [ "$config_value" = "phpstan.neon" ] || [ "$config_value" = "phpstan.neon.dist" ] || [ "$config_value" = "phpstan.dist.neon" ]; then
@@ -219,7 +219,7 @@ if [ "$BASE_CONFIG_IS_CI" = true ]; then
   TMP_FILES+=("$RESOLVED_CI_CONFIG")
   resolve_ci_template "$CI_CONFIG" "$RESOLVED_CI_CONFIG"
   trap cleanup EXIT
-elif [ -n "$BASE_CONFIG_ABS" ] && { [ "$BASE_CONFIG_ABS" = "$CI_CONFIG" ] || [ "${BASE_CONFIG_ABS##*/}" = "phpstan.neon" ] && [ "${BASE_CONFIG_ABS%/phpstan.neon}" = "/var/www/html/tooling/ci-config" ]; } ; then
+elif [ -n "$BASE_CONFIG_ABS" ] && { [ "$BASE_CONFIG_ABS" = "$CI_CONFIG" ] || [ "${BASE_CONFIG_ABS##*/}" = "phpstan.neon" ] && [ "${BASE_CONFIG_ABS%/phpstan.neon}" = "/var/www/html/dcq-tooling/ci-config" ]; } ; then
   # Treat explicit CI config selection as a template and resolve its placeholder.
   RESOLVED_CI_CONFIG="$(mktemp /tmp/phpstan-ci.XXXXXX.neon)"
   TMP_FILES+=("$RESOLVED_CI_CONFIG")

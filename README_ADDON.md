@@ -30,7 +30,12 @@ ddev restart
 
 During installation, the add-on copies CI-parity config files into the project
 root. If conflicts are detected, you can choose to back up and replace, skip,
-or abort. Skipping a config may reduce CI parity.
+or abort. Skipping a config may reduce CI parity. The installer will prompt for:
+- Conflict handling (default: skip unless you choose replace/abort).
+- PHP tooling dependencies (install `drupal/core-dev` or run `ddev composer install`).
+- Node toolchain location (project root or `web/core`).
+- Missing Drupal JS dependencies when a root `package.json` exists.
+- IDE settings (merge/overwrite/skip when templates are available).
 The installer runs in bash so it does not require host PHP.
 
 If PHPStan/PHPCS/PHPCBF binaries are missing, the installer prompts to add
@@ -121,8 +126,9 @@ paths if you prefer a different location.
 - `DCQ_INSTALL_DEPS`: `install`/`true` to auto-install missing `drupal/core-dev`,
   `skip`/`false` to skip, or unset to prompt when interactive.
 - `DCQ_INSTALL_NODE_DEPS`: `root` to install JS deps in the project root (creates
-  a root `package.json` from core if missing; name uses the DDEV project name),
-  `core` to install in `web/core`,
+  a root `package.json` from core if missing; name uses the DDEV project name,
+  and prompts to add missing Drupal deps when a root `package.json` already
+  exists), `core` to install in `web/core`,
   `install`/`true` to auto-install in the project root, `skip`/`false` to skip,
   or unset to prompt (default: root).
 - `DCQ_INSTALL_IDE_SETTINGS`: `merge` to add missing VS Code settings and

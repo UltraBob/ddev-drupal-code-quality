@@ -156,6 +156,248 @@ PHP
   return 0
 }
 
+find_missing_node_deps() {
+  local ddev_cmd="$1"
+  local output
+  local status
+  local php_script="${cwd}/.dcq-missing-node-deps.php"
+  local script_path="/var/www/html/.ddev/.dcq-missing-node-deps.php"
+  local attempts=0
+  local max_attempts=5
+
+  cat > "$php_script" <<'PHP'
+<?php
+$rootPath = "/var/www/html/package.json";
+$corePath = "/var/www/html/web/core/package.json";
+$assetsRoot = "/var/www/html/.ddev/dcq-assets";
+
+function read_json_file(string $path): ?array {
+  if (!is_readable($path)) {
+    return null;
+  }
+  $lines = file($path, FILE_IGNORE_NEW_LINES);
+  if ($lines === false) {
+    return null;
+  }
+  $filtered = [];
+  foreach ($lines as $line) {
+    if ($line !== "" && $line[0] === "#") {
+      continue;
+    }
+    $filtered[] = $line;
+  }
+  $json = implode("\n", $filtered);
+  $data = json_decode($json, true);
+  return is_array($data) ? $data : null;
+}
+
+function merge_deps(array $data): array {
+  $deps = [];
+  foreach (["dependencies", "devDependencies"] as $key) {
+    if (isset($data[$key]) && is_array($data[$key])) {
+      $deps += $data[$key];
+    }
+  }
+  return $deps;
+}
+
+function add_required(array &$required, string $name, array $coreDeps): void {
+  if (!array_key_exists($name, $required)) {
+    $required[$name] = $coreDeps[$name] ?? "";
+  }
+}
+
+function eslint_plugin_package(string $plugin): string {
+  if ($plugin === "") {
+    return "";
+  }
+  if ($plugin[0] === "@") {
+    $parts = explode("/", $plugin, 2);
+    if (count($parts) === 1) {
+      return $plugin . "/eslint-plugin";
+    }
+    return $parts[0] . "/eslint-plugin-" . $parts[1];
+  }
+  return "eslint-plugin-" . $plugin;
+}
+
+function eslint_config_package(string $config): string {
+  if ($config === "") {
+    return "";
+  }
+  if ($config[0] === "@") {
+    $parts = explode("/", $config, 2);
+    if (count($parts) === 1) {
+      return $config . "/eslint-config";
+    }
+    return $parts[0] . "/eslint-config-" . $parts[1];
+  }
+  return "eslint-config-" . $config;
+}
+
+$root = read_json_file($rootPath);
+$core = read_json_file($corePath);
+if (!is_array($root) || !is_array($core)) {
+  exit(0);
+}
+
+$rootDeps = merge_deps($root);
+$coreDeps = merge_deps($core);
+$required = $coreDeps;
+
+$basePackages = ["eslint", "prettier", "stylelint", "cspell"];
+foreach ($basePackages as $pkg) {
+  add_required($required, $pkg, $coreDeps);
+}
+
+$eslintConfigs = [
+  $assetsRoot . "/.eslintrc.json",
+  $assetsRoot . "/.eslintrc.jquery.json",
+  $assetsRoot . "/.eslintrc.passing.json",
+];
+foreach ($eslintConfigs as $path) {
+  $config = read_json_file($path);
+  if (!is_array($config)) {
+    continue;
+  }
+  if (isset($config["plugins"]) && is_array($config["plugins"])) {
+    foreach ($config["plugins"] as $plugin) {
+      if (!is_string($plugin)) {
+        continue;
+      }
+      $pkg = eslint_plugin_package($plugin);
+      if ($pkg !== "") {
+        add_required($required, $pkg, $coreDeps);
+      }
+    }
+  }
+  if (isset($config["extends"]) && is_array($config["extends"])) {
+    foreach ($config["extends"] as $extend) {
+      if (!is_string($extend) || $extend === "") {
+        continue;
+      }
+      if ($extend[0] === "." || $extend[0] === "/") {
+        continue;
+      }
+      if (strpos($extend, "eslint:") === 0) {
+        continue;
+      }
+      if (preg_match("/^plugin:([^\\/]+)\\//", $extend, $matches)) {
+        $pluginName = $matches[1];
+        $pkg = eslint_plugin_package($pluginName);
+        if ($pkg !== "") {
+          add_required($required, $pkg, $coreDeps);
+        }
+        continue;
+      }
+      $pkg = eslint_config_package($extend);
+      if ($pkg !== "") {
+        add_required($required, $pkg, $coreDeps);
+      }
+    }
+  }
+}
+
+$stylelintConfig = read_json_file($assetsRoot . "/.stylelintrc.json");
+if (is_array($stylelintConfig)) {
+  if (isset($stylelintConfig["plugins"]) && is_array($stylelintConfig["plugins"])) {
+    foreach ($stylelintConfig["plugins"] as $plugin) {
+      if (is_string($plugin) && $plugin !== "") {
+        add_required($required, $plugin, $coreDeps);
+      }
+    }
+  }
+  if (isset($stylelintConfig["extends"]) && is_array($stylelintConfig["extends"])) {
+    foreach ($stylelintConfig["extends"] as $extend) {
+      if (!is_string($extend) || $extend === "") {
+        continue;
+      }
+      if ($extend[0] === "." || $extend[0] === "/") {
+        continue;
+      }
+      $pkg = $extend;
+      if (strpos($extend, "/") !== false) {
+        $pkg = explode("/", $extend, 2)[0];
+      }
+      add_required($required, $pkg, $coreDeps);
+    }
+  }
+}
+
+$missing = [];
+foreach ($required as $name => $version) {
+  if (!array_key_exists($name, $rootDeps)) {
+    $missing[$name] = $version;
+  }
+}
+if (!$missing) {
+  exit(0);
+}
+foreach ($missing as $name => $version) {
+  $suffix = $version ? "@".$version : "";
+  echo $name . $suffix . PHP_EOL;
+}
+PHP
+
+  while [ "$attempts" -lt "$max_attempts" ]; do
+    if "$ddev_cmd" exec test -f "$script_path" >/dev/null 2>&1; then
+      break
+    fi
+    attempts=$((attempts + 1))
+    sleep 0.2
+  done
+
+  output="$("$ddev_cmd" exec php "$script_path" 2>&1)"
+  status=$?
+  rm -f "$php_script"
+
+  if [ "$status" -ne 0 ]; then
+    return 1
+  fi
+
+  printf '%s' "$output"
+}
+
+maybe_install_missing_root_deps() {
+  local ddev_cmd="$1"
+  local non_interactive="$2"
+  local missing_node_deps
+
+  if ! missing_node_deps="$(find_missing_node_deps "$ddev_cmd")"; then
+    return 1
+  fi
+
+  if [ -z "$missing_node_deps" ]; then
+    return 1
+  fi
+
+  mapfile -t missing_node_deps_array <<< "$missing_node_deps"
+  printf 'Detected missing Drupal JS tooling dependencies in package.json (%d):\n' "${#missing_node_deps_array[@]}"
+  for dep in "${missing_node_deps_array[@]}"; do
+    [ -n "$dep" ] || continue
+    printf '  %s\n' "$dep"
+  done
+
+  if [ "$non_interactive" -eq 1 ]; then
+    printf 'Skipping dependency add (non-interactive). Install the missing packages to avoid lint errors.\n'
+    return 1
+  fi
+
+  if prompt_yes_no "Add missing dependencies with 'yarn add -D' in the project root?" 1; then
+    deps_cmd=""
+    for dep in "${missing_node_deps_array[@]}"; do
+      deps_cmd+=" $(printf '%q' "$dep")"
+    done
+    cmd=( "$ddev_cmd" "exec" "bash" "-lc" "cd /var/www/html && yarn add -D${deps_cmd}" )
+    run_command "${cmd[@]}"
+    printf 'Node dependencies added (project root).\n'
+    return 0
+  fi
+
+  printf 'Skipping missing dependency install. ESLint plugins may be unavailable.\n'
+  return 1
+}
+
 prompt_node_target() {
   local has_root="$1"
   local choice
@@ -166,7 +408,7 @@ prompt_node_target() {
   fi
 
   if [ "$has_root" -eq 1 ]; then
-    printf 'Choose JS toolchain target: [r]oot (project package.json), [c]ore (web/core), [s]kip (default: root): ' >&"$PROMPT_OUT_FD"
+    printf 'Choose JS toolchain target: [r]oot (project package.json), [c]ore (web/core), [s]kip (no install, default: root): ' >&"$PROMPT_OUT_FD"
     if ! IFS= read -r -u "$PROMPT_IN_FD" choice; then
       choice=""
     fi
@@ -176,7 +418,7 @@ prompt_node_target() {
       return
     fi
   else
-    printf 'No project package.json found. Choose JS toolchain target: [r]oot (create from core), [c]ore (web/core), [s]kip (default: root): ' >&"$PROMPT_OUT_FD"
+    printf 'No project package.json found. Choose JS toolchain target: [r]oot (create from core), [c]ore (web/core), [s]kip (no install, default: root): ' >&"$PROMPT_OUT_FD"
     if ! IFS= read -r -u "$PROMPT_IN_FD" choice; then
       choice=""
     fi
@@ -700,16 +942,33 @@ fi
 core_package_json="${app_root%/}/web/core/package.json"
 if [ -f "$core_package_json" ]; then
   node_mode_raw="$(string_lower "${DCQ_INSTALL_NODE_DEPS:-}")"
-  if [ -z "$node_mode_raw" ] && node_toolchain_present "$app_root"; then
+  node_toolchain_existing=0
+  if node_toolchain_present "$app_root"; then
+    node_toolchain_existing=1
+  fi
+  skip_due_to_existing_toolchain=0
+  if [ -z "$node_mode_raw" ] && [ "$node_toolchain_existing" -eq 1 ]; then
     node_mode_raw="skip"
+    skip_due_to_existing_toolchain=1
   fi
 
-  if [ "$node_mode_raw" != "skip" ]; then
+  if [ "$node_mode_raw" != "skip" ] || [ "$skip_due_to_existing_toolchain" -eq 1 ]; then
     ddev_cmd="${DDEV_EXECUTABLE:-ddev}"
     root_package_json="${app_root%/}/package.json"
     has_root_package_json=0
     if [ -f "$root_package_json" ]; then
       has_root_package_json=1
+    fi
+    if [ "$skip_due_to_existing_toolchain" -eq 1 ] && [ "$has_root_package_json" -eq 1 ]; then
+      if ! command_available "$ddev_cmd"; then
+        printf 'ddev executable not found in PATH; skipping Node dependency check.\n'
+      else
+        maybe_install_missing_root_deps "$ddev_cmd" "$non_interactive" || true
+      fi
+    fi
+    if [ "$node_mode_raw" = "skip" ]; then
+      printf 'Skipping Node toolchain install. Use DCQ_INSTALL_NODE_DEPS=root or DCQ_INSTALL_NODE_DEPS=core to enable later.\n'
+      node_mode="skip"
     fi
     if [ -z "$node_mode_raw" ]; then
       if [ "$non_interactive" -eq 1 ]; then
@@ -757,16 +1016,23 @@ if [ -f "$core_package_json" ]; then
         node_target_choice="$target"
       fi
 
+      node_install_done=0
       if [ "$target" = "core" ]; then
         cmd=( "$ddev_cmd" "exec" "bash" "-lc" "cd web/core && yarn install" )
         run_command "${cmd[@]}"
         printf 'Node toolchain installed (core).\n'
+        node_install_done=1
       elif [ "$target" = "root" ]; then
-        cmd=( "$ddev_cmd" "exec" "bash" "-lc" "cd /var/www/html && yarn install" )
-        run_command "${cmd[@]}"
+        if [ "$has_root_package_json" -eq 1 ]; then
+          if maybe_install_missing_root_deps "$ddev_cmd" "$non_interactive"; then
+            node_install_done=1
+          fi
+        fi
+        if [ "$node_install_done" -eq 0 ]; then
+          cmd=( "$ddev_cmd" "exec" "bash" "-lc" "cd /var/www/html && yarn install" )
+          run_command "${cmd[@]}"
+        fi
         printf 'Node toolchain installed (project root).\n'
-      else
-        printf 'Skipping Node toolchain install. Use DCQ_INSTALL_NODE_DEPS=root or DCQ_INSTALL_NODE_DEPS=core to enable later.\n'
       fi
     fi
   fi

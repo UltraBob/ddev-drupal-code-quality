@@ -98,6 +98,8 @@ paths if you prefer a different location.
 - Node toolchain for JS linting (recommended: enable corepack in DDEV and run
   `yarn install` in the project root; the installer can create a root
   `package.json` based on Drupal core when missing).
+  - Note: current installer uses Yarn; future updates may select npm/yarn based
+    on existing lockfiles.
 
 ## Configuration notes
 
@@ -124,6 +126,9 @@ paths if you prefer a different location.
   - Use a baseline to suppress known issues in legacy code or core defaults
     (for example, the shipped `settings.php` files), then work it down over
     time. Avoid using it to hide new regressions.
+- PHPStan config fallback:
+  - If no project `phpstan.neon*` exists, the wrapper uses the GitLab template
+    config shipped with the add-on.
 
 ## Installer environment variables
 

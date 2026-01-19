@@ -1121,6 +1121,7 @@ fi
 
 emit '\n==> Phase 2: Copy CI parity configs and shims\n'
 emit 'This will copy config files into the project root and install shims under %s.\n' "$shim_dir_env"
+phpstan_updated=0
 
 # Copy add-on assets/shims into project, respecting conflict handling mode.
 while IFS= read -r -d '' source; do
@@ -1220,11 +1221,16 @@ while IFS= read -r -d '' source; do
     chmod 0755 "$target" || true
   fi
   emit_copy 'WRITE: %s\n' "$target"
+  if [ "$target" = "${app_root%/}/phpstan.neon" ]; then
+    phpstan_updated=1
+  fi
 done < <(find "$addon_root" -type f -print0)
 
 emit 'Done.\n'
 
-prompt_phpstan_level "$app_root"
+if [ "$phpstan_updated" -eq 1 ]; then
+  prompt_phpstan_level "$app_root"
+fi
 
 emit '\n==> Phase 3: JS toolchain dependencies\n'
 core_package_json="${app_root%/}/web/core/package.json"
@@ -1275,7 +1281,8 @@ if [ -f "$core_package_json" ]; then
     elif [ "$node_mode_raw" = "root" ] || [ "$node_mode_raw" = "project" ]; then
       node_mode="root"
     elif [ "$node_mode_raw" = "core" ]; then
-      node_mode="core"
+      emit 'Core toolchain installs are no longer supported by the installer. Set DCQ_INSTALL_NODE_DEPS=root to install in the project root.\n'
+      node_mode="skip"
     else
       node_mode="prompt"
     fi
@@ -1301,7 +1308,7 @@ if [ -f "$core_package_json" ]; then
       target="skip"
       if [ "$node_mode" = "install" ]; then
         target="root"
-      elif [ "$node_mode" = "root" ] || [ "$node_mode" = "core" ]; then
+      elif [ "$node_mode" = "root" ]; then
         target="$node_mode"
       elif [ "$node_mode" = "prompt" ]; then
         root_pm="$(detect_package_manager "$app_root")"
@@ -1330,23 +1337,12 @@ if [ -f "$core_package_json" ]; then
         fi
       fi
 
-      if [ "$target" = "root" ] || [ "$target" = "core" ]; then
+      if [ "$target" = "root" ]; then
         node_target_choice="$target"
       fi
 
       node_install_done=0
-      if [ "$target" = "core" ]; then
-        core_pm="$(detect_package_manager "${app_root%/}/web/core")"
-        emit 'Installing JS deps in web/core using %s.\n' "$core_pm"
-        if [ "$core_pm" = "npm" ]; then
-          cmd=( "$ddev_cmd" "exec" "bash" "-lc" "cd web/core && npm install" )
-        else
-          cmd=( "$ddev_cmd" "exec" "bash" "-lc" "cd web/core && yarn install" )
-        fi
-        run_command "${cmd[@]}"
-        emit 'Node toolchain installed (core).\n'
-        node_install_done=1
-      elif [ "$target" = "root" ]; then
+      if [ "$target" = "root" ]; then
         if [ "$has_root_package_json" -eq 1 ]; then
           root_pm="$(detect_package_manager "$app_root")"
           if [ "$root_pm" = "yarn" ]; then
@@ -1424,7 +1420,6 @@ if [ -f "$ide_settings_template" ] || [ -f "$ide_extensions_template" ]; then
         ide_node_mode="$node_target_choice"
       else
         case "$ide_node_mode_raw" in
-          core) ide_node_mode="core" ;;
           root|project) ide_node_mode="root" ;;
           1|true|yes|on|install|auto) ide_node_mode="root" ;;
         esac

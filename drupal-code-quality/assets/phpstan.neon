@@ -12,3 +12,7 @@ parameters:
     ignoreErrors:
         # new static() is a best practice in Drupal, so we cannot fix that.
         - "#^Unsafe usage of new static#"
+
+# Baseline guidance:
+# - Generate a baseline with: ddev phpstan --generate-baseline
+# - The baseline will be added to this config automatically.

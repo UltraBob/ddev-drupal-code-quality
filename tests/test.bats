@@ -585,17 +585,6 @@ teardown() {
   assert_log_contains '"eslint.nodePath": "node_modules"' ".vscode/settings.json"
   assert_log_contains '"resolvePluginsRelativeTo": "."' ".vscode/settings.json"
 
-  run bash -lc "cd \"${PWD}/.ddev\" && DCQ_INSTALL_IDE_SETTINGS=overwrite DCQ_INSTALL_NODE_DEPS=core DCQ_INSTALL_DEPS=skip DDEV_EXECUTABLE=true bash ./dcq-install.sh"
-  assert_success
-  assert_log_contains '"php.validate.executablePath": ".ddev/drupal-code-quality/tooling/bin/php"' ".vscode/settings.json"
-  assert_log_contains '"phpsab.executablePathCS": ".ddev/drupal-code-quality/tooling/bin/phpcs"' ".vscode/settings.json"
-  assert_log_contains '"phpsab.executablePathCBF": ".ddev/drupal-code-quality/tooling/bin/phpcbf"' ".vscode/settings.json"
-  assert_log_contains ".ddev/drupal-code-quality/tooling/bin/phpstan" ".vscode/settings.json"
-  assert_log_contains '"stylelint.stylelintPath": "./web/core/node_modules/stylelint"' ".vscode/settings.json"
-  assert_log_contains '"prettier.prettierPath": "./web/core/node_modules/prettier"' ".vscode/settings.json"
-  assert_log_contains '"eslint.nodePath": "web/core/node_modules"' ".vscode/settings.json"
-  assert_log_contains '"resolvePluginsRelativeTo": "./web/core"' ".vscode/settings.json"
-
   run ./.ddev/drupal-code-quality/tooling/bin/phpstan --version
   assert_success
   run ./.ddev/drupal-code-quality/tooling/bin/phpcs --version

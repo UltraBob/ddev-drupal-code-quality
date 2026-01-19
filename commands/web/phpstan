@@ -30,12 +30,48 @@ cleanup() {
   done
 }
 
+ensure_baseline_include() {
+  local config_path="$1"
+  local tmp
+
+  if [ -z "$config_path" ] || [ ! -f "$config_path" ]; then
+    return 1
+  fi
+
+  if grep -q 'phpstan-baseline\.neon' "$config_path"; then
+    return 0
+  fi
+
+  if grep -q '^[[:space:]]*includes:' "$config_path"; then
+    tmp="$(mktemp /tmp/phpstan-include.XXXXXX.neon)"
+    awk '
+      BEGIN { added = 0 }
+      /^[[:space:]]*includes:/ {
+        if (added == 0) {
+          match($0, /[^[:space:]]/)
+          prefix = substr($0, 1, RSTART - 1)
+          print $0
+          print prefix "  - phpstan-baseline.neon"
+          added = 1
+          next
+        }
+      }
+      { print }
+    ' "$config_path" > "$tmp"
+    mv "$tmp" "$config_path"
+  else
+    printf '\nincludes:\n  - phpstan-baseline.neon\n' >> "$config_path"
+  fi
+  return 0
+}
+
 has_help=false
 has_version=false
 has_config=false
 has_level=false
 has_json_format=false
 explicit_paths=false
+has_generate_baseline=false
 config_value=""
 
 args=("$@")
@@ -78,8 +114,10 @@ while [ "$index" -lt "$arg_count" ]; do
       ;;
     --generate-baseline)
       args[$index]="--generate-baseline=phpstan-baseline.neon"
+      has_generate_baseline=true
       ;;
     --generate-baseline=*)
+      has_generate_baseline=true
       ;;
     --error-format)
       next_index=$((index + 1))
@@ -312,4 +350,16 @@ echo json_encode($json);
 fi
 
 "${CMD[@]}" "${FINAL_ARGS[@]}"
-exit $?
+exit_code=$?
+
+if [ "$has_generate_baseline" = true ] && [ "$exit_code" -eq 0 ]; then
+  if [ -n "$CONFIG_FILE" ]; then
+    config_path="$CONFIG_FILE"
+    if [ "${config_path#/}" = "$config_path" ]; then
+      config_path="$(pwd)/$config_path"
+    fi
+    ensure_baseline_include "$config_path" || true
+  fi
+fi
+
+exit $exit_code

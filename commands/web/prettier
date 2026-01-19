@@ -2,6 +2,8 @@
 #ddev-generated
 set -u
 
+source /mnt/ddev_config/commands/helpers/path-map.sh
+
 print_help() {
   cat <<'USAGE'
 Usage: ddev prettier [args]
@@ -110,6 +112,7 @@ fi
 
 normalize_prettier_path() {
   local path="$1"
+  path="$(map_path "$path")"
   if [[ "$path" == /var/www/html/* ]]; then
     path="${path#/var/www/html/}"
   fi
@@ -145,12 +148,16 @@ if [ "$explicit_paths" = true ]; then
         FINAL_ARGS+=("$arg")
         next_arg="${args[$((index + 1))]:-}"
         if [ -n "$next_arg" ]; then
+          next_arg="$(map_path "$next_arg")"
           FINAL_ARGS+=("$next_arg")
           index=$((index + 1))
         fi
         ;;
       --config=*|--ignore-path=*)
-        FINAL_ARGS+=("$arg")
+        key="${arg%%=*}"
+        value="${arg#*=}"
+        value="$(map_path "$value")"
+        FINAL_ARGS+=("${key}=${value}")
         ;;
       -*)
         FINAL_ARGS+=("$arg")

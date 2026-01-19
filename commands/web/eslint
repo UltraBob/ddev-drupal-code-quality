@@ -2,6 +2,8 @@
 #ddev-generated
 set -u
 
+source /mnt/ddev_config/commands/helpers/path-map.sh
+
 print_help() {
   cat <<'USAGE'
 Usage: ddev eslint [args]
@@ -170,6 +172,7 @@ resolve_plugins_dir() {
 normalize_path() {
   local path="$1"
   # Convert container/short paths into repo-relative paths for consistent matching.
+  path="$(map_path "$path")"
   if [[ "$path" == /var/www/html/* ]]; then
     path="${path#/var/www/html/}"
   fi
@@ -187,6 +190,7 @@ normalize_path() {
 normalize_config_path() {
   local path="$1"
   # ESLint --config paths need to be relative to the repo root in the container.
+  path="$(map_path "$path")"
   if [[ "$path" == /var/www/html/* ]]; then
     path="${path#/var/www/html/}"
   fi

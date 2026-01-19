@@ -2,6 +2,8 @@
 #ddev-generated
 set -u
 
+source /mnt/ddev_config/commands/helpers/path-map.sh
+
 print_help() {
   cat <<'USAGE'
 Usage: ddev cspell [args]
@@ -98,6 +100,7 @@ fi
 
 normalize_path() {
   local path="$1"
+  path="$(map_path "$path")"
   if [[ "$path" == /var/www/html/* ]]; then
     path="${path#/var/www/html/}"
   fi
@@ -127,11 +130,13 @@ while [ "$index" -lt "$arg_count" ]; do
       FLAG_ARGS+=("$arg")
       ;;
     -c|--config)
-      FLAG_ARGS+=("$arg" "${args[$((index + 1))]:-}")
+      next_arg="${args[$((index + 1))]:-}"
+      FLAG_ARGS+=("$arg" "$(map_path "$next_arg")")
       index=$((index + 1))
       ;;
     --config=*)
-      FLAG_ARGS+=("$arg")
+      config_value="${arg#*=}"
+      FLAG_ARGS+=("--config=$(map_path "$config_value")")
       ;;
     -*)
       FLAG_ARGS+=("$arg")

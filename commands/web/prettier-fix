@@ -2,6 +2,8 @@
 #ddev-generated
 set -u
 
+source /mnt/ddev_config/commands/helpers/path-map.sh
+
 print_help() {
   cat <<'USAGE'
 Usage: ddev prettier-fix [args]
@@ -110,13 +112,14 @@ if [ "$has_version" = true ]; then
   exit $?
 fi
 
-REPORT_DIR="dcq-tooling/reports"
+REPORT_DIR="dcq-reports"
 mkdir -p "$REPORT_DIR"
 PATCH_FILE="${REPORT_DIR}/_prettier.patch"
 
 normalize_path() {
   local path="$1"
   # Normalize paths into repo-relative paths for matching target prefixes.
+  path="$(map_path "$path")"
   if [[ "$path" == /var/www/html/* ]]; then
     path="${path#/var/www/html/}"
   fi
@@ -133,6 +136,7 @@ normalize_path() {
 
 normalize_prettier_path() {
   local path="$1"
+  path="$(map_path "$path")"
   if [[ "$path" == /var/www/html/* ]]; then
     path="${path#/var/www/html/}"
   fi
@@ -199,12 +203,15 @@ if [ "$explicit_paths" = true ]; then
         FINAL_ARGS+=("$arg")
         next_arg="${args[$((index + 1))]:-}"
         if [ -n "$next_arg" ]; then
-          FINAL_ARGS+=("$next_arg")
+          FINAL_ARGS+=("$(map_path "$next_arg")")
           index=$((index + 1))
         fi
         ;;
       --config=*|--ignore-path=*)
-        FINAL_ARGS+=("$arg")
+        key="${arg%%=*}"
+        value="${arg#*=}"
+        value="$(map_path "$value")"
+        FINAL_ARGS+=("${key}=${value}")
         ;;
       -*)
         FINAL_ARGS+=("$arg")
@@ -296,7 +303,7 @@ tar -cf - \
   --exclude=./.trunk \
   --exclude=./node_modules \
   --exclude=./vendor \
-  --exclude=./dcq-tooling/reports \
+  --exclude=./dcq-reports \
   --exclude=./web/core/node_modules \
   --exclude='*/.git' \
   --exclude='*/.git/*' \

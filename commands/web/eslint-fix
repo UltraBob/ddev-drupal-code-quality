@@ -2,6 +2,8 @@
 #ddev-generated
 set -u
 
+source /mnt/ddev_config/commands/helpers/path-map.sh
+
 print_help() {
   cat <<'USAGE'
 Usage: ddev eslint-fix [args]
@@ -128,13 +130,14 @@ if [ "$has_version" = true ]; then
   exit $?
 fi
 
-REPORT_DIR="dcq-tooling/reports"
+REPORT_DIR="dcq-reports"
 mkdir -p "$REPORT_DIR"
 PATCH_FILE="${REPORT_DIR}/_eslint.patch"
 
 normalize_path() {
   local path="$1"
   # Normalize paths into repo-relative paths for matching target prefixes.
+  path="$(map_path "$path")"
   if [[ "$path" == /var/www/html/* ]]; then
     path="${path#/var/www/html/}"
   fi
@@ -279,6 +282,7 @@ resolve_plugins_dir() {
 FINAL_ARGS=()
 normalize_config_path() {
   local path="$1"
+  path="$(map_path "$path")"
   if [[ "$path" == /var/www/html/* ]]; then
     path="${path#/var/www/html/}"
   fi
@@ -369,7 +373,7 @@ tar -cf - \
   --exclude=./.trunk \
   --exclude=./node_modules \
   --exclude=./vendor \
-  --exclude=./dcq-tooling/reports \
+  --exclude=./dcq-reports \
   --exclude=./web/core/node_modules \
   --exclude='*/.git' \
   --exclude='*/.git/*' \

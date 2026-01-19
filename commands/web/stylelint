@@ -2,6 +2,8 @@
 #ddev-generated
 set -u
 
+source /mnt/ddev_config/commands/helpers/path-map.sh
+
 print_help() {
   cat <<'USAGE'
 Usage: ddev stylelint [args]
@@ -176,6 +178,10 @@ if [ "$explicit_paths" = true ]; then
   while [ "$index" -lt "$arg_count" ]; do
     arg="${args[$index]}"
     if [ "$seen_double_dash" = true ]; then
+      arg="$(map_path "$arg")"
+      if [[ "$arg" == /var/www/html/* ]]; then
+        arg="${arg#/var/www/html/}"
+      fi
       if [[ "$arg" == web/* ]]; then
         arg="${arg#web/}"
       elif [ "$arg" = "web" ]; then
@@ -192,6 +198,10 @@ if [ "$explicit_paths" = true ]; then
         ;;
       -c|--config)
         next_arg="${args[$((index + 1))]:-}"
+        next_arg="$(map_path "$next_arg")"
+        if [[ "$next_arg" == /var/www/html/* ]]; then
+          next_arg="${next_arg#/var/www/html/}"
+        fi
         if [[ "$next_arg" == web/* ]]; then
           next_arg="${next_arg#web/}"
         elif [ "$next_arg" = "web" ]; then
@@ -202,6 +212,10 @@ if [ "$explicit_paths" = true ]; then
         ;;
       --config=*)
         config_value="${arg#*=}"
+        config_value="$(map_path "$config_value")"
+        if [[ "$config_value" == /var/www/html/* ]]; then
+          config_value="${config_value#/var/www/html/}"
+        fi
         if [[ "$config_value" == web/* ]]; then
           config_value="${config_value#web/}"
         elif [ "$config_value" = "web" ]; then
@@ -213,6 +227,10 @@ if [ "$explicit_paths" = true ]; then
         FINAL_ARGS+=("$arg")
         ;;
       *)
+        arg="$(map_path "$arg")"
+        if [[ "$arg" == /var/www/html/* ]]; then
+          arg="${arg#/var/www/html/}"
+        fi
         if [[ "$arg" == web/* ]]; then
           arg="${arg#web/}"
         elif [ "$arg" = "web" ]; then

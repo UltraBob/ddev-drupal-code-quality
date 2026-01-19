@@ -39,7 +39,7 @@ or abort. Skipping a config may reduce CI parity. The installer will prompt for:
 - Conflict handling (default: skip unless you choose replace/abort).
 - PHP tooling dependencies (install `drupal/core-dev` or run `ddev composer install`).
 - PHPStan default level (keep CI level 0 or choose a local level 0-9; recommend 3).
-- Node toolchain location (project root or `web/core`) and package manager selection.
+- Node toolchain install in the project root and package manager selection.
 - Missing Drupal JS dependencies when a root `package.json` exists.
 - Optional `.gitignore` update for `dcq-reports/`.
 - IDE settings (merge/overwrite/skip when templates are available).
@@ -89,9 +89,7 @@ choose to merge them into `.vscode/settings.json` and
 manually.
 
 The template points PHP tooling at `.ddev/drupal-code-quality/tooling/bin` and JS tooling at local
-`node_modules`. The installer uses the Node toolchain choice (prompt or
-`DCQ_INSTALL_NODE_DEPS`) to set JS paths to root or `web/core`. Override the
-paths if you prefer a different location.
+`node_modules`. Override the paths if you prefer a different location.
 
 ## Requirements
 
@@ -100,8 +98,6 @@ paths if you prefer a different location.
 - Node toolchain for JS linting (npm or yarn; the installer selects based on
   lockfiles and can create a root `package.json` from Drupal core when missing).
   - If you use yarn, enable corepack in DDEV.
-  - Note: current installer uses Yarn; future updates may select npm/yarn based
-    on existing lockfiles.
 
 ## Configuration notes
 
@@ -144,10 +140,9 @@ paths if you prefer a different location.
 - `DCQ_INSTALL_NODE_DEPS`: `root` to install JS deps in the project root (creates
   a root `package.json` from core if missing; name uses the DDEV project name,
   and prompts to add missing Drupal deps when a root `package.json` already
-  exists), `core` to install in `web/core`,
-  `install`/`true` to auto-install in the project root, `skip`/`false` to skip,
-  or unset to prompt (default: root). The installer selects npm/yarn based on
-  existing lockfiles.
+  exists), `install`/`true` to auto-install in the project root, `skip`/`false`
+  to skip, or unset to prompt (default: install in the project root). The
+  installer selects npm/yarn based on existing lockfiles.
 - `DCQ_INSTALL_IDE_SETTINGS`: `merge` to add missing VS Code settings and
   extension recommendations, `overwrite` to back up and replace, `skip` to
   handle manually, or unset to prompt.

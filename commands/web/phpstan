@@ -76,6 +76,11 @@ while [ "$index" -lt "$arg_count" ]; do
         args[$index]="--configuration=$config_value"
       fi
       ;;
+    --generate-baseline)
+      args[$index]="--generate-baseline=phpstan-baseline.neon"
+      ;;
+    --generate-baseline=*)
+      ;;
     --error-format)
       next_index=$((index + 1))
       if [ "${args[$next_index]:-}" = "json" ]; then

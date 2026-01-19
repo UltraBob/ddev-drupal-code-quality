@@ -52,6 +52,24 @@ prompt_setup() {
   fi
 }
 
+emit() {
+  # Print to the prompt TTY when available so context appears before prompts.
+  if [ "${non_interactive:-0}" -eq 1 ]; then
+    printf "$@"
+  elif [ "${PROMPT_AVAILABLE:-0}" -eq 1 ]; then
+    printf "$@" >&"$PROMPT_OUT_FD"
+  else
+    printf "$@"
+  fi
+}
+
+emit_copy() {
+  # Suppress noisy copy output for shim assets.
+  if [ "${log_copy:-1}" -eq 1 ]; then
+    emit "$@"
+  fi
+}
+
 prompt_choice() {
   # Conflict prompt for file installs; returns short choice code for callers.
   local path="$1"
@@ -161,9 +179,9 @@ PHP
   fi
 
   printf '%s\n' "$output" > "${app_root%/}/package.json"
-  printf 'WRITE: %s\n' "${app_root%/}/package.json"
+  emit 'WRITE: %s\n' "${app_root%/}/package.json"
 
-  printf 'Created package.json from Drupal core devDependencies; review and customize as needed.\n'
+  emit 'Created package.json from Drupal core devDependencies; review and customize as needed.\n'
   return 0
 }
 
@@ -376,6 +394,8 @@ maybe_install_missing_root_deps() {
   local ddev_cmd="$1"
   local non_interactive="$2"
   local package_manager="$3"
+  local auto_add="${4:-0}"
+  local suppress_list="${5:-0}"
   local missing_node_deps
 
   if ! missing_node_deps="$(find_missing_node_deps "$ddev_cmd")"; then
@@ -387,14 +407,16 @@ maybe_install_missing_root_deps() {
   fi
 
   mapfile -t missing_node_deps_array <<< "$missing_node_deps"
-  printf 'Detected missing Drupal JS tooling dependencies in package.json (%d):\n' "${#missing_node_deps_array[@]}"
-  for dep in "${missing_node_deps_array[@]}"; do
-    [ -n "$dep" ] || continue
-    printf '  %s\n' "$dep"
-  done
+  if [ "$suppress_list" -ne 1 ]; then
+    emit 'Detected missing Drupal JS tooling dependencies in package.json (%d):\n' "${#missing_node_deps_array[@]}"
+    for dep in "${missing_node_deps_array[@]}"; do
+      [ -n "$dep" ] || continue
+      emit '  %s\n' "$dep"
+    done
+  fi
 
   if [ "$non_interactive" -eq 1 ]; then
-    printf 'Skipping dependency add (non-interactive). Install the missing packages to avoid lint errors.\n'
+    emit 'Skipping dependency add (non-interactive). Install the missing packages to avoid lint errors.\n'
     return 1
   fi
 
@@ -404,7 +426,14 @@ maybe_install_missing_root_deps() {
     prompt_msg="Add missing dependencies with 'yarn add -D' in the project root? This updates package.json and yarn.lock."
   fi
 
-  if prompt_yes_no "$prompt_msg" 1; then
+  should_add=0
+  if [ "$auto_add" -eq 1 ] && [ "$non_interactive" -ne 1 ]; then
+    should_add=1
+  elif prompt_yes_no "$prompt_msg" 1; then
+    should_add=1
+  fi
+
+  if [ "$should_add" -eq 1 ]; then
     deps_cmd=""
     for dep in "${missing_node_deps_array[@]}"; do
       deps_cmd+=" $(printf '%q' "$dep")"
@@ -415,52 +444,87 @@ maybe_install_missing_root_deps() {
       cmd=( "$ddev_cmd" "exec" "bash" "-lc" "cd /var/www/html && yarn add -D${deps_cmd}" )
     fi
     run_command "${cmd[@]}"
-    printf 'Node dependencies added (project root).\n'
+    emit 'Node dependencies added (project root).\n'
     return 0
   fi
 
-  printf 'Skipping missing dependency install. ESLint plugins may be unavailable.\n'
+  emit 'Skipping missing dependency install. ESLint plugins may be unavailable.\n'
   return 1
 }
 
-prompt_node_target() {
-  # Ask whether to install JS tooling in the project root or in web/core.
+prompt_node_install_action() {
   local has_root="$1"
+  local missing_deps="$2"
   local choice
 
   if [ "${PROMPT_AVAILABLE:-0}" -ne 1 ]; then
-    printf 'skip'
+    printf 'install'
     return
   fi
 
-  if [ "$has_root" -eq 1 ]; then
-    printf 'Choose JS toolchain target: [r]oot (install deps in project root), [c]ore (install deps in web/core), [s]kip (no install, default: root): ' >&"$PROMPT_OUT_FD"
-    if ! IFS= read -r -u "$PROMPT_IN_FD" choice; then
-      choice=""
-    fi
-    choice="$(string_lower "$choice")"
-    if [ -z "$choice" ]; then
-      printf 'root'
-      return
-    fi
-  else
-    printf 'No project package.json found. Choose JS toolchain target: [r]oot (create package.json from core, then install), [c]ore (install in web/core), [s]kip (no install, default: root): ' >&"$PROMPT_OUT_FD"
-    if ! IFS= read -r -u "$PROMPT_IN_FD" choice; then
-      choice=""
-    fi
-    choice="$(string_lower "$choice")"
-    if [ -z "$choice" ]; then
-      printf 'root'
-      return
-    fi
+  if [ "$has_root" -eq 0 ]; then
+    emit 'No project package.json found.\n'
+  fi
+
+  if [ -n "$missing_deps" ]; then
+    emit 'Some required node modules are missing:\n'
+    while IFS= read -r dep; do
+      [ -n "$dep" ] || continue
+      emit '  %s\n' "$dep"
+    done <<< "$missing_deps"
+  fi
+
+  emit 'ESLint, Prettier, and Stylelint require several packages to function properly.\n'
+  emit '[i]nstall these in the project root, [p]rovide an install command to run yourself, [s]kip node module installation (default: install): '
+  if ! IFS= read -r -u "$PROMPT_IN_FD" choice; then
+    choice=""
+  fi
+  choice="$(string_lower "$choice")"
+  if [ -z "$choice" ]; then
+    printf 'install'
+    return
   fi
 
   case "$choice" in
-    r|root) printf 'root' ;;
-    c|core) printf 'core' ;;
+    i|install) printf 'install' ;;
+    p|provide) printf 'provide' ;;
     s|skip) printf 'skip' ;;
-    *) printf 'skip' ;;
+    *) printf 'install' ;;
   esac
+}
+
+emit_node_install_command() {
+  local package_manager="$1"
+  local missing_deps="$2"
+  local has_root="$3"
+  local deps_cmd=""
+  local cmd=""
+
+  if [ -n "$missing_deps" ]; then
+    while IFS= read -r dep; do
+      [ -n "$dep" ] || continue
+      deps_cmd+=" $(printf '%q' "$dep")"
+    done <<< "$missing_deps"
+  fi
+
+  if [ -n "$deps_cmd" ]; then
+    if [ "$package_manager" = "npm" ]; then
+      cmd="ddev exec bash -lc \"cd /var/www/html && npm install --save-dev${deps_cmd}\""
+    else
+      cmd="ddev exec bash -lc \"cd /var/www/html && yarn add -D${deps_cmd}\""
+    fi
+  else
+    if [ "$package_manager" = "npm" ]; then
+      cmd="ddev exec bash -lc \"cd /var/www/html && npm install\""
+    else
+      cmd="ddev exec bash -lc \"cd /var/www/html && yarn install\""
+    fi
+  fi
+
+  if [ "$has_root" -eq 0 ]; then
+    emit 'No project package.json found. The install requires one at the project root.\n'
+  fi
+  emit 'Run:\n  %s\n' "$cmd"
 }
 
 prompt_yes_no() {
@@ -579,9 +643,9 @@ prompt_phpstan_level() {
   local answer
   local env_level
 
-  printf '\n==> PHPStan defaults\n'
-  printf 'PHPStan defaults to level 0 for CI parity. You can keep level 0 or set a higher local default (0-9).\n'
-  printf 'Recommended starting point: level 3.\n'
+  emit '\n==> PHPStan defaults\n'
+  emit 'The GitLab CI template defaults to PHPStan level 0, which only catches obvious syntax errors. You can keep level 0 or set a higher level for your project.\n'
+  emit 'Recommended starting point: level 3.\n'
 
   if [ ! -f "$config_path" ]; then
     printf 'phpstan.neon not found in project root; skipping level update.\n'
@@ -592,7 +656,7 @@ prompt_phpstan_level() {
   if [ -n "$env_level" ]; then
     if [[ "$env_level" =~ ^[0-9]$ ]]; then
       if set_phpstan_level "$config_path" "$env_level"; then
-        printf 'WRITE: %s (level %s)\n' "$config_path" "$env_level"
+        emit 'WRITE: %s (level %s)\n' "$config_path" "$env_level"
       else
         printf 'Unable to update phpstan.neon level.\n' >&2
       fi
@@ -602,15 +666,20 @@ prompt_phpstan_level() {
   elif [ "$non_interactive" -eq 1 ] || [ "${PROMPT_AVAILABLE:-0}" -ne 1 ]; then
     printf 'No interactive terminal detected; keeping current phpstan.neon level.\n'
   else
-    printf 'Set phpstan.neon level (0-9) or [s]kip to keep current (default: skip): ' >&"$PROMPT_OUT_FD"
+    emit 'Set phpstan.neon level (0-9) (default: 0): '
     if ! IFS= read -r -u "$PROMPT_IN_FD" answer; then
       answer=""
     fi
     answer="$(string_lower "$answer")"
-    if [ -n "$answer" ] && [ "$answer" != "s" ] && [ "$answer" != "skip" ]; then
+    if [ "$answer" = "s" ] || [ "$answer" = "skip" ]; then
+      answer=""
+    elif [ -z "$answer" ]; then
+      answer="0"
+    fi
+    if [ -n "$answer" ]; then
       if [[ "$answer" =~ ^[0-9]$ ]]; then
         if set_phpstan_level "$config_path" "$answer"; then
-          printf 'WRITE: %s (level %s)\n' "$config_path" "$answer"
+          emit 'WRITE: %s (level %s)\n' "$config_path" "$answer"
         else
           printf 'Unable to update phpstan.neon level.\n' >&2
         fi
@@ -621,8 +690,9 @@ prompt_phpstan_level() {
   fi
 
   if [ ! -f "$baseline_path" ]; then
-    printf 'No phpstan-baseline.neon found. Generate one with:\n'
-    printf '  ddev phpstan --generate-baseline\n'
+    emit 'No phpstan-baseline.neon found. Baselines let you focus on new errors while you fix existing ones over time.\n'
+    emit 'Generate one with:\n'
+    emit '  ddev phpstan --generate-baseline\n'
   fi
   return 0
 }
@@ -638,17 +708,18 @@ maybe_add_gitignore_reports() {
   fi
 
   if [ "$non_interactive" -eq 1 ] || [ "${PROMPT_AVAILABLE:-0}" -ne 1 ]; then
-    printf 'No interactive terminal detected; skipping .gitignore update for %s.\n' "$entry"
+    emit 'No interactive terminal detected; skipping .gitignore update for %s.\n' "$entry"
     return 0
   fi
 
-  if prompt_yes_no "Add '${entry}' to .gitignore to avoid committing report logs?" 1; then
+  emit 'Add %s to .gitignore to avoid committing report logs.\n' "$entry"
+  if prompt_yes_no "Add '${entry}' to .gitignore?" 1; then
     if [ -f "$gitignore" ]; then
       printf '\n%s\n' "$entry" >>"$gitignore"
     else
       printf '%s\n' "$entry" >"$gitignore"
     fi
-    printf 'WRITE: %s\n' "$gitignore"
+    emit 'WRITE: %s\n' "$gitignore"
   fi
   return 0
 }
@@ -678,7 +749,11 @@ show_diff() {
     printf 'Diff not available on this system.\n'
     return
   fi
-  diff -u "$target" "$source" || true
+  if [ "${PROMPT_AVAILABLE:-0}" -eq 1 ]; then
+    diff -u "$target" "$source" >&"$PROMPT_OUT_FD" || true
+  else
+    diff -u "$target" "$source" || true
+  fi
 }
 
 backup_file() {
@@ -730,7 +805,7 @@ ensure_root_yarnrc() {
   local app_root="$1"
   if [ -f "${app_root%/}/web/core/.yarnrc.yml" ] && [ ! -f "${app_root%/}/.yarnrc.yml" ]; then
     cp "${app_root%/}/web/core/.yarnrc.yml" "${app_root%/}/.yarnrc.yml"
-    printf 'WRITE: %s\n' "${app_root%/}/.yarnrc.yml"
+    emit 'WRITE: %s\n' "${app_root%/}/.yarnrc.yml"
   fi
 }
 
@@ -911,12 +986,16 @@ node_toolchain_present() {
 run_command() {
   # Echo and execute a command (simple transparency for users).
   local arg
-  printf 'Running:'
+  emit 'Running:'
   for arg in "$@"; do
-    printf ' %q' "$arg"
+    emit ' %q' "$arg"
   done
-  printf '\n'
-  "$@"
+  emit '\n'
+  if [ "${non_interactive:-0}" -eq 1 ] || [ "${PROMPT_AVAILABLE:-0}" -ne 1 ]; then
+    "$@"
+  else
+    "$@" >&"$PROMPT_OUT_FD"
+  fi
 }
 
 prompt_setup
@@ -961,110 +1040,7 @@ case "$install_mode" in
   abort) abort_on_conflict=1 ;;
 esac
 
-printf '\n==> Phase 1: Copy CI parity configs and shims\n'
-printf 'This will copy config files into the project root and install shims under %s.\n' "$shim_dir_env"
-
-# Copy add-on assets/shims into project, respecting conflict handling mode.
-while IFS= read -r -d '' source; do
-  rel="${source#$addon_root/}"
-  if [[ "$rel" == ide-settings/* ]]; then
-    continue
-  fi
-  if [[ "$rel" == tooling/scripts/* ]]; then
-    continue
-  fi
-  is_shim=0
-  if [[ "$rel" == tooling/bin/* ]]; then
-    target="${shim_dir%/}/${rel#tooling/bin/}"
-    is_shim=1
-  elif [[ "$rel" == assets/* ]]; then
-    target="${app_root%/}/${rel#assets/}"
-  else
-    continue
-  fi
-
-  tmp="$(mktemp "${TMPDIR:-/tmp}/dcq-src-XXXXXX")"
-  if [ "$is_shim" -eq 1 ]; then
-    cat "$source" >"$tmp"
-  else
-    strip_generated_header "$source" "$tmp"
-  fi
-
-  if [ -e "$target" ]; then
-    if cmp -s "$target" "$tmp"; then
-      printf 'OK: %s already matches.\n' "$target"
-      rm -f "$tmp"
-      continue
-    fi
-
-    if [ "$skip_all" -eq 1 ]; then
-      printf 'SKIP: %s (existing file).\n' "$target"
-      rm -f "$tmp"
-      continue
-    fi
-
-    if [ "$replace_all" -eq 1 ]; then
-      backup="$(backup_file "$target")"
-      printf 'BACKUP: %s\n' "$backup"
-    elif [ "$abort_on_conflict" -eq 1 ]; then
-      printf 'ABORT: conflict at %s.\n' "$target" >&2
-      rm -f "$tmp"
-      exit 1
-    else
-      show_diff "$target" "$tmp"
-      choice="$(prompt_choice "$target" "true")"
-      choice="$(string_lower "$choice")"
-      choice="$(printf '%s' "$choice" | tr -s ' ')"
-      case "$choice" in
-        r|replace)
-          backup="$(backup_file "$target")"
-          printf 'BACKUP: %s\n' "$backup"
-          ;;
-        s|skip)
-          printf 'SKIP: %s (existing file).\n' "$target"
-          rm -f "$tmp"
-          continue
-          ;;
-        a|abort)
-          printf 'ABORT: conflict at %s.\n' "$target" >&2
-          rm -f "$tmp"
-          exit 1
-          ;;
-        ra|rall|"replace all")
-          replace_all=1
-          backup="$(backup_file "$target")"
-          printf 'BACKUP: %s\n' "$backup"
-          ;;
-        sa|sall|"skip all")
-          skip_all=1
-          printf 'SKIP: %s (existing file).\n' "$target"
-          rm -f "$tmp"
-          continue
-          ;;
-        *)
-          printf 'Unknown choice. Skipping %s.\n' "$target"
-          rm -f "$tmp"
-          continue
-          ;;
-      esac
-    fi
-  fi
-
-  ensure_dir "$(dirname "$target")"
-  cat "$tmp" >"$target"
-  rm -f "$tmp"
-
-  if [ -x "$source" ] || [[ "$target" == "$shim_dir"* ]]; then
-    chmod 0755 "$target" || true
-  fi
-  printf 'WRITE: %s\n' "$target"
-done < <(find "$addon_root" -type f -print0)
-
-printf 'Done.\n'
-
-prompt_phpstan_level "$app_root"
-
-printf '\n==> Phase 2: PHP tooling dependencies\n'
+emit '\n==> Phase 1: PHP tooling dependencies\n'
 vendor_bin="${app_root%/}/vendor/bin"
 missing_tools=()
 for tool in phpstan phpcs phpcbf; do
@@ -1096,14 +1072,14 @@ if [ "${#missing_tools[@]}" -gt 0 ]; then
     deps_mode="prompt"
   fi
 
-  printf 'Missing dev tools: %s.\n' "$(printf '%s ' "${missing_tools[@]}" | sed 's/[[:space:]]*$//')"
+  emit 'Missing dev tools: %s.\n' "$(printf '%s ' "${missing_tools[@]}" | sed 's/[[:space:]]*$//')"
   if [ ! -f "$composer_json" ]; then
-    printf 'composer.json not found; skipping dependency install.\n'
+    emit 'composer.json not found; skipping dependency install.\n'
     missing_tools=()
   fi
 
   if [ "${#missing_tools[@]}" -gt 0 ] && ! command_available "$ddev_cmd"; then
-    printf 'ddev executable not found in PATH; skipping dependency install.\n'
+    emit 'ddev executable not found in PATH; skipping dependency install.\n'
     missing_tools=()
   fi
 
@@ -1120,30 +1096,137 @@ if [ "${#missing_tools[@]}" -gt 0 ]; then
     fi
 
     if [ "$action" = "install" ]; then
-      question="Run '${cmd[*]}' to install dev tools?"
+      question="Recommend installing PHP dev tools from composer.lock. Proceed?"
     else
-      question="Run '${cmd[*]}' to add Drupal core-dev tools?"
+      question="Recommend installing drupal/core-dev as a dev dependency to install PHP code quality tools and Drupal coding standards. Proceed?"
     fi
 
     should_install=0
     if [ "$deps_mode" = "install" ]; then
       should_install=1
     elif [ "$deps_mode" = "prompt" ]; then
-      if prompt_yes_no "$question" 1; then
+      if prompt_yes_no "$question" 0; then
         should_install=1
       fi
     fi
 
     if [ "$should_install" -ne 1 ]; then
-      printf "Skipping dependency install. Run '%s' later to enable PHPStan/PHPCS/PHPCBF.\n" "${cmd[*]}"
+      emit "Skipping dependency install. Run '%s' later to enable PHPStan/PHPCS/PHPCBF.\n" "${cmd[*]}"
     else
       (cd "$app_root" && run_command "${cmd[@]}")
-      printf 'Dependencies installed.\n'
+      emit 'Dependencies installed.\n'
     fi
   fi
 fi
 
-printf '\n==> Phase 3: JS toolchain dependencies\n'
+emit '\n==> Phase 2: Copy CI parity configs and shims\n'
+emit 'This will copy config files into the project root and install shims under %s.\n' "$shim_dir_env"
+
+# Copy add-on assets/shims into project, respecting conflict handling mode.
+while IFS= read -r -d '' source; do
+  rel="${source#$addon_root/}"
+  if [[ "$rel" == ide-settings/* ]]; then
+    continue
+  fi
+  if [[ "$rel" == tooling/scripts/* ]]; then
+    continue
+  fi
+  is_shim=0
+  if [[ "$rel" == tooling/bin/* ]]; then
+    target="${shim_dir%/}/${rel#tooling/bin/}"
+    is_shim=1
+  elif [[ "$rel" == assets/* ]]; then
+    target="${app_root%/}/${rel#assets/}"
+  else
+    continue
+  fi
+  log_copy=1
+  if [ "$is_shim" -eq 1 ]; then
+    log_copy=0
+  fi
+
+  tmp="$(mktemp "${TMPDIR:-/tmp}/dcq-src-XXXXXX")"
+  if [ "$is_shim" -eq 1 ]; then
+    cat "$source" >"$tmp"
+  else
+    strip_generated_header "$source" "$tmp"
+  fi
+
+  if [ -e "$target" ]; then
+    if cmp -s "$target" "$tmp"; then
+      emit_copy 'OK: %s already matches.\n' "$target"
+      rm -f "$tmp"
+      continue
+    fi
+
+    if [ "$skip_all" -eq 1 ]; then
+      emit_copy 'SKIP: %s (existing file).\n' "$target"
+      rm -f "$tmp"
+      continue
+    fi
+
+    if [ "$replace_all" -eq 1 ]; then
+      backup="$(backup_file "$target")"
+      emit_copy 'BACKUP: %s\n' "$backup"
+    elif [ "$abort_on_conflict" -eq 1 ]; then
+      printf 'ABORT: conflict at %s.\n' "$target" >&2
+      rm -f "$tmp"
+      exit 1
+    else
+      show_diff "$target" "$tmp"
+      choice="$(prompt_choice "$target" "true")"
+      choice="$(string_lower "$choice")"
+      choice="$(printf '%s' "$choice" | tr -s ' ')"
+      case "$choice" in
+        r|replace)
+          backup="$(backup_file "$target")"
+          emit_copy 'BACKUP: %s\n' "$backup"
+          ;;
+        s|skip)
+          emit_copy 'SKIP: %s (existing file).\n' "$target"
+          rm -f "$tmp"
+          continue
+          ;;
+        a|abort)
+          printf 'ABORT: conflict at %s.\n' "$target" >&2
+          rm -f "$tmp"
+          exit 1
+          ;;
+        ra|rall|"replace all")
+          replace_all=1
+          backup="$(backup_file "$target")"
+          emit_copy 'BACKUP: %s\n' "$backup"
+          ;;
+        sa|sall|"skip all")
+          skip_all=1
+          emit_copy 'SKIP: %s (existing file).\n' "$target"
+          rm -f "$tmp"
+          continue
+          ;;
+        *)
+          emit_copy 'Unknown choice. Skipping %s.\n' "$target"
+          rm -f "$tmp"
+          continue
+          ;;
+      esac
+    fi
+  fi
+
+  ensure_dir "$(dirname "$target")"
+  cat "$tmp" >"$target"
+  rm -f "$tmp"
+
+  if [ -x "$source" ] || [[ "$target" == "$shim_dir"* ]]; then
+    chmod 0755 "$target" || true
+  fi
+  emit_copy 'WRITE: %s\n' "$target"
+done < <(find "$addon_root" -type f -print0)
+
+emit 'Done.\n'
+
+prompt_phpstan_level "$app_root"
+
+emit '\n==> Phase 3: JS toolchain dependencies\n'
 core_package_json="${app_root%/}/web/core/package.json"
 if [ -f "$core_package_json" ]; then
   node_mode_raw="$(string_lower "${DCQ_INSTALL_NODE_DEPS:-}")"
@@ -1166,17 +1249,17 @@ if [ -f "$core_package_json" ]; then
     fi
     if [ "$skip_due_to_existing_toolchain" -eq 1 ] && [ "$has_root_package_json" -eq 1 ]; then
       if ! command_available "$ddev_cmd"; then
-        printf 'ddev executable not found in PATH; skipping Node dependency check.\n'
+        emit 'ddev executable not found in PATH; skipping Node dependency check.\n'
       else
         root_pm="$(detect_package_manager "$app_root")"
         if [ "$root_pm" = "yarn" ]; then
           ensure_root_yarnrc "$app_root"
         fi
-        maybe_install_missing_root_deps "$ddev_cmd" "$non_interactive" "$root_pm" || true
+        maybe_install_missing_root_deps "$ddev_cmd" "$non_interactive" "$root_pm" 0 0 || true
       fi
     fi
-  if [ "$node_mode_raw" = "skip" ]; then
-      printf 'Skipping Node toolchain install. Use DCQ_INSTALL_NODE_DEPS=root or DCQ_INSTALL_NODE_DEPS=core to enable later.\n'
+    if [ "$node_mode_raw" = "skip" ]; then
+      emit 'Skipping Node toolchain install. Use DCQ_INSTALL_NODE_DEPS=root to enable later.\n'
       node_mode="skip"
     fi
     if [ -z "$node_mode_raw" ]; then
@@ -1197,10 +1280,21 @@ if [ -f "$core_package_json" ]; then
       node_mode="prompt"
     fi
 
+    root_auto_add=0
+    root_suppress_list=0
+    if [ "$node_mode" = "install" ] || [ "$node_mode" = "root" ]; then
+      root_auto_add=1
+    fi
+
+    missing_node_deps=""
+    if [ "$has_root_package_json" -eq 1 ] && command_available "$ddev_cmd"; then
+      missing_node_deps="$(find_missing_node_deps "$ddev_cmd" || true)"
+    fi
+
     if [ "$node_mode" != "skip" ]; then
-      printf 'Preparing JS toolchain install.\n'
+      emit 'Preparing JS toolchain install.\n'
       if ! command_available "$ddev_cmd"; then
-        printf 'ddev executable not found in PATH; skipping Node toolchain install.\n'
+        emit 'ddev executable not found in PATH; skipping Node toolchain install.\n'
         node_mode="skip"
       fi
 
@@ -1210,7 +1304,22 @@ if [ -f "$core_package_json" ]; then
       elif [ "$node_mode" = "root" ] || [ "$node_mode" = "core" ]; then
         target="$node_mode"
       elif [ "$node_mode" = "prompt" ]; then
-        target="$(prompt_node_target "$has_root_package_json")"
+        root_pm="$(detect_package_manager "$app_root")"
+        node_action="$(prompt_node_install_action "$has_root_package_json" "$missing_node_deps")"
+        case "$node_action" in
+          install)
+            target="root"
+            root_auto_add=1
+            root_suppress_list=1
+            ;;
+          provide)
+            emit_node_install_command "$root_pm" "$missing_node_deps" "$has_root_package_json"
+            target="skip"
+            ;;
+          skip)
+            target="skip"
+            ;;
+        esac
       fi
 
       if [ "$target" = "root" ] && [ "$has_root_package_json" -eq 0 ]; then
@@ -1228,14 +1337,14 @@ if [ -f "$core_package_json" ]; then
       node_install_done=0
       if [ "$target" = "core" ]; then
         core_pm="$(detect_package_manager "${app_root%/}/web/core")"
-        printf 'Installing JS deps in web/core using %s.\n' "$core_pm"
+        emit 'Installing JS deps in web/core using %s.\n' "$core_pm"
         if [ "$core_pm" = "npm" ]; then
           cmd=( "$ddev_cmd" "exec" "bash" "-lc" "cd web/core && npm install" )
         else
           cmd=( "$ddev_cmd" "exec" "bash" "-lc" "cd web/core && yarn install" )
         fi
         run_command "${cmd[@]}"
-        printf 'Node toolchain installed (core).\n'
+        emit 'Node toolchain installed (core).\n'
         node_install_done=1
       elif [ "$target" = "root" ]; then
         if [ "$has_root_package_json" -eq 1 ]; then
@@ -1243,7 +1352,7 @@ if [ -f "$core_package_json" ]; then
           if [ "$root_pm" = "yarn" ]; then
             ensure_root_yarnrc "$app_root"
           fi
-          if maybe_install_missing_root_deps "$ddev_cmd" "$non_interactive" "$root_pm"; then
+          if maybe_install_missing_root_deps "$ddev_cmd" "$non_interactive" "$root_pm" "$root_auto_add" "$root_suppress_list"; then
             node_install_done=1
           fi
         fi
@@ -1254,7 +1363,7 @@ if [ -f "$core_package_json" ]; then
               ensure_root_yarnrc "$app_root"
             fi
           fi
-          printf 'Installing JS deps in project root using %s.\n' "${root_pm:-npm}"
+          emit 'Installing JS deps in project root using %s.\n' "${root_pm:-npm}"
           if [ "${root_pm:-npm}" = "npm" ]; then
             cmd=( "$ddev_cmd" "exec" "bash" "-lc" "cd /var/www/html && npm install" )
           else
@@ -1262,13 +1371,13 @@ if [ -f "$core_package_json" ]; then
           fi
           run_command "${cmd[@]}"
         fi
-        printf 'Node toolchain installed (project root).\n'
+        emit 'Node toolchain installed (project root).\n'
       fi
     fi
   fi
 fi
 
-printf '\n==> Optional: .gitignore update\n'
+emit '\n==> Optional: .gitignore update\n'
 maybe_add_gitignore_reports "$app_root"
 
 ide_settings_root="${addon_root}/ide-settings/vscode"
@@ -1276,7 +1385,7 @@ ide_settings_template="${ide_settings_root}/settings.json"
 ide_extensions_template="${ide_settings_root}/extensions.json"
 ide_settings_doc="${ide_settings_root}/README.md"
 if [ -f "$ide_settings_template" ] || [ -f "$ide_extensions_template" ]; then
-  printf '\n==> Phase 4: IDE settings\n'
+  emit '\n==> Phase 4: IDE settings\n'
   ide_mode_raw="$(string_lower "${DCQ_INSTALL_IDE_SETTINGS:-}")"
   if [ -z "$ide_mode_raw" ]; then
     if [ "$non_interactive" -eq 1 ]; then
@@ -1294,11 +1403,12 @@ if [ -f "$ide_settings_template" ] || [ -f "$ide_extensions_template" ]; then
   fi
 
   if [ "$ide_mode" = "prompt" ]; then
+    emit 'VS Code/Codium settings/extensions: choose merge, overwrite (with backup), or skip.\n'
     ide_mode="$(prompt_ide_settings_mode)"
   fi
 
   if [ "$ide_mode" = "skip" ]; then
-    printf 'Skipping IDE settings/extensions install. See %s for manual setup.\n' "$ide_settings_doc"
+    emit 'Skipping IDE settings/extensions install. See %s for manual setup.\n' "$ide_settings_doc"
   else
     ide_target_dir="${app_root%/}/.vscode"
     ide_target_settings="${ide_target_dir}/settings.json"

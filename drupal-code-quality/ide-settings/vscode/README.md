@@ -2,7 +2,7 @@
 # VS Code / VSCodium settings
 
 This folder contains starter VS Code settings and extension recommendations.
-The settings file points common linting tools at the `dcq-tooling/bin` shims
+The settings file points common linting tools at the `.ddev/drupal-code-quality/tooling/bin` shims
 installed by this add-on.
 
 ## Install options
@@ -11,8 +11,6 @@ installed by this add-on.
   recommended extensions into `.vscode/extensions.json` if present.
 - Overwrite: back up existing files and replace them.
 - Manual: copy `settings.json` and `extensions.json` into `.vscode/` yourself.
-
-If you changed `DCQ_SHIM_DIR`, update the PHP tool paths accordingly.
 
 ## Recommended extensions
 

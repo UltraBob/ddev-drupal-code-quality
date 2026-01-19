@@ -1,5 +1,5 @@
-#ddev-generated
 #!/usr/bin/env bash
+#ddev-generated
 
 set -euo pipefail
 

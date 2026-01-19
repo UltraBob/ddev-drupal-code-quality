@@ -147,18 +147,18 @@ health_checks() {
 
   for command in "${commands[@]}"; do
     assert_file_exist ".ddev/commands/web/${command}"
-    assert_file_exist "dcq-tooling/bin/${command}"
+    assert_file_exist ".ddev/drupal-code-quality/tooling/bin/${command}"
     run ddev exec test -x "/var/www/html/.ddev/commands/web/${command}"
     assert_success
-    run ddev exec test -x "/var/www/html/dcq-tooling/bin/${command}"
+    run ddev exec test -x "/mnt/ddev_config/drupal-code-quality/tooling/bin/${command}"
     assert_success
   done
 }
 
 assert_addon_installed() {
   assert_file_exist ".ddev/commands/web/phpstan"
-  assert_file_exist "dcq-tooling/bin/phpstan"
-  assert_file_exist "dcq-tooling/ci-config/phpstan.neon"
+  assert_file_exist ".ddev/drupal-code-quality/tooling/bin/phpstan"
+  assert_file_exist "phpstan.neon"
   assert_file_exist ".eslintrc.json"
   assert_file_exist ".phpcs.xml"
   assert_file_not_exist "ide-settings"
@@ -397,9 +397,8 @@ teardown() {
 
   run ddev add-on remove "${DIR}"
   assert_success
-  assert_file_not_exist ".ddev/dcq-assets"
-  assert_file_not_exist ".ddev/.dcq-shim-dir"
-  assert_file_not_exist "dcq-tooling/bin/phpstan"
+  assert_file_not_exist ".ddev/drupal-code-quality"
+  assert_file_not_exist ".ddev/drupal-code-quality/tooling/bin/phpstan"
 }
 
 # bats test_tags=release
@@ -451,41 +450,39 @@ teardown() {
   ensure_node_toolchain
   run ddev exec bash -lc $'mkdir -p /var/www/html/web/core/node_modules/.bin\ncat > /var/www/html/web/core/node_modules/.bin/cspell <<\'SH\'\n#!/bin/sh\necho \"core cspell should not be used\" >&2\nexit 99\nSH\nchmod +x /var/www/html/web/core/node_modules/.bin/cspell\nmkdir -p /var/www/html/web/core/node_modules/stylelint/bin\ncat > /var/www/html/web/core/node_modules/stylelint/bin/stylelint.mjs <<\'JS\'\nconsole.error(\"core stylelint should not be used\");\nprocess.exit(99);\nJS\ncat > /var/www/html/web/core/node_modules/.bin/prettier <<\'SH\'\n#!/bin/sh\necho \"core prettier should not be used\" >&2\nexit 99\nSH\nchmod +x /var/www/html/web/core/node_modules/.bin/prettier'
   assert_success
-  run ./dcq-tooling/bin/cspell --version
+  run ./.ddev/drupal-code-quality/tooling/bin/cspell --version
   assert_success
-  run ./dcq-tooling/bin/stylelint --version
+  run ./.ddev/drupal-code-quality/tooling/bin/stylelint --version
   assert_success
-  run ./dcq-tooling/bin/prettier --version
+  run ./.ddev/drupal-code-quality/tooling/bin/prettier --version
   assert_success
   assert_file_exist ".vscode/settings.json"
   assert_file_exist ".vscode/extensions.json"
-  assert_log_contains '"php.validate.executablePath": "./dcq-tooling/bin/php"' ".vscode/settings.json"
-  assert_log_contains '"phpsab.executablePathCS": "./dcq-tooling/bin/phpcs"' ".vscode/settings.json"
-  assert_log_contains '"phpsab.executablePathCBF": "./dcq-tooling/bin/phpcbf"' ".vscode/settings.json"
-  assert_log_contains "dcq-tooling/bin/phpstan" ".vscode/settings.json"
+  assert_log_contains '"php.validate.executablePath": ".ddev/drupal-code-quality/tooling/bin/php"' ".vscode/settings.json"
+  assert_log_contains '"phpsab.executablePathCS": ".ddev/drupal-code-quality/tooling/bin/phpcs"' ".vscode/settings.json"
+  assert_log_contains '"phpsab.executablePathCBF": ".ddev/drupal-code-quality/tooling/bin/phpcbf"' ".vscode/settings.json"
+  assert_log_contains ".ddev/drupal-code-quality/tooling/bin/phpstan" ".vscode/settings.json"
   assert_log_contains '"stylelint.stylelintPath": "./node_modules/stylelint"' ".vscode/settings.json"
   assert_log_contains '"prettier.prettierPath": "./node_modules/prettier"' ".vscode/settings.json"
-  assert_log_contains '"cSpell.path": "./node_modules/cspell"' ".vscode/settings.json"
   assert_log_contains '"eslint.nodePath": "node_modules"' ".vscode/settings.json"
   assert_log_contains '"resolvePluginsRelativeTo": "."' ".vscode/settings.json"
 
   run bash -lc "cd \"${PWD}/.ddev\" && DCQ_INSTALL_IDE_SETTINGS=overwrite DCQ_INSTALL_NODE_DEPS=core DCQ_INSTALL_DEPS=skip DDEV_EXECUTABLE=true bash ./dcq-install.sh"
   assert_success
-  assert_log_contains '"php.validate.executablePath": "./dcq-tooling/bin/php"' ".vscode/settings.json"
-  assert_log_contains '"phpsab.executablePathCS": "./dcq-tooling/bin/phpcs"' ".vscode/settings.json"
-  assert_log_contains '"phpsab.executablePathCBF": "./dcq-tooling/bin/phpcbf"' ".vscode/settings.json"
-  assert_log_contains "dcq-tooling/bin/phpstan" ".vscode/settings.json"
+  assert_log_contains '"php.validate.executablePath": ".ddev/drupal-code-quality/tooling/bin/php"' ".vscode/settings.json"
+  assert_log_contains '"phpsab.executablePathCS": ".ddev/drupal-code-quality/tooling/bin/phpcs"' ".vscode/settings.json"
+  assert_log_contains '"phpsab.executablePathCBF": ".ddev/drupal-code-quality/tooling/bin/phpcbf"' ".vscode/settings.json"
+  assert_log_contains ".ddev/drupal-code-quality/tooling/bin/phpstan" ".vscode/settings.json"
   assert_log_contains '"stylelint.stylelintPath": "./web/core/node_modules/stylelint"' ".vscode/settings.json"
   assert_log_contains '"prettier.prettierPath": "./web/core/node_modules/prettier"' ".vscode/settings.json"
-  assert_log_contains '"cSpell.path": "./web/core/node_modules/cspell"' ".vscode/settings.json"
   assert_log_contains '"eslint.nodePath": "web/core/node_modules"' ".vscode/settings.json"
   assert_log_contains '"resolvePluginsRelativeTo": "./web/core"' ".vscode/settings.json"
 
-  run ./dcq-tooling/bin/phpstan --version
+  run ./.ddev/drupal-code-quality/tooling/bin/phpstan --version
   assert_success
-  run ./dcq-tooling/bin/phpcs --version
+  run ./.ddev/drupal-code-quality/tooling/bin/phpcs --version
   assert_success
-  run ./dcq-tooling/bin/phpcbf --version
+  run ./.ddev/drupal-code-quality/tooling/bin/phpcbf --version
   assert_success
 
   create_fixture_code
@@ -504,7 +501,7 @@ teardown() {
   run wait_for_container_path "/var/www/html/web/themes/custom/dcq_theme/css/fixable.css"
   assert_success
 
-  run ./dcq-tooling/bin/checks
+  run ./.ddev/drupal-code-quality/tooling/bin/checks
   assert_failure
 
   assert_output --partial "==> phpcs"
@@ -515,17 +512,17 @@ teardown() {
   assert_output --partial "==> cspell"
   assert_output --partial "Summary:"
 
-  run ./dcq-tooling/bin/cspell lint --no-config-search -c web/cspell-test.json modules/custom/dcq_test/README.md
+  run ./.ddev/drupal-code-quality/tooling/bin/cspell lint --no-config-search -c web/cspell-test.json modules/custom/dcq_test/README.md
   assert_failure
   assert_output --partial "modlue"
 
-  run ./dcq-tooling/bin/cspell
+  run ./.ddev/drupal-code-quality/tooling/bin/cspell
   assert_failure
   assert_output --partial "modlue"
   assert_output --partial "roottypo"
 
   before_phpcbf="$(read_container_file /var/www/html/web/modules/custom/dcq_test/dcq_fixable.php)"
-  run ./dcq-tooling/bin/phpcbf web/modules/custom/dcq_test/dcq_fixable.php
+  run ./.ddev/drupal-code-quality/tooling/bin/phpcbf web/modules/custom/dcq_test/dcq_fixable.php
   if [ "$status" -ne 0 ] && [ "$status" -ne 1 ]; then
     echo "Expected PHPCBF to exit 0 or 1, got $status"
     return 1
@@ -535,7 +532,7 @@ teardown() {
   assert_not_equal "$before_phpcbf" "$after_phpcbf"
 
   before_eslint="$(read_container_file /var/www/html/web/themes/custom/dcq_theme/js/fixable.js)"
-  run ./dcq-tooling/bin/eslint-fix --yes --allow-dirty-outside-targets ./web/themes/custom/dcq_theme/js/fixable.js
+  run ./.ddev/drupal-code-quality/tooling/bin/eslint-fix --yes --allow-dirty-outside-targets ./web/themes/custom/dcq_theme/js/fixable.js
   if [ "$status" -ne 0 ] && [ "$status" -ne 1 ]; then
     echo "Expected ESLint-fix to exit 0 or 1, got $status"
     return 1
@@ -545,13 +542,13 @@ teardown() {
   assert_not_equal "$before_eslint" "$after_eslint"
 
   before_prettier="$(read_container_file /var/www/html/web/themes/custom/dcq_theme/js/prettier.js)"
-  run ./dcq-tooling/bin/prettier-fix --yes --allow-dirty-outside-targets web/themes/custom/dcq_theme/js/prettier.js
+  run ./.ddev/drupal-code-quality/tooling/bin/prettier-fix --yes --allow-dirty-outside-targets web/themes/custom/dcq_theme/js/prettier.js
   assert_success
   after_prettier="$(read_container_file /var/www/html/web/themes/custom/dcq_theme/js/prettier.js)"
   assert_not_equal "$before_prettier" "$after_prettier"
 
   before_stylelint="$(read_container_file /var/www/html/web/themes/custom/dcq_theme/css/fixable.css)"
-  run ./dcq-tooling/bin/stylelint-fix --yes --allow-dirty-outside-targets web/themes/custom/dcq_theme/css/fixable.css
+  run ./.ddev/drupal-code-quality/tooling/bin/stylelint-fix --yes --allow-dirty-outside-targets web/themes/custom/dcq_theme/css/fixable.css
   assert_success
   after_stylelint="$(read_container_file /var/www/html/web/themes/custom/dcq_theme/css/fixable.css)"
   assert_not_equal "$before_stylelint" "$after_stylelint"

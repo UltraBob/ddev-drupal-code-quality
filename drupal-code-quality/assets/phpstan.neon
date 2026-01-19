@@ -1,7 +1,4 @@
 #ddev-generated
-includes:
-  # This placeholder filename will be replaced with the value of variable $_PHPSTAN_BASELINE_FILENAME
-  - BASELINE_PLACEHOLDER
 parameters:
     level: 0
     fileExtensions:

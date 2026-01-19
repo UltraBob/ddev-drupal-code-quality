@@ -1,5 +1,19 @@
 #!/usr/bin/env bash
 
+# Installer for DDEV Drupal Code Quality add-on assets and tooling hints.
+# Phases:
+# 1) Copy CI parity config files and shims into the project (with conflict handling).
+# 2) Offer to install PHP tooling via ddev composer (core-dev).
+# 3) Offer to install JS tooling via yarn (root or core), including optional root package.json.
+# 4) Offer to install VS Code/Codium settings/extensions (merge/overwrite/skip).
+#
+# Key env vars (see README for full list):
+# - DCQ_INSTALL_MODE: replace|skip|abort (conflict strategy for files)
+# - DCQ_NONINTERACTIVE / DDEV_NONINTERACTIVE: disable prompts
+# - DCQ_INSTALL_DEPS: install|skip (PHP dev tools)
+# - DCQ_INSTALL_NODE_DEPS: root|core|install|skip (JS tooling)
+# - DCQ_INSTALL_IDE_SETTINGS: merge|overwrite|skip (IDE settings)
+
 set -euo pipefail
 
 string_lower() {
@@ -16,6 +30,8 @@ truthy() {
 }
 
 prompt_setup() {
+  # Detect a usable TTY for prompts. Falls back to /dev/tty when stdin/stdout
+  # are redirected (e.g., running from automation).
   PROMPT_AVAILABLE=0
   PROMPT_IN_FD=
   PROMPT_OUT_FD=
@@ -37,6 +53,7 @@ prompt_setup() {
 }
 
 prompt_choice() {
+  # Conflict prompt for file installs; returns short choice code for callers.
   local path="$1"
   local warn_parity="$2"
 
@@ -63,6 +80,8 @@ prompt_choice() {
 }
 
 create_root_package_json() {
+  # Create a project-root package.json based on Drupal core's package.json.
+  # Uses PHP inside the DDEV container to read core dependencies.
   local ddev_cmd="$1"
   local app_root="$2"
   local output
@@ -157,6 +176,8 @@ PHP
 }
 
 find_missing_node_deps() {
+  # Determine missing JS tooling deps by comparing root package.json to
+  # Drupal core + add-on config requirements (via a PHP helper in the container).
   local ddev_cmd="$1"
   local output
   local status
@@ -169,7 +190,7 @@ find_missing_node_deps() {
 <?php
 $rootPath = "/var/www/html/package.json";
 $corePath = "/var/www/html/web/core/package.json";
-$assetsRoot = "/var/www/html/.ddev/dcq-assets";
+$assetsRoot = "/var/www/html/.ddev/drupal-code-quality/assets";
 
 function read_json_file(string $path): ?array {
   if (!is_readable($path)) {
@@ -359,6 +380,7 @@ PHP
 }
 
 maybe_install_missing_root_deps() {
+  # Prompt to add missing root devDependencies (yarn add -D) when root package.json exists.
   local ddev_cmd="$1"
   local non_interactive="$2"
   local missing_node_deps
@@ -399,6 +421,7 @@ maybe_install_missing_root_deps() {
 }
 
 prompt_node_target() {
+  # Ask whether to install JS tooling in the project root or in web/core.
   local has_root="$1"
   local choice
 
@@ -438,6 +461,7 @@ prompt_node_target() {
 }
 
 prompt_yes_no() {
+  # Standard yes/no prompt with default behavior.
   local question="$1"
   local default_no="$2"
   local suffix
@@ -474,6 +498,7 @@ prompt_yes_no() {
 }
 
 prompt_ide_settings_mode() {
+  # Prompt for IDE settings merge/overwrite/skip mode.
   local choice
 
   if [ "${PROMPT_AVAILABLE:-0}" -ne 1 ]; then
@@ -500,6 +525,7 @@ prompt_ide_settings_mode() {
 }
 
 strip_generated_header() {
+  # Remove ddev-generated header if present to keep target files clean.
   local source="$1"
   local dest="$2"
   if [ "$(head -n 1 "$source")" = "#ddev-generated" ]; then
@@ -547,25 +573,23 @@ escape_sed_replacement() {
 }
 
 render_ide_template() {
+  # Render IDE settings template with resolved shim and tool paths.
   local template="$1"
   local output="$2"
   local shim_setting="$3"
   local stylelint_path="$4"
   local prettier_path="$5"
-  local cspell_path="$6"
-  local eslint_node_path="$7"
-  local eslint_resolve_plugins="$8"
+  local eslint_node_path="$6"
+  local eslint_resolve_plugins="$7"
   local escaped_shim
   local escaped_stylelint
   local escaped_prettier
-  local escaped_cspell
   local escaped_node_path
   local escaped_resolve_plugins
 
   escaped_shim="$(escape_sed_replacement "$shim_setting")"
   escaped_stylelint="$(escape_sed_replacement "$stylelint_path")"
   escaped_prettier="$(escape_sed_replacement "$prettier_path")"
-  escaped_cspell="$(escape_sed_replacement "$cspell_path")"
   escaped_node_path="$(escape_sed_replacement "$eslint_node_path")"
   escaped_resolve_plugins="$(escape_sed_replacement "$eslint_resolve_plugins")"
 
@@ -574,13 +598,13 @@ render_ide_template() {
     -e "s|__DCQ_SHIM_DIR__|${escaped_shim}|g" \
     -e "s|__DCQ_STYLELINT_PATH__|${escaped_stylelint}|g" \
     -e "s|__DCQ_PRETTIER_PATH__|${escaped_prettier}|g" \
-    -e "s|__DCQ_CSPELL_PATH__|${escaped_cspell}|g" \
     -e "s|__DCQ_ESLINT_NODE_PATH__|${escaped_node_path}|g" \
     -e "s|__DCQ_ESLINT_RESOLVE_PLUGINS__|${escaped_resolve_plugins}|g" \
     "$template" >"$output"
 }
 
 merge_json_settings() {
+  # Merge settings.json: keep existing keys, add missing keys from template.
   local existing="$1"
   local template="$2"
   local dest="$3"
@@ -627,6 +651,7 @@ PY
 }
 
 merge_json_extensions() {
+  # Merge extensions.json: union recommendations/unwantedRecommendations, preserve other keys.
   local existing="$1"
   local template="$2"
   local dest="$3"
@@ -700,6 +725,7 @@ PY
 }
 
 node_toolchain_present() {
+  # Detect installed eslint tooling in either root or core node_modules.
   local app_root="$1"
   local paths=(
     "$app_root/web/core/node_modules/.bin/eslint"
@@ -717,6 +743,7 @@ node_toolchain_present() {
 }
 
 run_command() {
+  # Echo and execute a command (simple transparency for users).
   local arg
   printf 'Running:'
   for arg in "$@"; do
@@ -736,36 +763,15 @@ fi
 
 node_target_choice=""
 
-assets_root="${cwd}/dcq-assets"
+addon_root="${cwd}/drupal-code-quality"
+assets_root="${addon_root}/assets"
 if [ ! -d "$assets_root" ]; then
-  printf 'dcq-assets directory not found at %s.\n' "$assets_root" >&2
+  printf 'drupal-code-quality assets directory not found at %s.\n' "$assets_root" >&2
   exit 1
 fi
 
-shim_dir_env="${DCQ_SHIM_DIR:-dcq-tooling/bin}"
-if [[ "$shim_dir_env" = /* ]]; then
-  shim_dir="$shim_dir_env"
-else
-  shim_dir="${app_root%/}/${shim_dir_env}"
-fi
-
-app_root_check="${app_root%/}"
-shim_dir_check="${shim_dir%/}"
-case "$shim_dir_check" in
-  "$app_root_check"|"$app_root_check"/*) ;;
-  *)
-    printf 'DCQ_SHIM_DIR must be inside the project root (%s).\n' "$app_root" >&2
-    exit 1
-    ;;
-esac
-
-shim_record="$shim_dir_env"
-if [[ "$shim_dir" == "$app_root_check"/* ]]; then
-  shim_record="${shim_dir#${app_root_check}/}"
-fi
-if [ -n "$shim_record" ] && [ "$shim_record" != "." ]; then
-  printf '%s\n' "$shim_record" > "${cwd}/.dcq-shim-dir"
-fi
+shim_dir_env=".ddev/drupal-code-quality/tooling/bin"
+shim_dir="${app_root%/}/${shim_dir_env}"
 
 non_interactive=0
 if truthy "${DDEV_NONINTERACTIVE:-}"; then
@@ -791,17 +797,23 @@ esac
 
 printf 'Installing Drupal CI parity assets...\n'
 
+# Copy add-on assets/shims into project, respecting conflict handling mode.
 while IFS= read -r -d '' source; do
-  rel="${source#$assets_root/}"
+  rel="${source#$addon_root/}"
   if [[ "$rel" == ide-settings/* ]]; then
     continue
   fi
+  if [[ "$rel" == tooling/scripts/* ]]; then
+    continue
+  fi
   is_shim=0
-  if [[ "$rel" == dcq-tooling/bin/* ]]; then
-    target="${shim_dir%/}/${rel#dcq-tooling/bin/}"
+  if [[ "$rel" == tooling/bin/* ]]; then
+    target="${shim_dir%/}/${rel#tooling/bin/}"
     is_shim=1
+  elif [[ "$rel" == assets/* ]]; then
+    target="${app_root%/}/${rel#assets/}"
   else
-    target="${app_root%/}/${rel}"
+    continue
   fi
 
   tmp="$(mktemp "${TMPDIR:-/tmp}/dcq-src-XXXXXX")"
@@ -879,7 +891,7 @@ while IFS= read -r -d '' source; do
     chmod 0755 "$target" || true
   fi
   printf 'WRITE: %s\n' "$target"
-done < <(find "$assets_root" -type f -print0)
+done < <(find "$addon_root" -type f -print0)
 
 printf 'Done.\n'
 
@@ -1060,7 +1072,7 @@ if [ -f "$core_package_json" ]; then
   fi
 fi
 
-ide_settings_root="${cwd}/dcq-assets/ide-settings/vscode"
+ide_settings_root="${addon_root}/ide-settings/vscode"
 ide_settings_template="${ide_settings_root}/settings.json"
 ide_extensions_template="${ide_settings_root}/extensions.json"
 ide_settings_doc="${ide_settings_root}/README.md"
@@ -1096,9 +1108,6 @@ if [ -f "$ide_settings_template" ] || [ -f "$ide_extensions_template" ]; then
       ide_tmp="$(mktemp "${TMPDIR:-/tmp}/dcq-ide-XXXXXX")"
 
       shim_setting="$shim_dir_env"
-      if [[ "$shim_setting" != /* ]]; then
-        shim_setting="./${shim_setting}"
-      fi
       ide_node_mode=""
       ide_node_mode_raw="$(string_lower "${DCQ_INSTALL_NODE_DEPS:-}")"
       if [ -n "$node_target_choice" ]; then
@@ -1135,10 +1144,9 @@ if [ -f "$ide_settings_template" ] || [ -f "$ide_extensions_template" ]; then
 
       stylelint_path="${js_modules}/stylelint"
       prettier_path="${js_modules}/prettier"
-      cspell_path="${js_modules}/cspell"
 
       render_ide_template "$ide_settings_template" "$ide_tmp" "$shim_setting" \
-        "$stylelint_path" "$prettier_path" "$cspell_path" "$eslint_node_path" "$eslint_resolve_plugins"
+        "$stylelint_path" "$prettier_path" "$eslint_node_path" "$eslint_resolve_plugins"
 
       if [ "$ide_mode" = "merge" ] && [ -f "$ide_target_settings" ]; then
         if merge_json_settings "$ide_target_settings" "$ide_tmp" "$ide_target_settings"; then

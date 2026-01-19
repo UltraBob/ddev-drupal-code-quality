@@ -20,7 +20,7 @@ project_files:
   - commands/web/prettier-fix
   - commands/web/stylelint
   - commands/web/stylelint-fix
-  - dcq-assets
+  - drupal-code-quality
   - dcq-install.sh
 
 # DDEV version constraint for the add-on.
@@ -34,32 +34,10 @@ post_install_actions:
 
 removal_actions:
   - |
-      #ddev-description Remove dcq-tooling shims
-      shim_dir="${DCQ_SHIM_DIR:-dcq-tooling/bin}"
-      if [ -f .dcq-shim-dir ]; then
-        shim_dir="$(cat .dcq-shim-dir)"
-      fi
+      #ddev-description Remove Drupal code quality shims
       project_root="$(cd .. && pwd)"
-      skip_shim_removal=0
-      if [ -z "$shim_dir" ] || [ "$shim_dir" = "." ]; then
-        echo "Skipping shim removal; invalid shim path."
-        skip_shim_removal=1
-      fi
-      if [ "$skip_shim_removal" -eq 0 ]; then
-        if [[ "$shim_dir" = /* ]]; then
-          target="$shim_dir"
-        else
-          target="${project_root%/}/$shim_dir"
-        fi
-        case "$target" in
-          "$project_root"/*) ;;
-          *)
-            echo "Skipping shim removal; path outside project root: $target"
-            skip_shim_removal=1
-            ;;
-        esac
-      fi
-      if [ "$skip_shim_removal" -eq 0 ] && [ -d "$target" ]; then
+      target="${project_root%/}/.ddev/drupal-code-quality/tooling/bin"
+      if [ -d "$target" ]; then
         for file in "$target"/*; do
           [ -e "$file" ] || continue
           if head -n 1 "$file" | grep -q '^#ddev-generated'; then
@@ -71,5 +49,4 @@ removal_actions:
         done
         find "$target" -type d -empty -delete
       fi
-      rm -f .dcq-shim-dir
-      rm -rf dcq-assets
+      rm -rf drupal-code-quality

@@ -9,10 +9,9 @@
   "phpsab.fixerArguments": [],
   "phpsab.snifferShowSources": true,
   "phpsab.debug": true,
-  "phpstan.binPath": "${workspaceFolder}/__DCQ_SHIM_DIR__/phpstan",
-  "phpstan.rootDir": "${workspaceFolder}",
-  "phpstan.configFile": "${workspaceFolder}/dcq-tooling/ci-config/phpstan.neon",
-  "phpstan.path": "${workspaceFolder}/__DCQ_SHIM_DIR__/phpstan",
+  "phpstan.binPath": "__DCQ_SHIM_DIR__/phpstan",
+  "phpstan.rootDir": ".",
+  "phpstan.configFile": "./phpstan.neon",
   "intelephense.environment.phpVersion": "8.3",
   "eslint.enable": true,
   "eslint.workingDirectories": [
@@ -35,6 +34,5 @@
     "yaml"
   ],
   "stylelint.stylelintPath": "__DCQ_STYLELINT_PATH__",
-  "prettier.prettierPath": "__DCQ_PRETTIER_PATH__",
-  "cSpell.path": "__DCQ_CSPELL_PATH__"
+  "prettier.prettierPath": "__DCQ_PRETTIER_PATH__"
 }

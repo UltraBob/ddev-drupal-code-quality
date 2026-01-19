@@ -65,31 +65,29 @@ ddev checks
 ddev checks-full
 ```
 
-Host shims are installed under `dcq-tooling/bin` by default (set `DCQ_SHIM_DIR`
-to change this within the project root). These are intended for IDE tool paths
-or tools that require a local binary path:
+Host shims are installed under `.ddev/drupal-code-quality/tooling/bin`. These are intended for
+IDE tool paths or tools that require a local binary path:
 
 ```bash
-./dcq-tooling/bin/phpstan
-./dcq-tooling/bin/phpcs
-./dcq-tooling/bin/eslint
-./dcq-tooling/bin/stylelint
-./dcq-tooling/bin/prettier
-./dcq-tooling/bin/cspell
-./dcq-tooling/bin/checks
-./dcq-tooling/bin/checks-full
+./.ddev/drupal-code-quality/tooling/bin/phpstan
+./.ddev/drupal-code-quality/tooling/bin/phpcs
+./.ddev/drupal-code-quality/tooling/bin/eslint
+./.ddev/drupal-code-quality/tooling/bin/stylelint
+./.ddev/drupal-code-quality/tooling/bin/prettier
+./.ddev/drupal-code-quality/tooling/bin/cspell
+./.ddev/drupal-code-quality/tooling/bin/checks
+./.ddev/drupal-code-quality/tooling/bin/checks-full
 ```
 
 ## IDE settings (VS Code/Codium)
 
-Starter settings live in `dcq-assets/ide-settings/vscode`. During install, you can
+Starter settings live in `.ddev/drupal-code-quality/ide-settings/vscode`. During install, you can
 choose to merge them into `.vscode/settings.json` and
 `.vscode/extensions.json`, back up and overwrite, or skip and handle them
 manually.
 
-The template points PHP tooling at `dcq-tooling/bin` and JS tooling at local
-`node_modules`. If you override `DCQ_SHIM_DIR`, update the PHP tool paths
-accordingly. The installer uses the Node toolchain choice (prompt or
+The template points PHP tooling at `.ddev/drupal-code-quality/tooling/bin` and JS tooling at local
+`node_modules`. The installer uses the Node toolchain choice (prompt or
 `DCQ_INSTALL_NODE_DEPS`) to set JS paths to root or `web/core`. Override the
 paths if you prefer a different location.
 
@@ -103,6 +101,10 @@ paths if you prefer a different location.
 
 ## Configuration notes
 
+- Reports:
+  - `dcq-reports/` is created at the project root when running `checks`,
+    `checks-full`, or the `*-fix` commands (logs + patch previews).
+  - Add `dcq-reports/` to `.gitignore` if you do not want to track it.
 - ESLint toolchain selection:
   - `ESLINT_TOOLCHAIN=auto` (default) prefers root toolchain when root configs exist.
   - `ESLINT_TOOLCHAIN=core` forces Drupal core JS toolchain.
@@ -111,7 +113,7 @@ paths if you prefer a different location.
   - `ESLINT_CONFIG_MODE=nearest` (default) groups by nearest config file.
   - `ESLINT_CONFIG_MODE=fixed` forces `.eslintrc.passing.json`.
 - CSpell parity:
-  - Run `ddev exec php dcq-tooling/scripts/prepare-cspell.php -s .prepared` once and
+  - Run `ddev exec php /mnt/ddev_config/drupal-code-quality/tooling/scripts/prepare-cspell.php -s .prepared` once and
     replace `.cspell.json` after reviewing the diff.
   - `ddev cspell` runs from the repo root (`.`) by default; scope is controlled
     by `.cspell.json` `ignorePaths`. Narrow the scan by passing explicit paths.
@@ -125,7 +127,6 @@ paths if you prefer a different location.
 
 ## Installer environment variables
 
-- `DCQ_SHIM_DIR`: override shim install path (must be within the project root).
 - `DCQ_INSTALL_MODE`: `replace`, `skip`, or `abort` for conflict handling.
 - `DCQ_NONINTERACTIVE=true`: behave like `DCQ_INSTALL_MODE=replace`.
 - `DCQ_INSTALL_DEPS`: `install`/`true` to auto-install missing `drupal/core-dev`,
@@ -142,9 +143,8 @@ paths if you prefer a different location.
 
 ## Uninstall
 
-Removing the add-on cleans up `.ddev` commands and assets, but project-root
-configs and `dcq-tooling/bin` shims are left in place intentionally. Remove them
-manually if desired.
+Removing the add-on cleans up `.ddev` commands and shims; project-root configs
+remain in place intentionally. Remove them manually if desired.
 
 ## Credits
 

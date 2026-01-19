@@ -4,7 +4,7 @@
 # Phases:
 # 1) Copy CI parity config files and shims into the project (with conflict handling).
 # 2) Offer to install PHP tooling via ddev composer (core-dev).
-# 3) Offer to install JS tooling via yarn (root or core), including optional root package.json.
+# 3) Offer to install JS tooling (root or core) using the detected package manager.
 # 4) Offer to install VS Code/Codium settings/extensions (merge/overwrite/skip).
 #
 # Key env vars (see README for full list):
@@ -125,9 +125,6 @@ if (isset($data["license"])) {
 if (isset($data["engines"])) {
   $out["engines"] = $data["engines"];
 }
-if (isset($data["packageManager"])) {
-  $out["packageManager"] = $data["packageManager"];
-}
 if (isset($data["dependencies"])) {
   $out["dependencies"] = $data["dependencies"];
 }
@@ -165,11 +162,6 @@ PHP
 
   printf '%s\n' "$output" > "${app_root%/}/package.json"
   printf 'WRITE: %s\n' "${app_root%/}/package.json"
-
-  if [ -f "${app_root%/}/web/core/.yarnrc.yml" ] && [ ! -f "${app_root%/}/.yarnrc.yml" ]; then
-    cp "${app_root%/}/web/core/.yarnrc.yml" "${app_root%/}/.yarnrc.yml"
-    printf 'WRITE: %s\n' "${app_root%/}/.yarnrc.yml"
-  fi
 
   printf 'Created package.json from Drupal core devDependencies; review and customize as needed.\n'
   return 0
@@ -380,9 +372,10 @@ PHP
 }
 
 maybe_install_missing_root_deps() {
-  # Prompt to add missing root devDependencies (yarn add -D) when root package.json exists.
+  # Prompt to add missing root devDependencies when root package.json exists.
   local ddev_cmd="$1"
   local non_interactive="$2"
+  local package_manager="$3"
   local missing_node_deps
 
   if ! missing_node_deps="$(find_missing_node_deps "$ddev_cmd")"; then
@@ -405,12 +398,22 @@ maybe_install_missing_root_deps() {
     return 1
   fi
 
-  if prompt_yes_no "Add missing dependencies with 'yarn add -D' in the project root?" 1; then
+  if [ "$package_manager" = "npm" ]; then
+    prompt_msg="Add missing dependencies with 'npm install --save-dev' in the project root? This updates package.json and package-lock.json."
+  else
+    prompt_msg="Add missing dependencies with 'yarn add -D' in the project root? This updates package.json and yarn.lock."
+  fi
+
+  if prompt_yes_no "$prompt_msg" 1; then
     deps_cmd=""
     for dep in "${missing_node_deps_array[@]}"; do
       deps_cmd+=" $(printf '%q' "$dep")"
     done
-    cmd=( "$ddev_cmd" "exec" "bash" "-lc" "cd /var/www/html && yarn add -D${deps_cmd}" )
+    if [ "$package_manager" = "npm" ]; then
+      cmd=( "$ddev_cmd" "exec" "bash" "-lc" "cd /var/www/html && npm install --save-dev${deps_cmd}" )
+    else
+      cmd=( "$ddev_cmd" "exec" "bash" "-lc" "cd /var/www/html && yarn add -D${deps_cmd}" )
+    fi
     run_command "${cmd[@]}"
     printf 'Node dependencies added (project root).\n'
     return 0
@@ -431,7 +434,7 @@ prompt_node_target() {
   fi
 
   if [ "$has_root" -eq 1 ]; then
-    printf 'Choose JS toolchain target: [r]oot (project package.json), [c]ore (web/core), [s]kip (no install, default: root): ' >&"$PROMPT_OUT_FD"
+    printf 'Choose JS toolchain target: [r]oot (install deps in project root), [c]ore (install deps in web/core), [s]kip (no install, default: root): ' >&"$PROMPT_OUT_FD"
     if ! IFS= read -r -u "$PROMPT_IN_FD" choice; then
       choice=""
     fi
@@ -441,7 +444,7 @@ prompt_node_target() {
       return
     fi
   else
-    printf 'No project package.json found. Choose JS toolchain target: [r]oot (create from core), [c]ore (web/core), [s]kip (no install, default: root): ' >&"$PROMPT_OUT_FD"
+    printf 'No project package.json found. Choose JS toolchain target: [r]oot (create package.json from core, then install), [c]ore (install in web/core), [s]kip (no install, default: root): ' >&"$PROMPT_OUT_FD"
     if ! IFS= read -r -u "$PROMPT_IN_FD" choice; then
       choice=""
     fi
@@ -467,7 +470,7 @@ prompt_yes_no() {
   local suffix
 
   if [ "${PROMPT_AVAILABLE:-0}" -ne 1 ]; then
-    printf 'No interactive terminal detected; skipping prompt. Use DCQ_INSTALL_DEPS=install to auto-approve.\n' >&2
+    printf 'No interactive terminal detected; skipping prompt. Use DCQ_INSTALL_* env vars to control behavior.\n' >&2
     if [ "$default_no" -eq 1 ]; then
       return 1
     fi
@@ -524,6 +527,132 @@ prompt_ide_settings_mode() {
   esac
 }
 
+set_phpstan_level() {
+  local config_path="$1"
+  local level="$2"
+  local tmp
+  local replaced=0
+  local inserted=0
+
+  if [ ! -f "$config_path" ]; then
+    return 1
+  fi
+
+  tmp="$(mktemp "${TMPDIR:-/tmp}/dcq-phpstan-XXXXXX")"
+  while IFS= read -r line; do
+    if [[ "$line" =~ ^[[:space:]]*level:[[:space:]]*[0-9]+ ]]; then
+      if [ "$replaced" -eq 0 ]; then
+        printf '    level: %s\n' "$level" >>"$tmp"
+        replaced=1
+      else
+        printf '%s\n' "$line" >>"$tmp"
+      fi
+      continue
+    fi
+    printf '%s\n' "$line" >>"$tmp"
+  done <"$config_path"
+
+  if [ "$replaced" -eq 0 ]; then
+    tmp2="$(mktemp "${TMPDIR:-/tmp}/dcq-phpstan-XXXXXX")"
+    while IFS= read -r line; do
+      printf '%s\n' "$line" >>"$tmp2"
+      if [ "$inserted" -eq 0 ] && [[ "$line" =~ ^parameters: ]]; then
+        printf '    level: %s\n' "$level" >>"$tmp2"
+        inserted=1
+      fi
+    done <"$tmp"
+    if [ "$inserted" -eq 0 ]; then
+      printf '\nparameters:\n    level: %s\n' "$level" >>"$tmp2"
+    fi
+    mv "$tmp2" "$tmp"
+  fi
+
+  cat "$tmp" >"$config_path"
+  rm -f "$tmp"
+  return 0
+}
+
+prompt_phpstan_level() {
+  local app_root="$1"
+  local config_path="${app_root%/}/phpstan.neon"
+  local baseline_path="${app_root%/}/phpstan-baseline.neon"
+  local answer
+  local env_level
+
+  printf '\n==> PHPStan defaults\n'
+  printf 'PHPStan defaults to level 0 for CI parity. You can keep level 0 or set a higher local default (0-9).\n'
+  printf 'Recommended starting point: level 3.\n'
+
+  if [ ! -f "$config_path" ]; then
+    printf 'phpstan.neon not found in project root; skipping level update.\n'
+    return 0
+  fi
+
+  env_level="$(string_lower "${DCQ_PHPSTAN_LEVEL:-}")"
+  if [ -n "$env_level" ]; then
+    if [[ "$env_level" =~ ^[0-9]$ ]]; then
+      if set_phpstan_level "$config_path" "$env_level"; then
+        printf 'WRITE: %s (level %s)\n' "$config_path" "$env_level"
+      else
+        printf 'Unable to update phpstan.neon level.\n' >&2
+      fi
+    else
+      printf 'Invalid DCQ_PHPSTAN_LEVEL "%s"; keeping current phpstan.neon level.\n' "$env_level" >&2
+    fi
+  elif [ "$non_interactive" -eq 1 ] || [ "${PROMPT_AVAILABLE:-0}" -ne 1 ]; then
+    printf 'No interactive terminal detected; keeping current phpstan.neon level.\n'
+  else
+    printf 'Set phpstan.neon level (0-9) or [s]kip to keep current (default: skip): ' >&"$PROMPT_OUT_FD"
+    if ! IFS= read -r -u "$PROMPT_IN_FD" answer; then
+      answer=""
+    fi
+    answer="$(string_lower "$answer")"
+    if [ -n "$answer" ] && [ "$answer" != "s" ] && [ "$answer" != "skip" ]; then
+      if [[ "$answer" =~ ^[0-9]$ ]]; then
+        if set_phpstan_level "$config_path" "$answer"; then
+          printf 'WRITE: %s (level %s)\n' "$config_path" "$answer"
+        else
+          printf 'Unable to update phpstan.neon level.\n' >&2
+        fi
+      else
+        printf 'Invalid level "%s"; keeping current phpstan.neon level.\n' "$answer" >&2
+      fi
+    fi
+  fi
+
+  if [ ! -f "$baseline_path" ]; then
+    printf 'No phpstan-baseline.neon found. Generate one with:\n'
+    printf '  ddev phpstan --generate-baseline\n'
+  fi
+  return 0
+}
+
+maybe_add_gitignore_reports() {
+  local app_root="$1"
+  local gitignore="${app_root%/}/.gitignore"
+  local entry="dcq-reports/"
+
+  if [ -f "$gitignore" ] && grep -q "^${entry}$" "$gitignore"; then
+    printf 'OK: %s already lists %s\n' "$gitignore" "$entry"
+    return 0
+  fi
+
+  if [ "$non_interactive" -eq 1 ] || [ "${PROMPT_AVAILABLE:-0}" -ne 1 ]; then
+    printf 'No interactive terminal detected; skipping .gitignore update for %s.\n' "$entry"
+    return 0
+  fi
+
+  if prompt_yes_no "Add '${entry}' to .gitignore to avoid committing report logs?" 1; then
+    if [ -f "$gitignore" ]; then
+      printf '\n%s\n' "$entry" >>"$gitignore"
+    else
+      printf '%s\n' "$entry" >"$gitignore"
+    fi
+    printf 'WRITE: %s\n' "$gitignore"
+  fi
+  return 0
+}
+
 strip_generated_header() {
   # Remove ddev-generated header if present to keep target files clean.
   local source="$1"
@@ -566,6 +695,43 @@ backup_file() {
 
 command_available() {
   command -v "$1" >/dev/null 2>&1
+}
+
+detect_package_manager() {
+  local dir="$1"
+  local has_yarn=0
+  local has_npm=0
+
+  if [ -f "${dir%/}/yarn.lock" ]; then
+    has_yarn=1
+  fi
+  if [ -f "${dir%/}/package-lock.json" ]; then
+    has_npm=1
+  fi
+
+  if [ "$has_npm" -eq 1 ] && [ "$has_yarn" -eq 1 ]; then
+    printf 'Both yarn.lock and package-lock.json found in %s; defaulting to npm.\n' "$dir" >&2
+    printf 'npm'
+    return
+  fi
+  if [ "$has_npm" -eq 1 ]; then
+    printf 'npm'
+    return
+  fi
+  if [ "$has_yarn" -eq 1 ]; then
+    printf 'yarn'
+    return
+  fi
+
+  printf 'npm'
+}
+
+ensure_root_yarnrc() {
+  local app_root="$1"
+  if [ -f "${app_root%/}/web/core/.yarnrc.yml" ] && [ ! -f "${app_root%/}/.yarnrc.yml" ]; then
+    cp "${app_root%/}/web/core/.yarnrc.yml" "${app_root%/}/.yarnrc.yml"
+    printf 'WRITE: %s\n' "${app_root%/}/.yarnrc.yml"
+  fi
 }
 
 escape_sed_replacement() {
@@ -795,7 +961,8 @@ case "$install_mode" in
   abort) abort_on_conflict=1 ;;
 esac
 
-printf 'Installing Drupal CI parity assets...\n'
+printf '\n==> Phase 1: Copy CI parity configs and shims\n'
+printf 'This will copy config files into the project root and install shims under %s.\n' "$shim_dir_env"
 
 # Copy add-on assets/shims into project, respecting conflict handling mode.
 while IFS= read -r -d '' source; do
@@ -895,6 +1062,9 @@ done < <(find "$addon_root" -type f -print0)
 
 printf 'Done.\n'
 
+prompt_phpstan_level "$app_root"
+
+printf '\n==> Phase 2: PHP tooling dependencies\n'
 vendor_bin="${app_root%/}/vendor/bin"
 missing_tools=()
 for tool in phpstan phpcs phpcbf; do
@@ -973,6 +1143,7 @@ if [ "${#missing_tools[@]}" -gt 0 ]; then
   fi
 fi
 
+printf '\n==> Phase 3: JS toolchain dependencies\n'
 core_package_json="${app_root%/}/web/core/package.json"
 if [ -f "$core_package_json" ]; then
   node_mode_raw="$(string_lower "${DCQ_INSTALL_NODE_DEPS:-}")"
@@ -997,10 +1168,14 @@ if [ -f "$core_package_json" ]; then
       if ! command_available "$ddev_cmd"; then
         printf 'ddev executable not found in PATH; skipping Node dependency check.\n'
       else
-        maybe_install_missing_root_deps "$ddev_cmd" "$non_interactive" || true
+        root_pm="$(detect_package_manager "$app_root")"
+        if [ "$root_pm" = "yarn" ]; then
+          ensure_root_yarnrc "$app_root"
+        fi
+        maybe_install_missing_root_deps "$ddev_cmd" "$non_interactive" "$root_pm" || true
       fi
     fi
-    if [ "$node_mode_raw" = "skip" ]; then
+  if [ "$node_mode_raw" = "skip" ]; then
       printf 'Skipping Node toolchain install. Use DCQ_INSTALL_NODE_DEPS=root or DCQ_INSTALL_NODE_DEPS=core to enable later.\n'
       node_mode="skip"
     fi
@@ -1052,18 +1227,39 @@ if [ -f "$core_package_json" ]; then
 
       node_install_done=0
       if [ "$target" = "core" ]; then
-        cmd=( "$ddev_cmd" "exec" "bash" "-lc" "cd web/core && yarn install" )
+        core_pm="$(detect_package_manager "${app_root%/}/web/core")"
+        printf 'Installing JS deps in web/core using %s.\n' "$core_pm"
+        if [ "$core_pm" = "npm" ]; then
+          cmd=( "$ddev_cmd" "exec" "bash" "-lc" "cd web/core && npm install" )
+        else
+          cmd=( "$ddev_cmd" "exec" "bash" "-lc" "cd web/core && yarn install" )
+        fi
         run_command "${cmd[@]}"
         printf 'Node toolchain installed (core).\n'
         node_install_done=1
       elif [ "$target" = "root" ]; then
         if [ "$has_root_package_json" -eq 1 ]; then
-          if maybe_install_missing_root_deps "$ddev_cmd" "$non_interactive"; then
+          root_pm="$(detect_package_manager "$app_root")"
+          if [ "$root_pm" = "yarn" ]; then
+            ensure_root_yarnrc "$app_root"
+          fi
+          if maybe_install_missing_root_deps "$ddev_cmd" "$non_interactive" "$root_pm"; then
             node_install_done=1
           fi
         fi
         if [ "$node_install_done" -eq 0 ]; then
-          cmd=( "$ddev_cmd" "exec" "bash" "-lc" "cd /var/www/html && yarn install" )
+          if [ -z "${root_pm:-}" ]; then
+            root_pm="$(detect_package_manager "$app_root")"
+            if [ "$root_pm" = "yarn" ]; then
+              ensure_root_yarnrc "$app_root"
+            fi
+          fi
+          printf 'Installing JS deps in project root using %s.\n' "${root_pm:-npm}"
+          if [ "${root_pm:-npm}" = "npm" ]; then
+            cmd=( "$ddev_cmd" "exec" "bash" "-lc" "cd /var/www/html && npm install" )
+          else
+            cmd=( "$ddev_cmd" "exec" "bash" "-lc" "cd /var/www/html && yarn install" )
+          fi
           run_command "${cmd[@]}"
         fi
         printf 'Node toolchain installed (project root).\n'
@@ -1072,11 +1268,15 @@ if [ -f "$core_package_json" ]; then
   fi
 fi
 
+printf '\n==> Optional: .gitignore update\n'
+maybe_add_gitignore_reports "$app_root"
+
 ide_settings_root="${addon_root}/ide-settings/vscode"
 ide_settings_template="${ide_settings_root}/settings.json"
 ide_extensions_template="${ide_settings_root}/extensions.json"
 ide_settings_doc="${ide_settings_root}/README.md"
 if [ -f "$ide_settings_template" ] || [ -f "$ide_extensions_template" ]; then
+  printf '\n==> Phase 4: IDE settings\n'
   ide_mode_raw="$(string_lower "${DCQ_INSTALL_IDE_SETTINGS:-}")"
   if [ -z "$ide_mode_raw" ]; then
     if [ "$non_interactive" -eq 1 ]; then

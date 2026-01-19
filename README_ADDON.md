@@ -38,8 +38,10 @@ root. If conflicts are detected, you can choose to back up and replace, skip,
 or abort. Skipping a config may reduce CI parity. The installer will prompt for:
 - Conflict handling (default: skip unless you choose replace/abort).
 - PHP tooling dependencies (install `drupal/core-dev` or run `ddev composer install`).
-- Node toolchain location (project root or `web/core`).
+- PHPStan default level (keep CI level 0 or choose a local level 0-9; recommend 3).
+- Node toolchain location (project root or `web/core`) and package manager selection.
 - Missing Drupal JS dependencies when a root `package.json` exists.
+- Optional `.gitignore` update for `dcq-reports/`.
 - IDE settings (merge/overwrite/skip when templates are available).
 The installer runs in bash so it does not require host PHP.
 
@@ -95,9 +97,9 @@ paths if you prefer a different location.
 
 - DDEV project with Drupal core under `web/`.
 - Composer dependencies installed (`ddev composer install`).
-- Node toolchain for JS linting (recommended: enable corepack in DDEV and run
-  `yarn install` in the project root; the installer can create a root
-  `package.json` based on Drupal core when missing).
+- Node toolchain for JS linting (npm or yarn; the installer selects based on
+  lockfiles and can create a root `package.json` from Drupal core when missing).
+  - If you use yarn, enable corepack in DDEV.
   - Note: current installer uses Yarn; future updates may select npm/yarn based
     on existing lockfiles.
 
@@ -129,11 +131,14 @@ paths if you prefer a different location.
 - PHPStan config fallback:
   - If no project `phpstan.neon*` exists, the wrapper uses the GitLab template
     config shipped with the add-on.
+- PHPStan level:
+  - CI parity uses level 0. The installer can set a local default level (0-9).
 
 ## Installer environment variables
 
 - `DCQ_INSTALL_MODE`: `replace`, `skip`, or `abort` for conflict handling.
 - `DCQ_NONINTERACTIVE=true`: behave like `DCQ_INSTALL_MODE=replace`.
+- `DCQ_PHPSTAN_LEVEL`: set `phpstan.neon` level (0-9) without prompting.
 - `DCQ_INSTALL_DEPS`: `install`/`true` to auto-install missing `drupal/core-dev`,
   `skip`/`false` to skip, or unset to prompt when interactive.
 - `DCQ_INSTALL_NODE_DEPS`: `root` to install JS deps in the project root (creates
@@ -141,7 +146,8 @@ paths if you prefer a different location.
   and prompts to add missing Drupal deps when a root `package.json` already
   exists), `core` to install in `web/core`,
   `install`/`true` to auto-install in the project root, `skip`/`false` to skip,
-  or unset to prompt (default: root).
+  or unset to prompt (default: root). The installer selects npm/yarn based on
+  existing lockfiles.
 - `DCQ_INSTALL_IDE_SETTINGS`: `merge` to add missing VS Code settings and
   extension recommendations, `overwrite` to back up and replace, `skip` to
   handle manually, or unset to prompt.

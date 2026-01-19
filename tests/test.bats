@@ -11,6 +11,8 @@
 #   bats ./tests/test.bats --filter-tags '!release'
 # To run the full Drupal install test:
 #   DCQ_FULL_TESTS=1 bats ./tests/test.bats --filter-tags 'full'
+# To run node package manager selection tests:
+#   bats ./tests/test.bats --filter-tags 'node'
 # For debugging:
 #   bats ./tests/test.bats --show-output-of-passing-tests --verbose-run --print-output-on-failure
 
@@ -119,6 +121,7 @@ setup() {
   export TESTDIR="$(mktemp -d "${HOME}/tmp/${PROJNAME}.XXXXXX")"
   export DDEV_NONINTERACTIVE=true
   export DDEV_NO_INSTRUMENTATION=true
+  export DCQ_NONINTERACTIVE=true
   ddev delete -Oy "${PROJNAME}" >/dev/null 2>&1 || true
   cd "${TESTDIR}"
   run ddev config --project-name="${PROJNAME}" --project-tld=ddev.site --project-type=drupal11 --docroot=web
@@ -162,6 +165,51 @@ assert_addon_installed() {
   assert_file_exist ".eslintrc.json"
   assert_file_exist ".phpcs.xml"
   assert_file_not_exist "ide-settings"
+}
+
+assert_phpstan_level() {
+  local expected="$1"
+
+  if command -v rg >/dev/null 2>&1; then
+    run rg -n "level:[[:space:]]*${expected}" "phpstan.neon"
+  else
+    run grep -E -n "level:[[:space:]]*${expected}" "phpstan.neon"
+  fi
+  assert_success
+}
+
+write_stub_package_json() {
+  local path="$1"
+  cat > "$path" <<'JSON'
+{
+  "name": "dcq-test",
+  "private": true,
+  "devDependencies": {
+    "eslint-plugin-no-jquery": "^3.1.1",
+    "stylelint-prettier": "^5.0.3"
+  }
+}
+JSON
+}
+
+write_stub_package_lock() {
+  local path="$1"
+  cat > "$path" <<'JSON'
+{
+  "name": "dcq-test",
+  "version": "1.0.0",
+  "lockfileVersion": 3,
+  "requires": true,
+  "packages": {}
+}
+JSON
+}
+
+assert_container_file_exist() {
+  local path="$1"
+
+  run ddev exec test -f "$path"
+  assert_success
 }
 
 restart_or_start_ddev() {
@@ -384,7 +432,19 @@ teardown() {
   run ddev restart -y
   assert_success
   assert_addon_installed
+  assert_phpstan_level "0"
   health_checks
+}
+
+@test "install from directory with phpstan level override" {
+  set -u -o pipefail
+  export DCQ_PHPSTAN_LEVEL=3
+  run ddev add-on get "${DIR}"
+  assert_success
+  run ddev restart -y
+  assert_success
+  assert_addon_installed
+  assert_phpstan_level "3"
 }
 
 @test "remove cleans ddev assets and shims" {
@@ -418,6 +478,64 @@ teardown() {
   assert_success
   assert_addon_installed
   health_checks
+}
+
+# bats test_tags=node
+@test "node install uses npm when package-lock.json present" {
+  set -u -o pipefail
+  export DCQ_INSTALL_DEPS=skip
+  export DCQ_INSTALL_NODE_DEPS=install
+  mkdir -p web/core
+  write_stub_package_json "web/core/package.json"
+  write_stub_package_json "package.json"
+  write_stub_package_lock "package-lock.json"
+
+  run ddev add-on get "${DIR}"
+  assert_success
+  assert_output --partial "Installing JS deps in project root using npm."
+  assert_container_file_exist "/var/www/html/package-lock.json"
+  assert_container_file_exist "/var/www/html/node_modules/eslint-plugin-no-jquery/package.json"
+  assert_container_file_exist "/var/www/html/node_modules/stylelint-prettier/package.json"
+}
+
+# bats test_tags=node
+@test "node install uses yarn when yarn.lock present" {
+  set -u -o pipefail
+  export DCQ_INSTALL_DEPS=skip
+  export DCQ_INSTALL_NODE_DEPS=install
+  mkdir -p web/core
+  write_stub_package_json "web/core/package.json"
+  write_stub_package_json "package.json"
+  printf '{}' > "yarn.lock"
+
+  run ddev exec bash -lc "command -v yarn"
+  if [ "$status" -ne 0 ]; then
+    skip "Yarn not available in container."
+  fi
+
+  run ddev add-on get "${DIR}"
+  assert_success
+  assert_output --partial "Installing JS deps in project root using yarn."
+  assert_container_file_exist "/var/www/html/yarn.lock"
+  assert_container_file_exist "/var/www/html/node_modules/eslint-plugin-no-jquery/package.json"
+  assert_container_file_exist "/var/www/html/node_modules/stylelint-prettier/package.json"
+}
+
+# bats test_tags=node
+@test "node install uses npm when no lockfile present" {
+  set -u -o pipefail
+  export DCQ_INSTALL_DEPS=skip
+  export DCQ_INSTALL_NODE_DEPS=install
+  mkdir -p web/core
+  write_stub_package_json "web/core/package.json"
+  write_stub_package_json "package.json"
+
+  run ddev add-on get "${DIR}"
+  assert_success
+  assert_output --partial "Installing JS deps in project root using npm."
+  assert_container_file_exist "/var/www/html/package-lock.json"
+  assert_container_file_exist "/var/www/html/node_modules/eslint-plugin-no-jquery/package.json"
+  assert_container_file_exist "/var/www/html/node_modules/stylelint-prettier/package.json"
 }
 
 # bats test_tags=full

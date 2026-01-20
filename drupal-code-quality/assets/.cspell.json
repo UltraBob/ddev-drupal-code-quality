@@ -52,7 +52,8 @@
         "sql",
         "fullstack",
         "drupal",
-        "dictionary"
+        "dictionary",
+        "project-words"
     ],
     "dictionaryDefinitions": [
         {
@@ -62,6 +63,11 @@
         {
             "name": "dictionary",
             "path": "web/core/misc/cspell/dictionary.txt"
+        },
+        {
+            "name": "project-words",
+            "path": ".cspell-project-words.txt",
+            "description": "Optional project dictionary maintained via ddev cspell-suggest."
         }
     ],
     "words": [

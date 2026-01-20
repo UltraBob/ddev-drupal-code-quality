@@ -117,6 +117,8 @@ The template points PHP tooling at `.ddev/drupal-code-quality/tooling/bin` and J
     replace `.cspell.json` after reviewing the diff.
   - `ddev cspell` runs from the repo root (`.`) by default; scope is controlled
     by `.cspell.json` `ignorePaths`. Narrow the scan by passing explicit paths.
+  - `.cspell-project-words.txt` is created by the installer (empty) and updated
+    by `ddev cspell-suggest` when you accept suggested words.
 - PHPStan baseline:
   - Generate a baseline with `ddev phpstan --generate-baseline`.
   - This writes `phpstan-baseline.neon` at the project root; the wrapper will

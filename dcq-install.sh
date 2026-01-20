@@ -1232,6 +1232,12 @@ if [ "$phpstan_updated" -eq 1 ]; then
   prompt_phpstan_level "$app_root"
 fi
 
+project_cspell_words="${app_root%/}/.cspell-project-words.txt"
+if [ ! -f "$project_cspell_words" ]; then
+  printf '# Project-specific CSpell words (managed via ddev cspell-suggest).\n' > "$project_cspell_words"
+  emit_copy 'WRITE: %s\n' "$project_cspell_words"
+fi
+
 emit '\n==> Phase 3: JS toolchain dependencies\n'
 core_package_json="${app_root%/}/web/core/package.json"
 if [ -f "$core_package_json" ]; then

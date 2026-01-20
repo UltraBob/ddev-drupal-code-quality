@@ -130,7 +130,11 @@ find_nearest_config() {
   dir="$(dirname "$file_path")"
   while true; do
     # Walk up the directory tree to find the closest ESLint config.
-    for candidate in .eslintrc .eslintrc.json .eslintrc.yaml .eslintrc.yml .eslintrc.js .eslintrc.cjs; do
+    for candidate in .eslintrc.passing.json .eslintrc .eslintrc.json .eslintrc.yaml .eslintrc.yml .eslintrc.js .eslintrc.cjs; do
+      if [ "$dir" = "web" ] || [ "$dir" = "./web" ]; then
+        # Skip docroot configs so nearest-mode prefers theme/module configs or root passing config.
+        continue
+      fi
       if [ -f "$dir/$candidate" ]; then
         echo "$dir/$candidate"
         return 0

@@ -1119,6 +1119,12 @@ if [ "${#missing_tools[@]}" -gt 0 ]; then
   fi
 fi
 
+script_path="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+if [[ "$script_path" == */.ddev/dcq-install.sh ]]; then
+  rm -f "$script_path"
+  emit 'Removed %s after install.\n' "$script_path"
+fi
+
 emit '\n==> Phase 2: Copy CI parity configs and shims\n'
 emit 'This will copy config files into the project root and install shims under %s.\n' "$shim_dir_env"
 phpstan_updated=0

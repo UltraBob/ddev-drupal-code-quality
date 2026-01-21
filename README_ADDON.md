@@ -151,8 +151,9 @@ The template points PHP tooling at `.ddev/drupal-code-quality/tooling/bin` and J
 
 ## Uninstall
 
-Removing the add-on cleans up `.ddev` commands and shims; project-root configs
-remain in place intentionally. Remove them manually if desired.
+Removing the add-on cleans up the `.ddev` payload (commands, shims, assets,
+manifest, and `dcq-install.sh`); project-root configs remain in place
+intentionally. Remove them manually if desired.
 
 ## Credits
 

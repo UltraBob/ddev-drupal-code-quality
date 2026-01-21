@@ -29,6 +29,30 @@ truthy() {
   return 1
 }
 
+detect_docroot() {
+  local config_path="$1"
+  local value=""
+
+  if [ -f "$config_path" ]; then
+    value="$(awk -F: '/^[[:space:]]*docroot:/ {
+      val=$2
+      sub(/^[[:space:]]+/, "", val)
+      sub(/[[:space:]]+$/, "", val)
+      gsub(/^"|"$/, "", val)
+      gsub(/^'\''|'\''$/, "", val)
+      print val
+      exit
+    }' "$config_path")"
+  fi
+
+  value="${value#/}"
+  value="${value%/}"
+  if [ -z "$value" ]; then
+    value="web"
+  fi
+  printf '%s' "$value"
+}
+
 prompt_setup() {
   # Detect a usable TTY for prompts. Falls back to /dev/tty when stdin/stdout
   # are redirected (e.g., running from automation).
@@ -109,9 +133,9 @@ create_root_package_json() {
   local attempts=0
   local max_attempts=5
 
-  cat > "$php_script" <<'PHP'
+  cat > "$php_script" <<PHP
 <?php
-$path = "/var/www/html/web/core/package.json";
+$path = "${DOCROOT_CORE}/package.json";
 $data = json_decode(file_get_contents($path), true);
 if (!is_array($data)) {
   fwrite(STDERR, "Failed to read core package.json\n");
@@ -196,10 +220,10 @@ find_missing_node_deps() {
   local attempts=0
   local max_attempts=5
 
-  cat > "$php_script" <<'PHP'
+  cat > "$php_script" <<PHP
 <?php
 $rootPath = "/var/www/html/package.json";
-$corePath = "/var/www/html/web/core/package.json";
+$corePath = "${DOCROOT_CORE}/package.json";
 $assetsRoot = "/var/www/html/.ddev/drupal-code-quality/assets";
 
 function read_json_file(string $path): ?array {
@@ -734,6 +758,24 @@ strip_generated_header() {
   fi
 }
 
+rewrite_docroot_config() {
+  local source="$1"
+  local target="$2"
+  local tmp
+
+  if [ "${DCQ_DOCROOT:-web}" = "web" ]; then
+    return 0
+  fi
+
+  case "$source" in
+    */assets/.cspell.json|*/assets/.phpcs.xml)
+      tmp="$(mktemp "${TMPDIR:-/tmp}/dcq-docroot-XXXXXX")"
+      sed "s|web/|${DCQ_DOCROOT}/|g" "$target" >"$tmp"
+      mv "$tmp" "$target"
+      ;;
+  esac
+}
+
 ensure_dir() {
   local dir="$1"
   if [ ! -d "$dir" ]; then
@@ -802,8 +844,8 @@ detect_package_manager() {
 
 ensure_root_yarnrc() {
   local app_root="$1"
-  if [ -f "${app_root%/}/web/core/.yarnrc.yml" ] && [ ! -f "${app_root%/}/.yarnrc.yml" ]; then
-    cp "${app_root%/}/web/core/.yarnrc.yml" "${app_root%/}/.yarnrc.yml"
+  if [ -f "${app_root%/}/${DCQ_DOCROOT}/core/.yarnrc.yml" ] && [ ! -f "${app_root%/}/.yarnrc.yml" ]; then
+    cp "${app_root%/}/${DCQ_DOCROOT}/core/.yarnrc.yml" "${app_root%/}/.yarnrc.yml"
     emit 'WRITE: %s\n' "${app_root%/}/.yarnrc.yml"
   fi
 }
@@ -968,8 +1010,8 @@ node_toolchain_present() {
   # Detect installed eslint tooling in either root or core node_modules.
   local app_root="$1"
   local paths=(
-    "$app_root/web/core/node_modules/.bin/eslint"
-    "$app_root/web/core/node_modules/eslint/bin/eslint.js"
+    "$app_root/${DCQ_DOCROOT}/core/node_modules/.bin/eslint"
+    "$app_root/${DCQ_DOCROOT}/core/node_modules/eslint/bin/eslint.js"
     "$app_root/node_modules/.bin/eslint"
     "$app_root/node_modules/eslint/bin/eslint.js"
   )
@@ -1003,6 +1045,21 @@ cwd="$(pwd)"
 app_root="${DDEV_APPROOT:-}"
 if [ -z "$app_root" ]; then
   app_root="$(cd "$cwd/.." && pwd)"
+fi
+
+dcq_docroot="$(detect_docroot "${app_root%/}/.ddev/config.yaml")"
+DCQ_DOCROOT="$dcq_docroot"
+DOCROOT_CONTAINER="/var/www/html/${DCQ_DOCROOT}"
+DOCROOT_CORE="${DOCROOT_CONTAINER}/core"
+docroot_file="${app_root%/}/.ddev/.dcq-docroot"
+if [ -f "$docroot_file" ]; then
+  if ! grep -Fxq "$DCQ_DOCROOT" "$docroot_file"; then
+    printf '%s\n' "$DCQ_DOCROOT" >"$docroot_file"
+    emit_copy 'WRITE: %s\n' "$docroot_file"
+  fi
+else
+  printf '%s\n' "$DCQ_DOCROOT" >"$docroot_file"
+  emit_copy 'WRITE: %s\n' "$docroot_file"
 fi
 
 node_target_choice=""
@@ -1156,6 +1213,7 @@ while IFS= read -r -d '' source; do
     cat "$source" >"$tmp"
   else
     strip_generated_header "$source" "$tmp"
+    rewrite_docroot_config "$source" "$tmp"
   fi
 
   if [ -e "$target" ]; then
@@ -1244,7 +1302,7 @@ if [ ! -f "$project_cspell_words" ]; then
 fi
 
 emit '\n==> Phase 3: JS toolchain dependencies\n'
-core_package_json="${app_root%/}/web/core/package.json"
+core_package_json="${app_root%/}/${DCQ_DOCROOT}/core/package.json"
 if [ -f "$core_package_json" ]; then
   node_mode_raw="$(string_lower "${DCQ_INSTALL_NODE_DEPS:-}")"
   node_toolchain_existing=0
@@ -1434,11 +1492,11 @@ if [ -f "$ide_settings_template" ] || [ -f "$ide_extensions_template" ]; then
       fi
 
       if [ -z "$ide_node_mode" ]; then
-        if [ -d "${app_root%/}/web/core/node_modules" ] && [ ! -d "${app_root%/}/node_modules" ]; then
+        if [ -d "${app_root%/}/${DCQ_DOCROOT}/core/node_modules" ] && [ ! -d "${app_root%/}/node_modules" ]; then
           ide_node_mode="core"
         elif [ -d "${app_root%/}/node_modules" ]; then
           ide_node_mode="root"
-        elif [ -d "${app_root%/}/web/core/node_modules" ]; then
+        elif [ -d "${app_root%/}/${DCQ_DOCROOT}/core/node_modules" ]; then
           ide_node_mode="core"
         else
           ide_node_mode="root"
@@ -1446,9 +1504,9 @@ if [ -f "$ide_settings_template" ] || [ -f "$ide_extensions_template" ]; then
       fi
 
       if [ "$ide_node_mode" = "core" ]; then
-        js_modules="./web/core/node_modules"
-        eslint_node_path="web/core/node_modules"
-        eslint_resolve_plugins="./web/core"
+        js_modules="./${DCQ_DOCROOT}/core/node_modules"
+        eslint_node_path="${DCQ_DOCROOT}/core/node_modules"
+        eslint_resolve_plugins="./${DCQ_DOCROOT}/core"
       else
         js_modules="./node_modules"
         eslint_node_path="node_modules"

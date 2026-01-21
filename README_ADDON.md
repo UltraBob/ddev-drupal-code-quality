@@ -93,7 +93,8 @@ The template points PHP tooling at `.ddev/drupal-code-quality/tooling/bin` and J
 
 ## Requirements
 
-- DDEV project with Drupal core under `web/`.
+- DDEV project with Drupal core in the configured docroot (default `web/`).
+  The installer records the docroot in `.ddev/.dcq-docroot` for wrappers.
 - Composer dependencies installed (`ddev composer install`).
 - Node toolchain for JS linting (npm or yarn; the installer selects based on
   lockfiles and can create a root `package.json` from Drupal core when missing).

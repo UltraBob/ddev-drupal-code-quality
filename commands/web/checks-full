@@ -5,9 +5,16 @@ set -u
 REPORT_DIR="dcq-reports"
 mkdir -p "$REPORT_DIR"
 
+DOCROOT="$(cat /mnt/ddev_config/.dcq-docroot 2>/dev/null || true)"
+DOCROOT="${DOCROOT#/}"
+DOCROOT="${DOCROOT%/}"
+if [ -z "$DOCROOT" ]; then
+  DOCROOT="web"
+fi
+
 # Collect custom code paths once so tools can reuse them.
 CUSTOM_PATHS=()
-for candidate in web/modules/custom web/themes/custom web/profiles/custom; do
+for candidate in "${DOCROOT}/modules/custom" "${DOCROOT}/themes/custom" "${DOCROOT}/profiles/custom"; do
   if [ -d "$candidate" ]; then
     CUSTOM_PATHS+=("$candidate")
   fi
@@ -40,12 +47,12 @@ declare -A TOOL_PATHS=(
 
 EXTRA_TOOLS=()
 
-if find web/modules/custom web/themes/custom web/profiles/custom -type f -path '*/tests/src/*' -print -quit 2>/dev/null | grep -q .; then
+if find "${DOCROOT}/modules/custom" "${DOCROOT}/themes/custom" "${DOCROOT}/profiles/custom" -type f -path '*/tests/src/*' -print -quit 2>/dev/null | grep -q .; then
   # Only run phpunit when we detect tests.
   EXTRA_TOOLS+=("phpunit")
 fi
 
-if find web/modules/custom web/themes/custom web/profiles/custom -type f -path '*/tests/src/Nightwatch/*.js' -print -quit 2>/dev/null | grep -q .; then
+if find "${DOCROOT}/modules/custom" "${DOCROOT}/themes/custom" "${DOCROOT}/profiles/custom" -type f -path '*/tests/src/Nightwatch/*.js' -print -quit 2>/dev/null | grep -q .; then
   # Only run Nightwatch when JS tests exist.
   EXTRA_TOOLS+=("nightwatch")
 fi

@@ -66,14 +66,10 @@ if [ "$has_help" = true ]; then
   print_help
 fi
 
-if ! command -v node >/dev/null 2>&1; then
-  echo "Node.js is not available in the DDEV web container." >&2
-  echo "Install the Drupal core JS toolchain (web/core) to run CSpell." >&2
-  exit 127
-fi
-
 PROJECT_ROOT="/var/www/html"
-CORE_CSPELL="${PROJECT_ROOT}/web/core/node_modules/.bin/cspell"
+DOCROOT="${DCQ_DOCROOT:-web}"
+DOCROOT_PATH="${PROJECT_ROOT}/${DOCROOT}"
+CORE_CSPELL="${DOCROOT_PATH}/core/node_modules/.bin/cspell"
 ROOT_CSPELL="${PROJECT_ROOT}/node_modules/.bin/cspell"
 CSPELL_BIN=""
 REPORT_DIR="${PROJECT_ROOT}/dcq-reports"
@@ -92,8 +88,8 @@ if [ -x "$ROOT_CSPELL" ]; then
 elif [ -x "$CORE_CSPELL" ]; then
   CSPELL_BIN="$CORE_CSPELL"
 else
-  echo "CSpell is not installed in web/core/node_modules or node_modules." >&2
-  echo "Enable corepack and run 'yarn install' in web/core, or install cspell in the project root." >&2
+  echo "CSpell is not installed in ${DOCROOT}/core/node_modules or node_modules." >&2
+  echo "Enable corepack and run 'yarn install' in ${DOCROOT}/core, or install cspell in the project root." >&2
   exit 127
 fi
 
@@ -113,8 +109,8 @@ if [ "$has_config" = false ]; then
   if [ -f "${PROJECT_ROOT}/.cspell.json" ]; then
     CMD+=(-c "${PROJECT_ROOT}/.cspell.json")
   else
-    CMD+=(-c "${PROJECT_ROOT}/web/core/.cspell.json")
-    echo "Warning: using core CSpell config (web/core/.cspell.json); project config not found." >&2
+    CMD+=(-c "${DOCROOT_PATH}/core/.cspell.json")
+    echo "Warning: using core CSpell config (${DOCROOT}/core/.cspell.json); project config not found." >&2
   fi
 fi
 
@@ -124,8 +120,15 @@ normalize_path() {
   if [[ "$path" == /var/www/html/* ]]; then
     path="${path#/var/www/html/}"
   fi
+  if [ "$DOCROOT" != "web" ] && [[ "$path" == web/* ]]; then
+    path="${DOCROOT}/${path#web/}"
+  fi
+  if [[ "$path" == "${DOCROOT}/"* ]]; then
+    echo "$path"
+    return
+  fi
   if [[ "$path" == modules/* || "$path" == themes/* || "$path" == profiles/* ]]; then
-    echo "web/$path"
+    echo "${DOCROOT}/$path"
     return
   fi
   echo "$path"
@@ -215,3 +218,8 @@ if [ -s "$UNRECOGNIZED_FILE" ]; then
 fi
 
 exit 0
+if ! command -v node >/dev/null 2>&1; then
+  echo "Node.js is not available in the DDEV web container." >&2
+  echo "Install the Drupal core JS toolchain (${DOCROOT}/core) to run CSpell." >&2
+  exit 127
+fi

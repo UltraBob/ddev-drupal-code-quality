@@ -124,8 +124,13 @@ setup() {
   export DCQ_NONINTERACTIVE=true
   ddev delete -Oy "${PROJNAME}" >/dev/null 2>&1 || true
   cd "${TESTDIR}"
-  run ddev config --project-name="${PROJNAME}" --project-tld=ddev.site --project-type=drupal11 --docroot=web
+  docroot="${DCQ_TEST_DOCROOT:-web}"
+  if [[ "${BATS_TEST_NAME:-}" == *"non-web docroot"* ]]; then
+    docroot="docroot"
+  fi
+  run ddev config --project-name="${PROJNAME}" --project-tld=ddev.site --project-type=drupal11 --docroot="$docroot"
   assert_success
+  mkdir -p "$docroot"
   python3 - <<'PY'
 from pathlib import Path
 
@@ -434,6 +439,24 @@ teardown() {
   assert_addon_installed
   assert_phpstan_level "0"
   health_checks
+}
+
+@test "install from directory with non-web docroot" {
+  set -u -o pipefail
+  run ddev add-on get "${DIR}"
+  assert_success
+  run ddev restart -y
+  assert_success
+  assert_addon_installed
+  assert_file_exist ".ddev/.dcq-docroot"
+  run cat ".ddev/.dcq-docroot"
+  assert_output "docroot"
+  run grep -n "docroot/core" ".cspell.json"
+  assert_success
+  run grep -n "web/core" ".cspell.json"
+  assert_failure
+  run grep -n "docroot/sites" ".phpcs.xml"
+  assert_success
 }
 
 @test "install from directory with phpstan level override" {

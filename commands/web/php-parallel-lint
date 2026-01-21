@@ -38,8 +38,15 @@ if [ -z "$LINT_BIN" ]; then
   exit 127
 fi
 
+DOCROOT="$(cat /mnt/ddev_config/.dcq-docroot 2>/dev/null || true)"
+DOCROOT="${DOCROOT#/}"
+DOCROOT="${DOCROOT%/}"
+if [ -z "$DOCROOT" ]; then
+  DOCROOT="web"
+fi
+
 DEFAULT_FILES=()
-for candidate in web/modules/custom web/themes/custom web/profiles/custom; do
+for candidate in "${DOCROOT}/modules/custom" "${DOCROOT}/themes/custom" "${DOCROOT}/profiles/custom"; do
   if [ -d "$candidate" ]; then
     while IFS= read -r file_path; do
       DEFAULT_FILES+=("$file_path")
@@ -49,7 +56,7 @@ for candidate in web/modules/custom web/themes/custom web/profiles/custom; do
 
 if [ "${#DEFAULT_FILES[@]}" -eq 0 ] && [ "$#" -eq 0 ]; then
   # Skip quietly if no custom PHP files are present.
-  echo "No custom PHP files found under web/modules/custom, web/themes/custom, or web/profiles/custom. Nothing to check." >&2
+  echo "No custom PHP files found under ${DOCROOT}/modules/custom, ${DOCROOT}/themes/custom, or ${DOCROOT}/profiles/custom. Nothing to check." >&2
   exit 0
 fi
 

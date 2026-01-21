@@ -6,6 +6,7 @@ PHPSTAN_BIN="vendor/bin/phpstan"
 CI_CONFIG="/mnt/ddev_config/drupal-code-quality/assets/phpstan.neon"
 TMP_FILES=()
 source /mnt/ddev_config/commands/helpers/path-map.sh
+DOCROOT="${DCQ_DOCROOT:-web}"
 
 print_help() {
   cat <<'USAGE'
@@ -166,9 +167,9 @@ fi
 CONFIG_FILE=""
 DEFAULT_PATHS=()
 EXCLUDE_PATHS=(
-  "web/modules/contrib"
-  "web/themes/contrib"
-  "web/sites/*/files"
+  "${DOCROOT}/modules/contrib"
+  "${DOCROOT}/themes/contrib"
+  "${DOCROOT}/sites/*/files"
   "sites/*/files"
 )
 # Prefer explicit project configs before falling back to CI template config.
@@ -181,15 +182,15 @@ done
 
 if [ "$explicit_paths" = false ]; then
   # Default to custom code only unless the user passes explicit paths.
-  for candidate in web/modules/custom web/themes/custom web/profiles/custom; do
+  for candidate in "${DOCROOT}/modules/custom" "${DOCROOT}/themes/custom" "${DOCROOT}/profiles/custom"; do
     if [ -d "$candidate" ]; then
       DEFAULT_PATHS+=("$candidate")
     fi
   done
-  if [ -d web/sites ]; then
+  if [ -d "${DOCROOT}/sites" ]; then
     while IFS= read -r site_file; do
       DEFAULT_PATHS+=("$site_file")
-    done < <(find web/sites -type f \( -name '*.php' -o -name '*.inc' -o -name '*.module' -o -name '*.install' -o -name '*.theme' -o -name '*.profile' \) ! -path '*/files/*')
+    done < <(find "${DOCROOT}/sites" -type f \( -name '*.php' -o -name '*.inc' -o -name '*.module' -o -name '*.install' -o -name '*.theme' -o -name '*.profile' \) ! -path '*/files/*')
   fi
 fi
 

@@ -49,4 +49,5 @@ removal_actions:
         done
         find "$target" -type d -empty -delete
       fi
+      rm -f .dcq-docroot
       rm -rf drupal-code-quality

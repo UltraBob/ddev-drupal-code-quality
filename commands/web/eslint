@@ -19,7 +19,9 @@ has_config=false
 seen_double_dash=false
 explicit_paths=false
 PROJECT_ROOT="/var/www/html"
-CORE_ESLINT="${PROJECT_ROOT}/web/core/node_modules/eslint/bin/eslint.js"
+DOCROOT="${DCQ_DOCROOT:-web}"
+DOCROOT_PATH="${PROJECT_ROOT}/${DOCROOT}"
+CORE_ESLINT="${DOCROOT_PATH}/core/node_modules/eslint/bin/eslint.js"
 ROOT_ESLINT="${PROJECT_ROOT}/node_modules/eslint/bin/eslint.js"
 TOOLCHAIN_BIN=""
 NODE_PATH=""
@@ -66,7 +68,7 @@ fi
 
 if ! command -v node >/dev/null 2>&1; then
   echo "Node.js is not available in the DDEV web container." >&2
-  echo "Install Node toolchain (e.g. in web/core via yarn) to run ESLint." >&2
+  echo "Install Node toolchain (e.g. in ${DOCROOT}/core via yarn) to run ESLint." >&2
   exit 127
 fi
 
@@ -86,15 +88,15 @@ if [ "$prefer_root" = true ] && [ -f "$ROOT_ESLINT" ]; then
   RESOLVE_PLUGINS_DIR="$NODE_PATH"
 elif [ -f "$CORE_ESLINT" ]; then
   TOOLCHAIN_BIN="$CORE_ESLINT"
-  NODE_PATH="${PROJECT_ROOT}/web/core/node_modules"
+  NODE_PATH="${DOCROOT_PATH}/core/node_modules"
   RESOLVE_PLUGINS_DIR="$NODE_PATH"
 elif [ -f "$ROOT_ESLINT" ]; then
   TOOLCHAIN_BIN="$ROOT_ESLINT"
   NODE_PATH="${PROJECT_ROOT}/node_modules"
   RESOLVE_PLUGINS_DIR="$NODE_PATH"
 else
-  echo "ESLint is not installed in web/core/node_modules or node_modules." >&2
-  echo "Enable corepack and run 'yarn install' in web/core, or install eslint in the project root." >&2
+  echo "ESLint is not installed in ${DOCROOT}/core/node_modules or node_modules." >&2
+  echo "Enable corepack and run 'yarn install' in ${DOCROOT}/core, or install eslint in the project root." >&2
   exit 127
 fi
 
@@ -118,8 +120,8 @@ if [ "$has_config" = false ] && [ "$ESLINT_CONFIG_MODE" != "nearest" ]; then
   if [ -f "${PROJECT_ROOT}/.eslintrc.passing.json" ]; then
     CMD+=(--config="${PROJECT_ROOT}/.eslintrc.passing.json")
   else
-    CMD+=(--config="${PROJECT_ROOT}/web/core/.eslintrc.passing.json")
-    echo "Warning: using core ESLint config (web/core/.eslintrc.passing.json); project config not found." >&2
+    CMD+=(--config="${DOCROOT_PATH}/core/.eslintrc.passing.json")
+    echo "Warning: using core ESLint config (${DOCROOT}/core/.eslintrc.passing.json); project config not found." >&2
   fi
 fi
 CMD+=(--ext .js,.yml --ignore-pattern "**/node_modules/**")
@@ -166,8 +168,8 @@ resolve_plugins_dir() {
     echo "${PROJECT_ROOT}"
     return
   fi
-  if [ -d "${PROJECT_ROOT}/web/core/node_modules" ]; then
-    echo "${PROJECT_ROOT}/web/core"
+  if [ -d "${DOCROOT_PATH}/core/node_modules" ]; then
+    echo "${DOCROOT_PATH}/core"
     return
   fi
   echo ""
@@ -180,12 +182,18 @@ normalize_path() {
   if [[ "$path" == /var/www/html/* ]]; then
     path="${path#/var/www/html/}"
   fi
-  if [[ "$path" == web/* || "$path" == core/* ]]; then
+  if [ "$DOCROOT" != "web" ] && [[ "$path" == web/* ]]; then
+    path="${DOCROOT}/${path#web/}"
+  fi
+  if [[ "$path" == core/* ]]; then
+    path="${DOCROOT}/$path"
+  fi
+  if [[ "$path" == "${DOCROOT}/"* ]]; then
     echo "$path"
     return
   fi
   if [[ "$path" == modules/* || "$path" == themes/* || "$path" == profiles/* ]]; then
-    echo "web/$path"
+    echo "${DOCROOT}/$path"
     return
   fi
   echo "$path"
@@ -198,8 +206,11 @@ normalize_config_path() {
   if [[ "$path" == /var/www/html/* ]]; then
     path="${path#/var/www/html/}"
   fi
+  if [ "$DOCROOT" != "web" ] && [[ "$path" == web/* ]]; then
+    path="${DOCROOT}/${path#web/}"
+  fi
   if [[ "$path" == core/* ]]; then
-    echo "web/$path"
+    echo "${DOCROOT}/$path"
     return
   fi
   echo "$path"
@@ -249,7 +260,7 @@ fi
 FILES=()
 if [ "$explicit_paths" = false ]; then
   DEFAULT_FILES=()
-  for candidate in web/modules/custom web/themes/custom web/profiles/custom; do
+  for candidate in "${DOCROOT}/modules/custom" "${DOCROOT}/themes/custom" "${DOCROOT}/profiles/custom"; do
     if [ -d "$candidate" ]; then
       while IFS= read -r file_path; do
         DEFAULT_FILES+=("$file_path")
@@ -268,8 +279,8 @@ fi
 DEFAULT_CONFIG=""
 if [ -f "${PROJECT_ROOT}/.eslintrc.passing.json" ]; then
   DEFAULT_CONFIG="${PROJECT_ROOT}/.eslintrc.passing.json"
-elif [ -f "${PROJECT_ROOT}/web/core/.eslintrc.passing.json" ]; then
-  DEFAULT_CONFIG="${PROJECT_ROOT}/web/core/.eslintrc.passing.json"
+elif [ -f "${DOCROOT_PATH}/core/.eslintrc.passing.json" ]; then
+  DEFAULT_CONFIG="${DOCROOT_PATH}/core/.eslintrc.passing.json"
 fi
 
 if [ "$ESLINT_CONFIG_MODE" = "nearest" ]; then

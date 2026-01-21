@@ -5,9 +5,16 @@ set -u
 REPORT_DIR="dcq-reports"
 mkdir -p "$REPORT_DIR"
 
+DOCROOT="$(cat /mnt/ddev_config/.dcq-docroot 2>/dev/null || true)"
+DOCROOT="${DOCROOT#/}"
+DOCROOT="${DOCROOT%/}"
+if [ -z "$DOCROOT" ]; then
+  DOCROOT="web"
+fi
+
 # Collect custom code paths once so tools can reuse them.
 CUSTOM_PATHS=()
-for candidate in web/modules/custom web/themes/custom web/profiles/custom; do
+for candidate in "${DOCROOT}/modules/custom" "${DOCROOT}/themes/custom" "${DOCROOT}/profiles/custom"; do
   if [ -d "$candidate" ]; then
     CUSTOM_PATHS+=("$candidate")
   fi

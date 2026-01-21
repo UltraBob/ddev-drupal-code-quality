@@ -4,10 +4,21 @@ set -u
 
 CONTAINER_ROOT="/var/www/html"
 HOST_ROOT=""
+DCQ_DOCROOT="web"
 
 # Read the DDEV project root from compose metadata so host paths can be mapped.
 if [ -f /mnt/ddev_config/.ddev-docker-compose-full.yaml ]; then
   HOST_ROOT="$(awk -F': ' '/com\.ddev\.approot:/ {print $2; exit}' /mnt/ddev_config/.ddev-docker-compose-full.yaml)"
+fi
+
+# Read the docroot detected during install for non-standard Drupal layouts.
+if [ -f /mnt/ddev_config/.dcq-docroot ]; then
+  read -r docroot_value </mnt/ddev_config/.dcq-docroot || true
+  docroot_value="${docroot_value#/}"
+  docroot_value="${docroot_value%/}"
+  if [ -n "$docroot_value" ]; then
+    DCQ_DOCROOT="$docroot_value"
+  fi
 fi
 
 map_path() {

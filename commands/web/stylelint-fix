@@ -20,7 +20,9 @@ USAGE
 }
 
 PROJECT_ROOT="/var/www/html"
-CORE_STYLELINT="${PROJECT_ROOT}/web/core/node_modules/stylelint/bin/stylelint.mjs"
+DOCROOT="${DCQ_DOCROOT:-web}"
+DOCROOT_PATH="${PROJECT_ROOT}/${DOCROOT}"
+CORE_STYLELINT="${DOCROOT_PATH}/core/node_modules/stylelint/bin/stylelint.mjs"
 ROOT_STYLELINT="${PROJECT_ROOT}/node_modules/stylelint/bin/stylelint.mjs"
 TOOLCHAIN_BIN=""
 NODE_PATH=""
@@ -87,7 +89,7 @@ fi
 
 if ! command -v node >/dev/null 2>&1; then
   echo "Node.js is not available in the DDEV web container." >&2
-  echo "Install the Drupal core JS toolchain (web/core) to run Stylelint." >&2
+  echo "Install the Drupal core JS toolchain (${DOCROOT}/core) to run Stylelint." >&2
   exit 127
 fi
 
@@ -96,10 +98,10 @@ if [ -f "$ROOT_STYLELINT" ]; then
   NODE_PATH="${PROJECT_ROOT}/node_modules"
 elif [ -f "$CORE_STYLELINT" ]; then
   TOOLCHAIN_BIN="$CORE_STYLELINT"
-  NODE_PATH="${PROJECT_ROOT}/web/core/node_modules"
+  NODE_PATH="${DOCROOT_PATH}/core/node_modules"
 else
-  echo "Stylelint is not installed in web/core/node_modules or node_modules." >&2
-  echo "Enable corepack and run 'yarn install' in web/core, or install stylelint in the project root." >&2
+  echo "Stylelint is not installed in ${DOCROOT}/core/node_modules or node_modules." >&2
+  echo "Enable corepack and run 'yarn install' in ${DOCROOT}/core, or install stylelint in the project root." >&2
   exit 127
 fi
 
@@ -126,12 +128,15 @@ normalize_path() {
   if [[ "$path" == /var/www/html/* ]]; then
     path="${path#/var/www/html/}"
   fi
-  if [[ "$path" == web/* ]]; then
+  if [ "$DOCROOT" != "web" ] && [[ "$path" == web/* ]]; then
+    path="${DOCROOT}/${path#web/}"
+  fi
+  if [[ "$path" == "${DOCROOT}/"* ]]; then
     echo "$path"
     return
   fi
   if [[ "$path" == modules/* || "$path" == themes/* || "$path" == profiles/* ]]; then
-    echo "web/$path"
+    echo "${DOCROOT}/$path"
     return
   fi
   echo "$path"
@@ -174,7 +179,7 @@ if [ "${#RAW_PATHS[@]}" -gt 0 ]; then
   done
 else
   # Default to custom code when no explicit paths are provided.
-  for candidate in web/modules/custom web/themes/custom web/profiles/custom; do
+  for candidate in "${DOCROOT}/modules/custom" "${DOCROOT}/themes/custom" "${DOCROOT}/profiles/custom"; do
     if [ -d "$candidate" ]; then
       TARGET_PREFIXES+=("$candidate")
     fi
@@ -208,8 +213,8 @@ if [ "$has_config" = false ]; then
   if [ -f "${PROJECT_ROOT}/.stylelintrc.json" ]; then
     CMD_BASE+=(--config="${PROJECT_ROOT}/.stylelintrc.json")
   else
-    CMD_BASE+=(--config="${PROJECT_ROOT}/web/core/.stylelintrc.json")
-    echo "Warning: using core Stylelint config (web/core/.stylelintrc.json); project config not found." >&2
+    CMD_BASE+=(--config="${DOCROOT_PATH}/core/.stylelintrc.json")
+    echo "Warning: using core Stylelint config (${DOCROOT}/core/.stylelintrc.json); project config not found." >&2
   fi
 fi
 
@@ -238,7 +243,7 @@ find_scss_parser() {
   for path in "${paths[@]}"; do
     [ -z "$path" ] && continue
     if [[ "$path" != /* ]]; then
-      path="${PROJECT_ROOT}/web/${path}"
+      path="${DOCROOT_PATH}/${path}"
     fi
     if [ -f "$path/postcss-scss/lib/scss-syntax.js" ]; then
       CUSTOM_SYNTAX_PATH="$path/postcss-scss/lib/scss-syntax.js"
@@ -253,7 +258,7 @@ if [ "$has_config" = false ]; then
   if [ -f "${PROJECT_ROOT}/.stylelintrc.json" ]; then
     CONFIG_PATH="${PROJECT_ROOT}/.stylelintrc.json"
   else
-    CONFIG_PATH="${PROJECT_ROOT}/web/core/.stylelintrc.json"
+    CONFIG_PATH="${DOCROOT_PATH}/core/.stylelintrc.json"
   fi
   DEFAULT_CONFIG_PATH="$CONFIG_PATH"
 else
@@ -267,7 +272,7 @@ config_supports_scss() {
     return 1
   fi
   if [[ "$full_path" != /* ]]; then
-    full_path="${PROJECT_ROOT}/web/${full_path}"
+    full_path="${DOCROOT_PATH}/${full_path}"
   fi
   if [ ! -f "$full_path" ]; then
     return 1
@@ -276,6 +281,23 @@ config_supports_scss() {
     return 0
   fi
   return 1
+}
+
+normalize_docroot_arg() {
+  local arg="$1"
+  arg="$(map_path "$arg")"
+  if [[ "$arg" == /var/www/html/* ]]; then
+    arg="${arg#/var/www/html/}"
+  fi
+  if [ "$DOCROOT" != "web" ] && [[ "$arg" == web/* ]]; then
+    arg="${DOCROOT}/${arg#web/}"
+  fi
+  if [[ "$arg" == "${DOCROOT}/"* ]]; then
+    arg="${arg#${DOCROOT}/}"
+  elif [ "$arg" = "$DOCROOT" ]; then
+    arg="."
+  fi
+  printf '%s' "$arg"
 }
 
 uses_scss=false
@@ -290,15 +312,7 @@ if [ "$explicit_paths" = true ]; then
   while [ "$index" -lt "$arg_count" ]; do
     arg="${args[$index]}"
     if [ "$seen_double_dash" = true ]; then
-      arg="$(map_path "$arg")"
-      if [[ "$arg" == /var/www/html/* ]]; then
-        arg="${arg#/var/www/html/}"
-      fi
-      if [[ "$arg" == web/* ]]; then
-        arg="${arg#web/}"
-      elif [ "$arg" = "web" ]; then
-        arg="."
-      fi
+      arg="$(normalize_docroot_arg "$arg")"
       FINAL_ARGS+=("$arg")
       index=$((index + 1))
       continue
@@ -310,44 +324,20 @@ if [ "$explicit_paths" = true ]; then
         ;;
       -c|--config)
         next_arg="${args[$((index + 1))]:-}"
-        next_arg="$(map_path "$next_arg")"
-        if [[ "$next_arg" == /var/www/html/* ]]; then
-          next_arg="${next_arg#/var/www/html/}"
-        fi
-        if [[ "$next_arg" == web/* ]]; then
-          next_arg="${next_arg#web/}"
-        elif [ "$next_arg" = "web" ]; then
-          next_arg="."
-        fi
+        next_arg="$(normalize_docroot_arg "$next_arg")"
         FINAL_ARGS+=("$arg" "$next_arg")
         index=$((index + 1))
         ;;
       --config=*)
         config_value="${arg#*=}"
-        config_value="$(map_path "$config_value")"
-        if [[ "$config_value" == /var/www/html/* ]]; then
-          config_value="${config_value#/var/www/html/}"
-        fi
-        if [[ "$config_value" == web/* ]]; then
-          config_value="${config_value#web/}"
-        elif [ "$config_value" = "web" ]; then
-          config_value="."
-        fi
+        config_value="$(normalize_docroot_arg "$config_value")"
         FINAL_ARGS+=("--config=$config_value")
         ;;
       -* )
         FINAL_ARGS+=("$arg")
         ;;
       *)
-        arg="$(map_path "$arg")"
-        if [[ "$arg" == /var/www/html/* ]]; then
-          arg="${arg#/var/www/html/}"
-        fi
-        if [[ "$arg" == web/* ]]; then
-          arg="${arg#web/}"
-        elif [ "$arg" = "web" ]; then
-          arg="."
-        fi
+        arg="$(normalize_docroot_arg "$arg")"
         FINAL_ARGS+=("$arg")
         ;;
     esac
@@ -360,7 +350,7 @@ if [ "$explicit_paths" = true ]; then
         CONFIG_PATH="$config_candidate"
         config_dir="$(dirname "$CONFIG_PATH")"
         if [[ "$config_dir" != /* ]]; then
-          config_dir="${PROJECT_ROOT}/web/${config_dir}"
+          config_dir="${DOCROOT_PATH}/${config_dir}"
         fi
         if [ -d "$config_dir/node_modules" ]; then
           NODE_PATH="${NODE_PATH}:${config_dir}/node_modules"
@@ -409,7 +399,7 @@ if [ "$explicit_paths" = false ]; then
         CONFIG_PATH="$config_candidate"
         config_dir="$(dirname "$CONFIG_PATH")"
         if [[ "$config_dir" != /* ]]; then
-          config_dir="${PROJECT_ROOT}/web/${config_dir}"
+          config_dir="${DOCROOT_PATH}/${config_dir}"
         fi
         if [ -d "$config_dir/node_modules" ]; then
           NODE_PATH="${NODE_PATH}:${config_dir}/node_modules"
@@ -510,15 +500,15 @@ tar -cf - \
   --exclude=./node_modules \
   --exclude=./vendor \
   --exclude=./dcq-reports \
-  --exclude=./web/core/node_modules \
+  --exclude=./${DOCROOT}/core/node_modules \
   --exclude='*/.git' \
   --exclude='*/.git/*' \
   . | (cd "$tmp_root" && tar -xf -)
 
 if [ "$explicit_paths" = false ]; then
-  (cd "$tmp_root/web" && "${CMD_BASE[@]}" --fix "${FILTERED_FILES[@]}")
+  (cd "$tmp_root/${DOCROOT}" && "${CMD_BASE[@]}" --fix "${FILTERED_FILES[@]}")
 else
-  (cd "$tmp_root/web" && "${CMD_BASE[@]}" --fix "${FILTERED_ARGS[@]}")
+  (cd "$tmp_root/${DOCROOT}" && "${CMD_BASE[@]}" --fix "${FILTERED_ARGS[@]}")
 fi
 
 : > "${PATCH_FILE}.raw"

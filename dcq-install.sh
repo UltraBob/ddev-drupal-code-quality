@@ -475,7 +475,7 @@ prompt_node_install_action() {
   fi
 
   emit 'ESLint, Prettier, and Stylelint require several packages to function properly.\n'
-  emit '[i]nstall these in the project root, [p]rovide an install command to run yourself, [s]kip node module installation (default: install): '
+  emit '[i]nstall these in the project root, [s]kip node module installation (default: install): '
   if ! IFS= read -r -u "$PROMPT_IN_FD" choice; then
     choice=""
   fi
@@ -487,7 +487,6 @@ prompt_node_install_action() {
 
   case "$choice" in
     i|install) printf 'install' ;;
-    p|provide) printf 'provide' ;;
     s|skip) printf 'skip' ;;
     *) printf 'install' ;;
   esac
@@ -1331,11 +1330,8 @@ if [ -f "$core_package_json" ]; then
             root_auto_add=1
             root_suppress_list=1
             ;;
-          provide)
-            emit_node_install_command "$root_pm" "$missing_node_deps" "$has_root_package_json"
-            target="skip"
-            ;;
           skip)
+            emit_node_install_command "$root_pm" "$missing_node_deps" "$has_root_package_json"
             target="skip"
             ;;
         esac

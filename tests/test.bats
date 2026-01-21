@@ -125,12 +125,9 @@ setup() {
   ddev delete -Oy "${PROJNAME}" >/dev/null 2>&1 || true
   cd "${TESTDIR}"
   docroot="${DCQ_TEST_DOCROOT:-web}"
-  if [[ "${BATS_TEST_NAME:-}" == *"non-web docroot"* ]]; then
-    docroot="docroot"
-  fi
+  mkdir -p "$docroot"
   run ddev config --project-name="${PROJNAME}" --project-tld=ddev.site --project-type=drupal11 --docroot="$docroot"
   assert_success
-  mkdir -p "$docroot"
   python3 - <<'PY'
 from pathlib import Path
 
@@ -443,6 +440,11 @@ teardown() {
 
 @test "install from directory with non-web docroot" {
   set -u -o pipefail
+  mkdir -p docroot
+  run ddev config --docroot=docroot
+  assert_success
+  run ddev restart -y
+  assert_success
   run ddev add-on get "${DIR}"
   assert_success
   run ddev restart -y

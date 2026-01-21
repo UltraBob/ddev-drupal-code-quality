@@ -438,6 +438,20 @@ teardown() {
   health_checks
 }
 
+@test "path map prefers DDEV_HOST_PROJECT_ROOT" {
+  set -u -o pipefail
+  run ddev add-on get "${DIR}"
+  assert_success
+  run ddev restart -y
+  assert_success
+  run ddev exec bash -lc 'export DDEV_HOST_PROJECT_ROOT="/tmp/dcq-host-root"; source /mnt/ddev_config/commands/helpers/path-map.sh; map_path "/tmp/dcq-host-root/path/to/file.php"'
+  assert_success
+  assert_output "/var/www/html/path/to/file.php"
+  run ddev exec bash -lc 'source /mnt/ddev_config/commands/helpers/path-map.sh; map_path "/var/www/html/web/index.php"'
+  assert_success
+  assert_output "/var/www/html/web/index.php"
+}
+
 @test "install from directory with non-web docroot" {
   set -u -o pipefail
   mkdir -p docroot

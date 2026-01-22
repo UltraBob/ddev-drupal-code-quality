@@ -531,7 +531,7 @@ teardown() {
 
   run ddev add-on get "${DIR}"
   assert_success
-  assert_output --partial "Installing JS deps in project root using npm."
+  assert_output --partial "Node dependencies added (project root)."
   assert_container_file_exist "/var/www/html/package-lock.json"
   assert_container_file_exist "/var/www/html/node_modules/eslint-plugin-no-jquery/package.json"
   assert_container_file_exist "/var/www/html/node_modules/stylelint-prettier/package.json"
@@ -554,7 +554,7 @@ teardown() {
 
   run ddev add-on get "${DIR}"
   assert_success
-  assert_output --partial "Installing JS deps in project root using yarn."
+  assert_output --partial "Node dependencies added (project root)."
   assert_container_file_exist "/var/www/html/yarn.lock"
   assert_container_file_exist "/var/www/html/node_modules/eslint-plugin-no-jquery/package.json"
   assert_container_file_exist "/var/www/html/node_modules/stylelint-prettier/package.json"
@@ -571,7 +571,7 @@ teardown() {
 
   run ddev add-on get "${DIR}"
   assert_success
-  assert_output --partial "Installing JS deps in project root using npm."
+  assert_output --partial "Node dependencies added (project root)."
   assert_container_file_exist "/var/www/html/package-lock.json"
   assert_container_file_exist "/var/www/html/node_modules/eslint-plugin-no-jquery/package.json"
   assert_container_file_exist "/var/www/html/node_modules/stylelint-prettier/package.json"

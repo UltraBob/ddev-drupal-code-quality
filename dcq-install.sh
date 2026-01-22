@@ -126,16 +126,13 @@ create_root_package_json() {
   # Uses PHP inside the DDEV container to read core dependencies.
   local ddev_cmd="$1"
   local app_root="$2"
+  local php_code
+  local php_payload
   local output
   local status
-  local php_script="${cwd}/.dcq-create-package.php"
-  local script_path="/var/www/html/.ddev/.dcq-create-package.php"
-  local attempts=0
-  local max_attempts=5
 
-  cat > "$php_script" <<PHP
-<?php
-$path = "${DOCROOT_CORE}/package.json";
+  php_code=$(cat <<'PHP'
+$path = "__DOCROOT_CORE__/package.json";
 $data = json_decode(file_get_contents($path), true);
 if (!is_array($data)) {
   fwrite(STDERR, "Failed to read core package.json\n");
@@ -175,23 +172,22 @@ if (isset($data["devDependencies"])) {
 }
 echo json_encode($out, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . PHP_EOL;
 PHP
+  )
+  php_code="${php_code//__DOCROOT_CORE__/${DOCROOT_CORE}}"
+  php_payload="$(printf '%s' "$php_code" | base64 | tr -d '\n')"
 
-  while [ "$attempts" -lt "$max_attempts" ]; do
-    if "$ddev_cmd" exec test -f "$script_path" >/dev/null 2>&1; then
-      break
-    fi
-    attempts=$((attempts + 1))
-    sleep 0.2
-  done
-
-  output="$("$ddev_cmd" exec php "$script_path" 2>&1)"
+  local php_cmd
+  printf -v php_cmd "php -r 'eval(base64_decode(\"%s\"));'" "$php_payload"
+  output="$("$ddev_cmd" exec bash -lc "$php_cmd" 2>&1)"
   status=$?
-  rm -f "$php_script"
 
   if [ "$status" -ne 0 ] || [ -z "$output" ]; then
     printf 'Unable to create project package.json from core.\n' >&2
+    printf 'Helper status: %s\n' "$status" >&2
     if [ -n "$output" ]; then
       printf '%s\n' "$output" >&2
+    else
+      printf 'No output from helper.\n' >&2
     fi
     return 1
   fi
@@ -213,17 +209,14 @@ find_missing_node_deps() {
   # Determine missing JS tooling deps by comparing root package.json to
   # Drupal core + add-on config requirements (via a PHP helper in the container).
   local ddev_cmd="$1"
+  local php_code
+  local php_payload
   local output
   local status
-  local php_script="${cwd}/.dcq-missing-node-deps.php"
-  local script_path="/var/www/html/.ddev/.dcq-missing-node-deps.php"
-  local attempts=0
-  local max_attempts=5
 
-  cat > "$php_script" <<PHP
-<?php
+  php_code=$(cat <<'PHP'
 $rootPath = "/var/www/html/package.json";
-$corePath = "${DOCROOT_CORE}/package.json";
+$corePath = "__DOCROOT_CORE__/package.json";
 $assetsRoot = "/var/www/html/.ddev/drupal-code-quality/assets";
 
 function read_json_file(string $path): ?array {
@@ -393,18 +386,14 @@ foreach ($missing as $name => $version) {
   echo $name . $suffix . PHP_EOL;
 }
 PHP
+  )
+  php_code="${php_code//__DOCROOT_CORE__/${DOCROOT_CORE}}"
+  php_payload="$(printf '%s' "$php_code" | base64 | tr -d '\n')"
 
-  while [ "$attempts" -lt "$max_attempts" ]; do
-    if "$ddev_cmd" exec test -f "$script_path" >/dev/null 2>&1; then
-      break
-    fi
-    attempts=$((attempts + 1))
-    sleep 0.2
-  done
-
-  output="$("$ddev_cmd" exec php "$script_path" 2>&1)"
+  local php_cmd
+  printf -v php_cmd "php -r 'eval(base64_decode(\"%s\"));'" "$php_payload"
+  output="$("$ddev_cmd" exec bash -lc "$php_cmd" 2>&1)"
   status=$?
-  rm -f "$php_script"
 
   if [ "$status" -ne 0 ]; then
     return 1
@@ -439,11 +428,6 @@ maybe_install_missing_root_deps() {
     done
   fi
 
-  if [ "$non_interactive" -eq 1 ]; then
-    emit 'Skipping dependency add (non-interactive). Install the missing packages to avoid lint errors.\n'
-    return 1
-  fi
-
   if [ "$package_manager" = "npm" ]; then
     prompt_msg="Add missing dependencies with 'npm install --save-dev' in the project root? This updates package.json and package-lock.json."
   else
@@ -451,8 +435,11 @@ maybe_install_missing_root_deps() {
   fi
 
   should_add=0
-  if [ "$auto_add" -eq 1 ] && [ "$non_interactive" -ne 1 ]; then
+  if [ "$auto_add" -eq 1 ]; then
     should_add=1
+  elif [ "$non_interactive" -eq 1 ]; then
+    emit 'Skipping dependency add (non-interactive). Install the missing packages to avoid lint errors.\n'
+    return 1
   elif prompt_yes_no "$prompt_msg" 1; then
     should_add=1
   fi
@@ -463,12 +450,16 @@ maybe_install_missing_root_deps() {
       deps_cmd+=" $(printf '%q' "$dep")"
     done
     if [ "$package_manager" = "npm" ]; then
-      cmd=( "$ddev_cmd" "exec" "bash" "-lc" "cd /var/www/html && npm install --save-dev${deps_cmd}" )
+      cmd=( "$ddev_cmd" "exec" "bash" "-lc" "cd /var/www/html && npm install --save-dev --package-lock${deps_cmd}" )
+      run_command "${cmd[@]}"
+      emit 'Node dependencies added (project root).\n'
+      cmd=( "$ddev_cmd" "exec" "bash" "-lc" "cd /var/www/html && npm install --package-lock" )
+      run_command "${cmd[@]}"
     else
       cmd=( "$ddev_cmd" "exec" "bash" "-lc" "cd /var/www/html && yarn add -D${deps_cmd}" )
+      run_command "${cmd[@]}"
+      emit 'Node dependencies added (project root).\n'
     fi
-    run_command "${cmd[@]}"
-    emit 'Node dependencies added (project root).\n'
     return 0
   fi
 
@@ -1303,7 +1294,26 @@ fi
 
 emit '\n==> Phase 3: JS toolchain dependencies\n'
 core_package_json="${app_root%/}/${DCQ_DOCROOT}/core/package.json"
+core_package_json_present=0
 if [ -f "$core_package_json" ]; then
+  core_package_json_present=1
+elif command_available "${DDEV_EXECUTABLE:-ddev}"; then
+  ddev_cmd="${DDEV_EXECUTABLE:-ddev}"
+  attempts=0
+  while [ "$attempts" -lt 5 ]; do
+    if "$ddev_cmd" exec test -f "/var/www/html/${DCQ_DOCROOT}/core/package.json" >/dev/null 2>&1; then
+      core_package_json_present=1
+      break
+    fi
+    attempts=$((attempts + 1))
+    sleep 1
+  done
+  if [ "$core_package_json_present" -eq 0 ]; then
+    emit 'Core package.json not detected in container after waiting; skipping JS toolchain install.\n'
+  fi
+fi
+
+if [ "$core_package_json_present" -eq 1 ]; then
   node_mode_raw="$(string_lower "${DCQ_INSTALL_NODE_DEPS:-}")"
   node_toolchain_existing=0
   if node_toolchain_present "$app_root"; then
@@ -1364,9 +1374,13 @@ if [ -f "$core_package_json" ]; then
 
     missing_node_deps=""
     if [ "$has_root_package_json" -eq 1 ] && command_available "$ddev_cmd"; then
-      missing_node_deps="$(find_missing_node_deps "$ddev_cmd" || true)"
+      if missing_node_deps="$(find_missing_node_deps "$ddev_cmd")"; then
+        :
+      else
+        emit 'Failed to compute missing Node deps.\n'
+        missing_node_deps=""
+      fi
     fi
-
     if [ "$node_mode" != "skip" ]; then
       emit 'Preparing JS toolchain install.\n'
       if ! command_available "$ddev_cmd"; then

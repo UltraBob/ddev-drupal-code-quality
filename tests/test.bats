@@ -207,6 +207,51 @@ write_stub_package_lock() {
 JSON
 }
 
+write_jsonc_settings() {
+  local path="$1"
+  cat > "$path" <<'JSONC'
+// VS Code settings with JSONC features
+{
+  // Preserve this key
+  "dcq.customSetting": "keep",
+  "eslint.nodePath": "custom",
+  "editor.formatOnSave": true,
+  "files.exclude": {
+    "**/.git": true,
+  },
+}
+JSONC
+}
+
+write_jsonc_extensions() {
+  local path="$1"
+  cat > "$path" <<'JSONC'
+// VS Code extensions with JSONC features
+{
+  "recommendations": [
+    "example.extension",
+    "dbaeumer.vscode-eslint",
+  ],
+  "unwantedRecommendations": [
+    "example.unwanted",
+  ],
+}
+JSONC
+}
+
+write_invalid_jsonc_settings() {
+  local path="$1"
+  cat > "$path" <<'JSONC'
+// Invalid JSONC (missing closing brace)
+{
+  "dcq.customSetting": "keep",
+  "editor.formatOnSave": true,
+  "files.exclude": {
+    "**/.git": true,
+  },
+JSONC
+}
+
 assert_container_file_exist() {
   local path="$1"
 
@@ -436,6 +481,68 @@ teardown() {
   assert_addon_installed
   assert_phpstan_level "0"
   health_checks
+}
+
+@test "VS Code settings merge handles JSONC" {
+  set -u -o pipefail
+  export DCQ_INSTALL_DEPS=skip
+  export DCQ_INSTALL_NODE_DEPS=skip
+  export DCQ_INSTALL_IDE_SETTINGS=merge
+
+  mkdir -p ".vscode"
+  write_jsonc_settings ".vscode/settings.json"
+  write_jsonc_extensions ".vscode/extensions.json"
+
+  run bash -lc "ddev add-on get \"${DIR}\" 2>&1"
+  assert_success
+  assert_output --partial "MERGE: "
+  assert_output --partial ".vscode/settings.json"
+  assert_output --partial ".vscode/extensions.json"
+
+  run python3 - ".vscode/settings.json" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, encoding="utf-8") as fh:
+    data = json.load(fh)
+
+assert data.get("dcq.customSetting") == "keep"
+assert data.get("eslint.nodePath") == "custom"
+PY
+  assert_success
+
+  run python3 - ".vscode/extensions.json" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, encoding="utf-8") as fh:
+    data = json.load(fh)
+
+recs = data.get("recommendations", [])
+assert "example.extension" in recs
+assert "dbaeumer.vscode-eslint" in recs
+PY
+  assert_success
+}
+
+@test "VS Code settings merge skips invalid JSONC with warning" {
+  set -u -o pipefail
+  export DCQ_INSTALL_DEPS=skip
+  export DCQ_INSTALL_NODE_DEPS=skip
+  export DCQ_INSTALL_IDE_SETTINGS=merge
+
+  mkdir -p ".vscode"
+  write_invalid_jsonc_settings ".vscode/settings.json"
+  cp ".vscode/settings.json" ".vscode/settings.json.original"
+
+  run bash -lc "ddev add-on get \"${DIR}\" 2>&1"
+  assert_success
+  assert_output --partial "Unable to merge IDE settings; install manually from"
+
+  run cmp -s ".vscode/settings.json.original" ".vscode/settings.json"
+  assert_success
 }
 
 @test "path map prefers DDEV_HOST_PROJECT_ROOT" {

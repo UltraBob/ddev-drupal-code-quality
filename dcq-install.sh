@@ -903,16 +903,108 @@ import json
 import sys
 
 existing_path, template_path, dest_path = sys.argv[1:4]
+
+def strip_jsonc(text):
+    out = []
+    i = 0
+    in_string = False
+    escape = False
+    in_line = False
+    in_block = False
+    while i < len(text):
+        ch = text[i]
+        nxt = text[i + 1] if i + 1 < len(text) else ""
+        if in_line:
+            if ch == "\n":
+                in_line = False
+                out.append(ch)
+            i += 1
+            continue
+        if in_block:
+            if ch == "*" and nxt == "/":
+                in_block = False
+                i += 2
+                continue
+            i += 1
+            continue
+        if in_string:
+            out.append(ch)
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            i += 1
+            continue
+        if ch == '"':
+            in_string = True
+            out.append(ch)
+            i += 1
+            continue
+        if ch == "/" and nxt == "/":
+            in_line = True
+            i += 2
+            continue
+        if ch == "/" and nxt == "*":
+            in_block = True
+            i += 2
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+def strip_trailing_commas(text):
+    out = []
+    i = 0
+    in_string = False
+    escape = False
+    while i < len(text):
+        ch = text[i]
+        if in_string:
+            out.append(ch)
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            i += 1
+            continue
+        if ch == '"':
+            in_string = True
+            out.append(ch)
+            i += 1
+            continue
+        if ch == ",":
+            j = i + 1
+            while j < len(text) and text[j] in " \t\r\n":
+                j += 1
+            if j < len(text) and text[j] in "}]":
+                i += 1
+                continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
 def load_json(path):
     with open(path, encoding="utf-8") as f:
         content = f.read()
     lines = content.splitlines()
     if lines and lines[0].strip() == "#ddev-generated":
         content = "\n".join(lines[1:])
+    content = strip_trailing_commas(strip_jsonc(content))
     return json.loads(content)
 
-existing = load_json(existing_path)
-template = load_json(template_path)
+try:
+    existing = load_json(existing_path)
+    template = load_json(template_path)
+except Exception as exc:
+    sys.stderr.write(
+        "WARNING: Failed to parse JSONC in VS Code settings; skipping merge. "
+        f"{exc}\n"
+    )
+    raise SystemExit(1)
 
 if not isinstance(existing, dict) or not isinstance(template, dict):
     raise SystemExit("settings JSON must be objects")
@@ -950,16 +1042,108 @@ import json
 import sys
 
 existing_path, template_path, dest_path = sys.argv[1:4]
+
+def strip_jsonc(text):
+    out = []
+    i = 0
+    in_string = False
+    escape = False
+    in_line = False
+    in_block = False
+    while i < len(text):
+        ch = text[i]
+        nxt = text[i + 1] if i + 1 < len(text) else ""
+        if in_line:
+            if ch == "\n":
+                in_line = False
+                out.append(ch)
+            i += 1
+            continue
+        if in_block:
+            if ch == "*" and nxt == "/":
+                in_block = False
+                i += 2
+                continue
+            i += 1
+            continue
+        if in_string:
+            out.append(ch)
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            i += 1
+            continue
+        if ch == '"':
+            in_string = True
+            out.append(ch)
+            i += 1
+            continue
+        if ch == "/" and nxt == "/":
+            in_line = True
+            i += 2
+            continue
+        if ch == "/" and nxt == "*":
+            in_block = True
+            i += 2
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+def strip_trailing_commas(text):
+    out = []
+    i = 0
+    in_string = False
+    escape = False
+    while i < len(text):
+        ch = text[i]
+        if in_string:
+            out.append(ch)
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            i += 1
+            continue
+        if ch == '"':
+            in_string = True
+            out.append(ch)
+            i += 1
+            continue
+        if ch == ",":
+            j = i + 1
+            while j < len(text) and text[j] in " \t\r\n":
+                j += 1
+            if j < len(text) and text[j] in "}]":
+                i += 1
+                continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
 def load_json(path):
     with open(path, encoding="utf-8") as f:
         content = f.read()
     lines = content.splitlines()
     if lines and lines[0].strip() == "#ddev-generated":
         content = "\n".join(lines[1:])
+    content = strip_trailing_commas(strip_jsonc(content))
     return json.loads(content)
 
-existing = load_json(existing_path)
-template = load_json(template_path)
+try:
+    existing = load_json(existing_path)
+    template = load_json(template_path)
+except Exception as exc:
+    sys.stderr.write(
+        "WARNING: Failed to parse JSONC in VS Code extensions; skipping merge. "
+        f"{exc}\n"
+    )
+    raise SystemExit(1)
 
 if not isinstance(existing, dict) or not isinstance(template, dict):
     raise SystemExit("extensions JSON must be objects")

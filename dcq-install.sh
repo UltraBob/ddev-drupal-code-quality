@@ -126,6 +126,7 @@ create_root_package_json() {
   # Uses PHP inside the DDEV container to read core dependencies.
   local ddev_cmd="$1"
   local app_root="$2"
+  local container_package_json="/var/www/html/package.json"
   local php_code
   local php_payload
   local output
@@ -200,6 +201,15 @@ PHP
 
   printf '%s\n' "$output" > "${app_root%/}/package.json"
   emit 'WRITE: %s\n' "${app_root%/}/package.json"
+
+  if command_available "$ddev_cmd"; then
+    if ! printf '%s\n' "$output" | "$ddev_cmd" exec bash -lc "cat > ${container_package_json}"; then
+      printf 'Failed to write %s in container; Node install may fail.\n' "$container_package_json" >&2
+    fi
+    if ! "$ddev_cmd" exec test -f "$container_package_json" >/dev/null 2>&1; then
+      printf '%s not visible in container; Node install may fail.\n' "$container_package_json" >&2
+    fi
+  fi
 
   emit 'Created package.json from Drupal core devDependencies; review and customize as needed.\n'
   return 0

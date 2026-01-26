@@ -88,10 +88,7 @@ emit() {
 }
 
 emit_copy() {
-  # Suppress noisy copy output for shim assets.
-  if [ "${log_copy:-1}" -eq 1 ]; then
-    emit "$@"
-  fi
+  emit "$@"
 }
 
 prompt_choice() {
@@ -1082,6 +1079,9 @@ fi
 if truthy "${DCQ_NONINTERACTIVE:-}"; then
   non_interactive=1
 fi
+if [ "${PROMPT_AVAILABLE:-0}" -ne 1 ]; then
+  non_interactive=1
+fi
 
 install_mode="$(string_lower "${DCQ_INSTALL_MODE:-}")"
 if [ "$non_interactive" -eq 1 ] && [ -z "$install_mode" ]; then
@@ -1185,6 +1185,9 @@ fi
 emit '\n==> Phase 2: Copy CI parity configs and shims\n'
 emit 'This will copy config files into the project root and install shims under %s.\n' "$shim_dir_env"
 phpstan_updated=0
+copy_changed=0
+copy_skipped=0
+copy_unchanged=0
 
 # Copy add-on assets/shims into project, respecting conflict handling mode.
 while IFS= read -r -d '' source; do
@@ -1204,11 +1207,6 @@ while IFS= read -r -d '' source; do
   else
     continue
   fi
-  log_copy=1
-  if [ "$is_shim" -eq 1 ]; then
-    log_copy=0
-  fi
-
   tmp="$(mktemp "${TMPDIR:-/tmp}/dcq-src-XXXXXX")"
   if [ "$is_shim" -eq 1 ]; then
     cat "$source" >"$tmp"
@@ -1220,12 +1218,14 @@ while IFS= read -r -d '' source; do
   if [ -e "$target" ]; then
     if cmp -s "$target" "$tmp"; then
       emit_copy 'OK: %s already matches.\n' "$target"
+      copy_unchanged=$((copy_unchanged + 1))
       rm -f "$tmp"
       continue
     fi
 
     if [ "$skip_all" -eq 1 ]; then
       emit_copy 'SKIP: %s (existing file).\n' "$target"
+      copy_skipped=$((copy_skipped + 1))
       rm -f "$tmp"
       continue
     fi
@@ -1249,6 +1249,7 @@ while IFS= read -r -d '' source; do
           ;;
         s|skip)
           emit_copy 'SKIP: %s (existing file).\n' "$target"
+          copy_skipped=$((copy_skipped + 1))
           rm -f "$tmp"
           continue
           ;;
@@ -1265,11 +1266,13 @@ while IFS= read -r -d '' source; do
         sa|sall|"skip all")
           skip_all=1
           emit_copy 'SKIP: %s (existing file).\n' "$target"
+          copy_skipped=$((copy_skipped + 1))
           rm -f "$tmp"
           continue
           ;;
         *)
           emit_copy 'Unknown choice. Skipping %s.\n' "$target"
+          copy_skipped=$((copy_skipped + 1))
           rm -f "$tmp"
           continue
           ;;
@@ -1285,12 +1288,17 @@ while IFS= read -r -d '' source; do
     chmod 0755 "$target" || true
   fi
   emit_copy 'WRITE: %s\n' "$target"
+  copy_changed=$((copy_changed + 1))
   if [ "$target" = "${app_root%/}/phpstan.neon" ]; then
     phpstan_updated=1
   fi
 done < <(find "$addon_root" -type f -print0)
 
-emit 'Done.\n'
+if [ "$copy_changed" -eq 0 ] && [ "$copy_skipped" -eq 0 ]; then
+  emit 'All files already match; no changes.\n'
+else
+  emit 'Done. Changed: %s, skipped: %s, unchanged: %s.\n' "$copy_changed" "$copy_skipped" "$copy_unchanged"
+fi
 
 if [ "$phpstan_updated" -eq 1 ]; then
   prompt_phpstan_level "$app_root"
@@ -1547,7 +1555,7 @@ if [ -f "$ide_settings_template" ] || [ -f "$ide_extensions_template" ]; then
         if merge_json_settings "$ide_target_settings" "$ide_tmp" "$ide_target_settings"; then
           printf 'MERGE: %s\n' "$ide_target_settings"
         else
-          printf 'Unable to merge IDE settings; install manually from %s.\n' "$ide_settings_doc" >&2
+          emit 'Unable to merge IDE settings; install manually from %s.\n' "$ide_settings_doc"
         fi
       else
         ensure_dir "$ide_target_dir"
@@ -1567,7 +1575,7 @@ if [ -f "$ide_settings_template" ] || [ -f "$ide_extensions_template" ]; then
         if merge_json_extensions "$ide_target_extensions" "$ide_extensions_template" "$ide_target_extensions"; then
           printf 'MERGE: %s\n' "$ide_target_extensions"
         else
-          printf 'Unable to merge IDE extensions; install manually from %s.\n' "$ide_settings_doc" >&2
+          emit 'Unable to merge IDE extensions; install manually from %s.\n' "$ide_settings_doc"
         fi
       else
         ensure_dir "$ide_target_dir"

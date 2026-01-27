@@ -1,0 +1,17 @@
+#ddev-generated
+# DCQ defaults for local development
+# This file contains scope and exclusion paths that will be merged into phpstan.neon
+# during installation. The __DOCROOT__ placeholder is replaced with the actual docroot.
+parameters:
+    paths:
+        - __DOCROOT__/modules/custom
+        - __DOCROOT__/themes/custom
+        - __DOCROOT__/profiles/custom
+        - __DOCROOT__/sites
+    excludePaths:
+        analyseAndScan:
+            - __DOCROOT__/sites/*/files
+
+# Baseline guidance:
+# - Generate a baseline with: ddev phpstan --generate-baseline
+# - The baseline will be added to this config automatically.

@@ -31,6 +31,18 @@ cleanup() {
   done
 }
 
+config_has_paths() {
+  local config_file="$1"
+  if [ -z "$config_file" ] || [ ! -f "$config_file" ]; then
+    return 1
+  fi
+  # Check if config defines parameters.paths
+  if grep -q '^[[:space:]]*paths:' "$config_file"; then
+    return 0
+  fi
+  return 1
+}
+
 ensure_baseline_include() {
   local config_path="$1"
   local tmp
@@ -276,25 +288,31 @@ done
 
 if [ "$has_config" = false ]; then
   if [ "$explicit_paths" = false ]; then
-    # Build a minimal config that scopes analysis and excludes contrib/files.
-    CONFIG_TO_USE="$(mktemp /tmp/phpstan-scope.XXXXXX.neon)"
-    TMP_FILES+=("$CONFIG_TO_USE")
-    if [ -n "$BASE_CONFIG_FOR_USE" ]; then
-      printf "includes:\n  - %s\n" "$BASE_CONFIG_FOR_USE" > "$CONFIG_TO_USE"
-    fi
-    project_root="$(pwd)"
-    cat <<'EOF' >> "$CONFIG_TO_USE"
+    # Only inject scope/excludes if the config doesn't already define paths
+    if config_has_paths "$BASE_CONFIG_FOR_USE"; then
+      # Config already has paths defined; use it as-is
+      CONFIG_TO_USE="$BASE_CONFIG_FOR_USE"
+    else
+      # Build a minimal config that scopes analysis and excludes contrib/files.
+      CONFIG_TO_USE="$(mktemp /tmp/phpstan-scope.XXXXXX.neon)"
+      TMP_FILES+=("$CONFIG_TO_USE")
+      if [ -n "$BASE_CONFIG_FOR_USE" ]; then
+        printf "includes:\n  - %s\n" "$BASE_CONFIG_FOR_USE" > "$CONFIG_TO_USE"
+      fi
+      project_root="$(pwd)"
+      cat <<'EOF' >> "$CONFIG_TO_USE"
 parameters:
   excludePaths:
     analyseAndScan:
 EOF
-    for exclude_path in "${EXCLUDE_PATHS[@]}"; do
-      if [ "${exclude_path#/}" = "$exclude_path" ]; then
-        exclude_path="${project_root}/${exclude_path}"
-      fi
-      printf "      - %s (?)\n" "$exclude_path" >> "$CONFIG_TO_USE"
-    done
-    trap cleanup EXIT
+      for exclude_path in "${EXCLUDE_PATHS[@]}"; do
+        if [ "${exclude_path#/}" = "$exclude_path" ]; then
+          exclude_path="${project_root}/${exclude_path}"
+        fi
+        printf "      - %s (?)\n" "$exclude_path" >> "$CONFIG_TO_USE"
+      done
+      trap cleanup EXIT
+    fi
   else
     CONFIG_TO_USE="$BASE_CONFIG_FOR_USE"
   fi
@@ -310,8 +328,11 @@ if [ "$has_level" = false ] && [ -z "$CONFIG_FILE" ] && [ "$has_config" = false 
   CMD+=(--level=0)
 fi
 
+# Only add DEFAULT_PATHS if config doesn't define paths
 if [ "$explicit_paths" = false ] && [ "${#DEFAULT_PATHS[@]}" -gt 0 ]; then
-  FINAL_ARGS+=("${DEFAULT_PATHS[@]}")
+  if ! config_has_paths "$CONFIG_TO_USE" && ! config_has_paths "$BASE_CONFIG_FOR_USE"; then
+    FINAL_ARGS+=("${DEFAULT_PATHS[@]}")
+  fi
 fi
 
 if [ "$has_json_format" = true ]; then

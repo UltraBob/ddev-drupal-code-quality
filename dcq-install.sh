@@ -774,6 +774,31 @@ rewrite_docroot_config() {
   esac
 }
 
+merge_phpstan_config() {
+  # Merge phpstan.neon with phpstan.dcq.neon and substitute docroot placeholders.
+  local phpstan_source="$1"
+  local phpstan_dcq_source="$2"
+  local target="$3"
+  local docroot="${DCQ_DOCROOT:-web}"
+  local tmp
+
+  if [ ! -f "$phpstan_dcq_source" ]; then
+    # If dcq amendments don't exist, just use the base config
+    return 0
+  fi
+
+  # Append DCQ amendments to the target (already contains base phpstan.neon)
+  tmp="$(mktemp "${TMPDIR:-/tmp}/dcq-phpstan-XXXXXX")"
+  cat "$target" > "$tmp"
+  printf '\n' >> "$tmp"
+  # Strip the #ddev-generated header from dcq file before appending
+  tail -n +2 "$phpstan_dcq_source" >> "$tmp"
+
+  # Substitute __DOCROOT__ placeholder with actual docroot
+  sed "s|__DOCROOT__|${docroot}|g" "$tmp" > "$target"
+  rm -f "$tmp"
+}
+
 ensure_dir() {
   local dir="$1"
   if [ ! -d "$dir" ]; then
@@ -1382,6 +1407,9 @@ while IFS= read -r -d '' source; do
   if [[ "$rel" == tooling/scripts/* ]]; then
     continue
   fi
+  if [[ "$rel" == config-amendments/* ]]; then
+    continue
+  fi
   is_shim=0
   if [[ "$rel" == tooling/bin/* ]]; then
     target="${shim_dir%/}/${rel#tooling/bin/}"
@@ -1468,14 +1496,18 @@ while IFS= read -r -d '' source; do
   cat "$tmp" >"$target"
   rm -f "$tmp"
 
+  # Merge phpstan.dcq.neon into phpstan.neon if this is the phpstan config
+  if [ "$target" = "${app_root%/}/phpstan.neon" ]; then
+    phpstan_dcq_source="${addon_root}/config-amendments/phpstan.dcq.neon"
+    merge_phpstan_config "$source" "$phpstan_dcq_source" "$target"
+    phpstan_updated=1
+  fi
+
   if [ -x "$source" ] || [[ "$target" == "$shim_dir"* ]]; then
     chmod 0755 "$target" || true
   fi
   emit_copy 'WRITE: %s\n' "$target"
   copy_changed=$((copy_changed + 1))
-  if [ "$target" = "${app_root%/}/phpstan.neon" ]; then
-    phpstan_updated=1
-  fi
 done < <(find "$addon_root" -type f -print0)
 
 if [ "$copy_changed" -eq 0 ] && [ "$copy_skipped" -eq 0 ]; then

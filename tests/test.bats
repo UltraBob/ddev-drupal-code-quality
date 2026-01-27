@@ -15,6 +15,7 @@
 #   bats ./tests/test.bats --filter-tags 'node'
 # For debugging:
 #   bats ./tests/test.bats --show-output-of-passing-tests --verbose-run --print-output-on-failure
+# Note: Tests do not currently support parallel execution (--jobs > 1)
 
 load_bats_helpers() {
   local load_failed=0
@@ -580,6 +581,14 @@ PY
   assert_failure
   run grep -n "docroot/sites" ".phpcs.xml"
   assert_success
+
+  # Verify PHPStan config uses custom docroot
+  run grep -q "docroot/modules/custom" phpstan.neon
+  assert_success
+  run grep -q "docroot/sites" phpstan.neon
+  assert_success
+  run grep -q "docroot/sites/\*/files" phpstan.neon
+  assert_success
 }
 
 @test "install from directory with phpstan level override" {
@@ -591,6 +600,32 @@ PY
   assert_success
   assert_addon_installed
   assert_phpstan_level "3"
+}
+
+@test "phpstan config includes default paths and excludes after install" {
+  set -u -o pipefail
+  run ddev add-on get "${DIR}"
+  assert_success
+  run ddev restart -y
+  assert_success
+
+  # Check that paths section exists
+  run grep -q "paths:" phpstan.neon
+  assert_success
+
+  # Check for expected default paths
+  run grep -q "web/modules/custom" phpstan.neon
+  assert_success
+  run grep -q "web/themes/custom" phpstan.neon
+  assert_success
+  run grep -q "web/sites" phpstan.neon
+  assert_success
+
+  # Check for excludePaths
+  run grep -q "excludePaths:" phpstan.neon
+  assert_success
+  run grep -q "web/sites/\*/files" phpstan.neon
+  assert_success
 }
 
 @test "remove cleans ddev assets and shims" {

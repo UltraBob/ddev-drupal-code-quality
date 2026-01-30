@@ -6,7 +6,7 @@ print_help() {
   cat <<'USAGE'
 Usage: ddev composer-validate [args]
 
-Runs composer validate inside the DDEV web container (CI parity).
+Runs composer validate inside the DDEV web container (Drupal.org GitLab CI template defaults).
 USAGE
 }
 

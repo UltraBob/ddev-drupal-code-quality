@@ -1,6 +1,6 @@
 # ddev-drupal-code-quality
 
-DDEV add-on that installs Drupal GitLab CI parity tooling (PHPStan, PHPCS, ESLint,
+DDEV add-on that installs local code quality tooling based on Drupal.org GitLab CI template defaults (PHPStan, PHPCS, ESLint,
 Stylelint, Prettier, CSpell) for local CLI/IDE usage.
 
 ## Repository structure

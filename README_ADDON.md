@@ -4,9 +4,9 @@
 
 ## Overview
 
-This add-on installs Drupal GitLab CI parity tooling for local development and IDE usage.
-It provides DDEV commands and host shims so developers can run the same checks
-locally that GitLab CI runs on Drupal.org.
+This add-on installs a local code quality tool suite for Drupal projects and IDE usage,
+starting from Drupal.org GitLab CI template defaults. It provides DDEV commands and
+host shims so developers can run the same checks locally that GitLab CI runs on Drupal.org.
 
 Tools covered:
 - PHPStan
@@ -33,12 +33,13 @@ ddev add-on get /path/to/ddev-drupal-code-quality
 ddev restart
 ```
 
-During installation, the add-on copies CI-parity config files into the project
-root. If conflicts are detected, you can choose to back up and replace, skip,
-or abort. Skipping a config may reduce CI parity. The installer will prompt for:
+During installation, the add-on copies Drupal.org GitLab CI template default
+config files into the project root. If conflicts are detected, you can choose to
+back up and replace, skip, or abort. Skipping a config may diverge from the
+Drupal.org GitLab CI template defaults. The installer will prompt for:
 - Conflict handling (default: skip unless you choose replace/abort).
 - PHP tooling dependencies (install `drupal/core-dev` or run `ddev composer install`).
-- PHPStan default level (keep CI level 0 or choose a local level 0-9; recommend 3).
+- PHPStan default level (keep GitLab CI template level 0 or choose a local level 0-9; recommend 3).
 - Node toolchain install in the project root and package manager selection.
 - Missing Drupal JS dependencies when a root `package.json` exists.
 - Optional `.gitignore` update for `dcq-reports/`.
@@ -131,7 +132,7 @@ The template points PHP tooling at `.ddev/drupal-code-quality/tooling/bin` and J
   - If no project `phpstan.neon*` exists, the wrapper uses the GitLab template
     config shipped with the add-on.
 - PHPStan level:
-  - CI parity uses level 0. The installer can set a local default level (0-9).
+- GitLab CI template defaults use level 0. The installer can set a local default level (0-9).
 
 ## Installer environment variables
 

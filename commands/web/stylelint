@@ -8,7 +8,7 @@ print_help() {
   cat <<'USAGE'
 Usage: ddev stylelint [args]
 
-Runs Stylelint inside the DDEV web container with Drupal CI parity config and defaults.
+Runs Stylelint inside the DDEV web container with Drupal.org GitLab CI template defaults.
 USAGE
 }
 

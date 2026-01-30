@@ -8,7 +8,7 @@ print_help() {
   cat <<'USAGE'
 Usage: ddev eslint [args]
 
-Runs ESLint inside the DDEV web container with Drupal CI parity flags.
+Runs ESLint inside the DDEV web container with Drupal.org GitLab CI template defaults.
 USAGE
 }
 
@@ -116,7 +116,7 @@ if [ -n "$RESOLVE_PLUGINS_DIR" ]; then
   CMD+=(--resolve-plugins-relative-to "$RESOLVE_PLUGINS_DIR")
 fi
 if [ "$has_config" = false ] && [ "$ESLINT_CONFIG_MODE" != "nearest" ]; then
-  # Fixed mode: force the passing config for CI parity when requested.
+  # Fixed mode: force the passing config for Drupal.org GitLab CI template defaults when requested.
   if [ -f "${PROJECT_ROOT}/.eslintrc.passing.json" ]; then
     CMD+=(--config="${PROJECT_ROOT}/.eslintrc.passing.json")
   else

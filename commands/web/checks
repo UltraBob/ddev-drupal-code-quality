@@ -20,7 +20,7 @@ for candidate in "${DOCROOT}/modules/custom" "${DOCROOT}/themes/custom" "${DOCRO
   fi
 done
 
-# Ordered list of CI-parity tools to run.
+# Ordered list of Drupal.org GitLab CI template default tools to run.
 TOOLS=(
   "composer-validate"
   "php-parallel-lint"

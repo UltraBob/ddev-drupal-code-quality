@@ -2,7 +2,7 @@
 
 # Installer for DDEV Drupal Code Quality add-on assets and tooling hints.
 # Phases:
-# 1) Copy CI parity config files and shims into the project (with conflict handling).
+# 1) Copy Drupal.org GitLab CI template default configs and shims into the project (with conflict handling).
 # 2) Offer to install PHP tooling via ddev composer (core-dev).
 # 3) Offer to install JS tooling (root or core) using the detected package manager.
 # 4) Offer to install VS Code/Codium settings/extensions (merge/overwrite/skip).
@@ -103,7 +103,7 @@ prompt_choice() {
   fi
 
   if [ "$warn_parity" = "true" ]; then
-    printf 'Skipping this file may reduce CI parity for your local tooling.\n' >&"$PROMPT_OUT_FD"
+    printf 'Skipping this file may diverge from Drupal.org GitLab CI template defaults.\n' >&"$PROMPT_OUT_FD"
   fi
   printf '\n' >&"$PROMPT_OUT_FD"
   printf 'Conflict at %s. Choose: [r]eplace (backup), [s]kip, [a]bort, [ra] replace all, [sa] skip all (default: skip): ' "$path" >&"$PROMPT_OUT_FD"
@@ -1412,7 +1412,7 @@ if [[ "$script_path" == */.ddev/dcq-install.sh ]]; then
   emit 'Removed %s after install.\n' "$script_path"
 fi
 
-emit '\n==> Phase 2: Copy CI parity configs and shims\n'
+emit '\n==> Phase 2: Copy Drupal.org GitLab CI template configs and shims\n'
 emit 'This will copy config files into the project root and install shims under %s.\n' "$shim_dir_env"
 phpstan_updated=0
 copy_changed=0
@@ -1845,7 +1845,7 @@ print_install_summary() {
   emit '===============================================================\n'
   emit '\n'
   emit 'What was installed:\n'
-  emit '  - CI-parity configs (%s files) and DDEV commands\n' "$configs_count"
+  emit '  - GitLab CI template configs (%s files) and DDEV commands\n' "$configs_count"
   emit '  - Host shims for IDE integration\n'
 
   if [ "$php_deps_status" = "installed" ]; then

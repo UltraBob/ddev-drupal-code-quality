@@ -6,7 +6,7 @@ print_help() {
   cat <<'USAGE'
 Usage: ddev php-parallel-lint [args]
 
-Runs PHP parallel lint inside the DDEV web container (CI parity).
+Runs PHP parallel lint inside the DDEV web container (Drupal.org GitLab CI template defaults).
 USAGE
 }
 

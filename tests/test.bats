@@ -546,6 +546,27 @@ PY
   assert_success
 }
 
+@test "VS Code settings omit JS tool paths when node_modules missing" {
+  set -u -o pipefail
+  export DCQ_INSTALL_DEPS=skip
+  export DCQ_INSTALL_NODE_DEPS=skip
+  export DCQ_INSTALL_IDE_SETTINGS=overwrite
+
+  run ddev add-on get "${DIR}"
+  assert_success
+  assert_output --partial "JS tool paths not configured (node_modules missing)."
+
+  assert_file_exist ".vscode/settings.json"
+  run grep -q '"eslint.nodePath"' ".vscode/settings.json"
+  assert_failure
+  run grep -q '"eslint.options"' ".vscode/settings.json"
+  assert_failure
+  run grep -q '"stylelint.stylelintPath"' ".vscode/settings.json"
+  assert_failure
+  run grep -q '"prettier.prettierPath"' ".vscode/settings.json"
+  assert_failure
+}
+
 @test "path map prefers DDEV_HOST_PROJECT_ROOT" {
   set -u -o pipefail
   run ddev add-on get "${DIR}"

@@ -1830,7 +1830,7 @@ if [ -f "$ide_settings_template" ] || [ -f "$ide_extensions_template" ]; then
         "$stylelint_path" "$prettier_path" "$eslint_node_path" "$eslint_resolve_plugins"
       if [ "$ide_js_paths_set" -eq 0 ]; then
         strip_ide_js_settings "$ide_tmp" || true
-        emit 'JS tool paths not configured (project root node_modules missing). Install JS deps in the project root and re-run the installer or update settings manually.\n'
+        emit 'JS tool paths not configured (node_modules missing). Install JS deps and re-run the installer or update settings manually.\n'
       fi
 
       if [ "$ide_mode" = "merge" ] && [ -f "$ide_target_settings" ]; then

@@ -105,6 +105,7 @@ prompt_choice() {
   if [ "$warn_parity" = "true" ]; then
     printf 'Skipping this file may reduce CI parity for your local tooling.\n' >&"$PROMPT_OUT_FD"
   fi
+  printf '\n' >&"$PROMPT_OUT_FD"
   printf 'Conflict at %s. Choose: [r]eplace (backup), [s]kip, [a]bort, [ra] replace all, [sa] skip all (default: skip): ' "$path" >&"$PROMPT_OUT_FD"
   local answer=""
   if ! IFS= read -r -u "$PROMPT_IN_FD" answer; then
@@ -174,9 +175,9 @@ PHP
   php_code="${php_code//__DOCROOT_CORE__/${DOCROOT_CORE}}"
   php_payload="$(printf '%s' "$php_code" | base64 | tr -d '\n')"
 
-  local php_cmd
-  printf -v php_cmd "php -r 'eval(base64_decode(\"%s\"));'" "$php_payload"
-  output="$("$ddev_cmd" exec bash -lc "$php_cmd" 2>&1)"
+  # Use bash -lc so the php -r argument stays quoted; ddev exec can reparse
+  # complex arguments and break on parentheses/semicolons.
+  output="$("$ddev_cmd" exec bash -lc "php -r 'eval(base64_decode(\"${php_payload}\"));'" 2>&1)"
   status=$?
 
   if [ "$status" -ne 0 ] || [ -z "$output" ]; then
@@ -397,9 +398,9 @@ PHP
   php_code="${php_code//__DOCROOT_CORE__/${DOCROOT_CORE}}"
   php_payload="$(printf '%s' "$php_code" | base64 | tr -d '\n')"
 
-  local php_cmd
-  printf -v php_cmd "php -r 'eval(base64_decode(\"%s\"));'" "$php_payload"
-  output="$("$ddev_cmd" exec bash -lc "$php_cmd" 2>&1)"
+  # Use bash -lc so the php -r argument stays quoted; ddev exec can reparse
+  # complex arguments and break on parentheses/semicolons.
+  output="$("$ddev_cmd" exec bash -lc "php -r 'eval(base64_decode(\"${php_payload}\"));'" 2>&1)"
   status=$?
 
   if [ "$status" -ne 0 ]; then
@@ -497,10 +498,15 @@ prompt_node_install_action() {
   fi
 
   emit 'ESLint, Prettier, and Stylelint require several packages to function properly.\n'
+  emit '\n'
   emit '[i]nstall these in the project root, [s]kip node module installation (default: install): '
   if ! IFS= read -r -u "$PROMPT_IN_FD" choice; then
     choice=""
   fi
+  # Normalize prompt input to avoid silent fall-through on CR/LF/whitespace.
+  choice="${choice//$'\r'/}"
+  choice="${choice//$'\n'/}"
+  choice="$(printf '%s' "$choice" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
   choice="$(string_lower "$choice")"
   if [ -z "$choice" ]; then
     printf 'install'
@@ -687,6 +693,7 @@ prompt_phpstan_level() {
   elif [ "$non_interactive" -eq 1 ] || [ "${PROMPT_AVAILABLE:-0}" -ne 1 ]; then
     printf 'No interactive terminal detected; keeping current phpstan.neon level.\n'
   else
+    printf '\n'
     emit 'Set phpstan.neon level (0-9) (default: 0): '
     if ! IFS= read -r -u "$PROMPT_IN_FD" answer; then
       answer=""
@@ -734,6 +741,7 @@ maybe_add_gitignore_reports() {
   fi
 
   emit 'Add %s to .gitignore to avoid committing report logs.\n' "$entry"
+  printf '\n'
   if prompt_yes_no "Add '${entry}' to .gitignore?" 1; then
     if [ -f "$gitignore" ]; then
       printf '\n%s\n' "$entry" >>"$gitignore"
@@ -1292,6 +1300,18 @@ if [ "${PROMPT_AVAILABLE:-0}" -ne 1 ]; then
   non_interactive=1
 fi
 
+# Fail loudly if ddev exec cannot resolve a project. Silent skips later are
+# usually caused by running in a context where DDEV can't find .ddev/config.yaml.
+ddev_cmd="${DDEV_EXECUTABLE:-ddev}"
+if command_available "$ddev_cmd"; then
+  if ! "$ddev_cmd" exec true >/dev/null 2>&1; then
+    emit 'ERROR: ddev exec could not resolve a project from %s.\n' "${PWD:-.}"
+    emit 'Run the installer from the target project (for add-on installs, this should be automatic).\n'
+    emit 'Try: cd %s && ddev exec true\n' "$app_root"
+    exit 1
+  fi
+fi
+
 install_mode="$(string_lower "${DCQ_INSTALL_MODE:-}")"
 if [ "$non_interactive" -eq 1 ] && [ -z "$install_mode" ]; then
   install_mode="replace"
@@ -1371,6 +1391,7 @@ if [ "${#missing_tools[@]}" -gt 0 ]; then
     if [ "$deps_mode" = "install" ]; then
       should_install=1
     elif [ "$deps_mode" = "prompt" ]; then
+      printf '\n'
       if prompt_yes_no "$question" 0; then
         should_install=1
       fi
@@ -1630,6 +1651,10 @@ if [ "$core_package_json_present" -eq 1 ]; then
       elif [ "$node_mode" = "prompt" ]; then
         root_pm="$(detect_package_manager "$app_root")"
         node_action="$(prompt_node_install_action "$has_root_package_json" "$missing_node_deps")"
+        # Defensively normalize the prompt result to avoid silent fall-through.
+        node_action="${node_action//$'\r'/}"
+        node_action="${node_action//$'\n'/}"
+        node_action="$(printf '%s' "$node_action" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
         case "$node_action" in
           install)
             target="root"
@@ -1645,6 +1670,7 @@ if [ "$core_package_json_present" -eq 1 ]; then
 
       if [ "$target" = "root" ] && [ "$has_root_package_json" -eq 0 ]; then
         if ! create_root_package_json "$ddev_cmd" "$app_root"; then
+          emit 'Failed to create a project-root package.json; skipping Node toolchain install.\n'
           target="skip"
         else
           has_root_package_json=1
@@ -1714,6 +1740,7 @@ if [ -f "$ide_settings_template" ] || [ -f "$ide_extensions_template" ]; then
 
   if [ "$ide_mode" = "prompt" ]; then
     emit 'VS Code/Codium settings/extensions: choose merge, overwrite (with backup), or skip.\n'
+    printf '\n'
     ide_mode="$(prompt_ide_settings_mode)"
   fi
 
@@ -1805,3 +1832,79 @@ if [ -f "$ide_settings_template" ] || [ -f "$ide_extensions_template" ]; then
     fi
   fi
 fi
+
+print_install_summary() {
+  local php_deps_status="$1"
+  local node_status="$2"
+  local ide_status="$3"
+  local configs_count="$4"
+
+  emit '\n'
+  emit '===============================================================\n'
+  emit '  Installation Complete\n'
+  emit '===============================================================\n'
+  emit '\n'
+  emit 'What was installed:\n'
+  emit '  - CI-parity configs (%s files) and DDEV commands\n' "$configs_count"
+  emit '  - Host shims for IDE integration\n'
+
+  if [ "$php_deps_status" = "installed" ]; then
+    emit '  - PHP dev tools (PHPStan, PHPCS, etc.)\n'
+  else
+    emit '  - PHP dev tools: NOT installed\n'
+  fi
+
+  if [ "$node_status" = "root" ]; then
+    emit '  - Node toolchain (ESLint, Prettier, Stylelint)\n'
+  else
+    emit '  - Node toolchain: NOT installed\n'
+  fi
+
+  if [ "$ide_status" = "merge" ] || [ "$ide_status" = "overwrite" ]; then
+    emit '  - VS Code settings\n'
+  else
+    emit '  - VS Code settings: NOT installed\n'
+  fi
+
+  emit '\n'
+  emit 'Next steps:\n'
+  local step_num=1
+
+  if [ "$php_deps_status" != "installed" ]; then
+    emit '  %s. Install PHP tools: ddev composer require --dev drupal/core-dev\n' "$step_num"
+    step_num=$((step_num + 1))
+  fi
+
+  if [ "$node_status" != "root" ]; then
+    emit '  %s. Install Node tools: ddev exec bash -lc "cd /var/www/html && npm install"\n' "$step_num"
+    step_num=$((step_num + 1))
+  fi
+
+  emit '  %s. Run quality checks: ddev checks\n' "$step_num"
+  step_num=$((step_num + 1))
+
+  if [ "$ide_status" = "skip" ]; then
+    emit '  %s. Setup VS Code: see .ddev/drupal-code-quality/ide-settings/vscode/README.md\n' "$step_num"
+  fi
+
+  emit '\n'
+  emit 'More info: https://github.com/UltraBob/ddev-drupal-code-quality\n'
+  emit '===============================================================\n'
+}
+
+# Determine summary statuses
+php_deps_summary="skipped"
+if [ "${should_install:-0}" -eq 1 ]; then
+  php_deps_summary="installed"
+fi
+
+node_summary="skipped"
+if [ -n "${node_target_choice:-}" ] && [ "$node_target_choice" = "root" ]; then
+  node_summary="root"
+fi
+
+ide_summary="${ide_mode:-skip}"
+
+configs_copied="${copy_changed:-0}"
+
+print_install_summary "$php_deps_summary" "$node_summary" "$ide_summary" "$configs_copied"

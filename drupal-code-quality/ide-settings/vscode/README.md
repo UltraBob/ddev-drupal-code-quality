@@ -16,7 +16,7 @@ installed by this add-on.
 
 See `extensions.json` for the extension IDs. JS-focused extensions (ESLint,
 Stylelint, Prettier, CSpell) use local `node_modules` paths. The installer uses
-the Node toolchain choice (prompt or `DCQ_INSTALL_NODE_DEPS`) to decide whether
-those paths point at the project root or `web/core`. Override the paths if you
+the Node toolchain choice (prompt or `DCQ_INSTALL_NODE_DEPS`) and only configures
+JS tool paths when project-root `node_modules` exists. Override the paths if you
 prefer a different location. Run `ddev <tool>` in the terminal to use the
 containerized CLI wrappers.

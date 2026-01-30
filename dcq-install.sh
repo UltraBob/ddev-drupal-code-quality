@@ -4,14 +4,14 @@
 # Phases:
 # 1) Copy Drupal.org GitLab CI template default configs and shims into the project (with conflict handling).
 # 2) Offer to install PHP tooling via ddev composer (core-dev).
-# 3) Offer to install JS tooling (root or core) using the detected package manager.
+# 3) Offer to install JS tooling (project root) using the detected package manager.
 # 4) Offer to install VS Code/Codium settings/extensions (merge/overwrite/skip).
 #
 # Key env vars (see README for full list):
 # - DCQ_INSTALL_MODE: replace|skip|abort (conflict strategy for files)
 # - DCQ_NONINTERACTIVE / DDEV_NONINTERACTIVE: disable prompts
 # - DCQ_INSTALL_DEPS: install|skip (PHP dev tools)
-# - DCQ_INSTALL_NODE_DEPS: root|core|install|skip (JS tooling)
+# - DCQ_INSTALL_NODE_DEPS: root|install|skip (JS tooling)
 # - DCQ_INSTALL_IDE_SETTINGS: merge|overwrite|skip (IDE settings)
 
 set -euo pipefail
@@ -916,6 +916,42 @@ render_ide_template() {
     "$template" >"$output"
 }
 
+strip_ide_js_settings() {
+  local settings_path="$1"
+  local python_bin=""
+
+  if command_available python3; then
+    python_bin="python3"
+  elif command_available python; then
+    python_bin="python"
+  else
+    emit 'Warning: python not available; unable to remove JS tool paths from %s.\n' "$settings_path"
+    return 1
+  fi
+
+  if ! "$python_bin" - "$settings_path" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, encoding="utf-8") as handle:
+    data = json.load(handle)
+
+for key in ("stylelint.stylelintPath", "prettier.prettierPath", "eslint.nodePath", "eslint.options"):
+    data.pop(key, None)
+
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(data, handle, indent=2, sort_keys=False)
+    handle.write("\n")
+PY
+  then
+    emit 'Warning: unable to strip JS tool paths from %s.\n' "$settings_path"
+    return 1
+  fi
+
+  return 0
+}
+
 merge_json_settings() {
   # Merge settings.json: keep existing keys, add missing keys from template.
   local existing="$1"
@@ -1614,11 +1650,9 @@ if [ "$core_package_json_present" -eq 1 ]; then
       node_mode="skip"
     elif [ "$node_mode_raw" = "root" ] || [ "$node_mode_raw" = "project" ]; then
       node_mode="root"
-    elif [ "$node_mode_raw" = "core" ]; then
-      emit 'Core toolchain installs are no longer supported by the installer. Set DCQ_INSTALL_NODE_DEPS=root to install in the project root.\n'
-      node_mode="skip"
     else
-      node_mode="prompt"
+      emit 'Unknown DCQ_INSTALL_NODE_DEPS value "%s"; skipping Node toolchain install.\n' "$node_mode_raw"
+      node_mode="skip"
     fi
 
     root_auto_add=0
@@ -1757,42 +1791,47 @@ if [ -f "$ide_settings_template" ] || [ -f "$ide_extensions_template" ]; then
       shim_setting="$shim_dir_env"
       ide_node_mode=""
       ide_node_mode_raw="$(string_lower "${DCQ_INSTALL_NODE_DEPS:-}")"
+      has_root_node_modules=0
+      if [ -d "${app_root%/}/node_modules" ]; then
+        has_root_node_modules=1
+      fi
+
       if [ -n "$node_target_choice" ]; then
         ide_node_mode="$node_target_choice"
       else
         case "$ide_node_mode_raw" in
-          root|project) ide_node_mode="root" ;;
-          1|true|yes|on|install|auto) ide_node_mode="root" ;;
+          root|project|1|true|yes|on|install|auto) ide_node_mode="root" ;;
         esac
       fi
 
-      if [ -z "$ide_node_mode" ]; then
-        if [ -d "${app_root%/}/${DCQ_DOCROOT}/core/node_modules" ] && [ ! -d "${app_root%/}/node_modules" ]; then
-          ide_node_mode="core"
-        elif [ -d "${app_root%/}/node_modules" ]; then
-          ide_node_mode="root"
-        elif [ -d "${app_root%/}/${DCQ_DOCROOT}/core/node_modules" ]; then
-          ide_node_mode="core"
-        else
-          ide_node_mode="root"
-        fi
+      if [ -z "$ide_node_mode" ] && [ "$has_root_node_modules" -eq 1 ]; then
+        ide_node_mode="root"
       fi
 
-      if [ "$ide_node_mode" = "core" ]; then
-        js_modules="./${DCQ_DOCROOT}/core/node_modules"
-        eslint_node_path="${DCQ_DOCROOT}/core/node_modules"
-        eslint_resolve_plugins="./${DCQ_DOCROOT}/core"
-      else
+      ide_js_paths_set=0
+      js_modules=""
+      eslint_node_path=""
+      eslint_resolve_plugins=""
+      if [ "$ide_node_mode" = "root" ] && [ "$has_root_node_modules" -eq 1 ]; then
         js_modules="./node_modules"
         eslint_node_path="node_modules"
         eslint_resolve_plugins="."
+        ide_js_paths_set=1
       fi
 
-      stylelint_path="${js_modules}/stylelint"
-      prettier_path="${js_modules}/prettier"
+      stylelint_path=""
+      prettier_path=""
+      if [ "$ide_js_paths_set" -eq 1 ]; then
+        stylelint_path="${js_modules}/stylelint"
+        prettier_path="${js_modules}/prettier"
+      fi
 
       render_ide_template "$ide_settings_template" "$ide_tmp" "$shim_setting" \
         "$stylelint_path" "$prettier_path" "$eslint_node_path" "$eslint_resolve_plugins"
+      if [ "$ide_js_paths_set" -eq 0 ]; then
+        strip_ide_js_settings "$ide_tmp" || true
+        emit 'JS tool paths not configured (project root node_modules missing). Install JS deps in the project root and re-run the installer or update settings manually.\n'
+      fi
 
       if [ "$ide_mode" = "merge" ] && [ -f "$ide_target_settings" ]; then
         if merge_json_settings "$ide_target_settings" "$ide_tmp" "$ide_target_settings"; then

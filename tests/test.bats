@@ -480,8 +480,80 @@ teardown() {
   run ddev restart -y
   assert_success
   assert_addon_installed
-  assert_phpstan_level "0"
+  assert_phpstan_level "3"
+  if command -v rg >/dev/null 2>&1; then
+    run rg -n "^dcq-reports/$" ".gitignore"
+  else
+    run grep -E -n "^dcq-reports/$" ".gitignore"
+  fi
+  assert_success
   health_checks
+}
+
+@test "installer prompt accepts recommended settings" {
+  set -u -o pipefail
+  unset DCQ_NONINTERACTIVE
+  unset DDEV_NONINTERACTIVE
+  unset DCQ_INSTALL_MODE
+  unset DCQ_INSTALL_DEPS
+  unset DCQ_INSTALL_NODE_DEPS
+  unset DCQ_PHPSTAN_LEVEL
+  unset DCQ_INSTALL_IDE_SETTINGS
+  unset DCQ_INSTALL_GITIGNORE
+
+  python_bin=""
+  if command -v python3 >/dev/null 2>&1; then
+    python_bin="python3"
+  elif command -v python >/dev/null 2>&1; then
+    python_bin="python"
+  else
+    skip "python not available for prompt automation"
+  fi
+
+  run "$python_bin" - <<PY
+import os
+import pty
+import select
+import sys
+
+cmd = ["ddev", "add-on", "get", "${DIR}"]
+prompt = b"Accept recommended settings? (y/N)"
+sent = False
+buf = b""
+
+pid, fd = pty.fork()
+if pid == 0:
+    os.execvp(cmd[0], cmd)
+
+try:
+    while True:
+        r, _, _ = select.select([fd], [], [], 1)
+        if fd in r:
+            data = os.read(fd, 1024)
+            if not data:
+                break
+            sys.stdout.buffer.write(data)
+            sys.stdout.buffer.flush()
+            buf += data
+            if (not sent) and (prompt in buf):
+                os.write(fd, b"y\\n")
+                sent = True
+except OSError:
+    pass
+
+_, status = os.waitpid(pid, 0)
+code = os.waitstatus_to_exitcode(status)
+sys.exit(code)
+PY
+  assert_success
+  assert_output --partial "Accept recommended settings? (y/N)"
+  assert_phpstan_level "3"
+  if command -v rg >/dev/null 2>&1; then
+    run rg -n "^dcq-reports/$" ".gitignore"
+  else
+    run grep -E -n "^dcq-reports/$" ".gitignore"
+  fi
+  assert_success
 }
 
 @test "VS Code settings merge handles JSONC" {

@@ -12,6 +12,7 @@
 # - DCQ_NONINTERACTIVE / DDEV_NONINTERACTIVE: disable prompts
 # - DCQ_INSTALL_DEPS: install|skip (PHP dev tools)
 # - DCQ_INSTALL_NODE_DEPS: root|install|skip (JS tooling)
+# - DCQ_INSTALL_GITIGNORE: add|skip (dcq-reports entry)
 # - DCQ_INSTALL_IDE_SETTINGS: merge|overwrite|skip (IDE settings)
 
 set -euo pipefail
@@ -591,6 +592,44 @@ prompt_yes_no() {
   return 1
 }
 
+prompt_recommended_settings() {
+  # Prompt for accepting recommended settings (default: no).
+  if [ "${PROMPT_AVAILABLE:-0}" -ne 1 ]; then
+    return 1
+  fi
+
+  printf 'Accept recommended settings? (y/N) ' >&"$PROMPT_OUT_FD"
+  local answer=""
+  if ! IFS= read -r -u "$PROMPT_IN_FD" answer; then
+    answer=""
+  fi
+  answer="$(string_lower "$answer")"
+  if [ -z "$answer" ]; then
+    return 1
+  fi
+  case "$answer" in
+    y|yes) return 0 ;;
+  esac
+  return 1
+}
+
+has_install_overrides() {
+  [ -n "${DCQ_INSTALL_MODE:-}" ] \
+    || [ -n "${DCQ_INSTALL_DEPS:-}" ] \
+    || [ -n "${DCQ_INSTALL_NODE_DEPS:-}" ] \
+    || [ -n "${DCQ_PHPSTAN_LEVEL:-}" ] \
+    || [ -n "${DCQ_INSTALL_IDE_SETTINGS:-}" ] \
+    || [ -n "${DCQ_INSTALL_GITIGNORE:-}" ]
+}
+
+set_default_env() {
+  local name="$1"
+  local value="$2"
+  if [ -z "${!name:-}" ]; then
+    printf -v "$name" '%s' "$value"
+  fi
+}
+
 prompt_ide_settings_mode() {
   # Prompt for IDE settings merge/overwrite/skip mode.
   local choice
@@ -727,11 +766,35 @@ prompt_phpstan_level() {
 
 maybe_add_gitignore_reports() {
   local app_root="$1"
+  local mode_raw
+  local mode
   local gitignore="${app_root%/}/.gitignore"
   local entry="dcq-reports/"
 
+  mode_raw="$(string_lower "${2:-}")"
+  case "$mode_raw" in
+    1|true|yes|on|add|install|auto) mode="add" ;;
+    0|false|no|off|skip) mode="skip" ;;
+    *) mode="prompt" ;;
+  esac
+
   if [ -f "$gitignore" ] && grep -q "^${entry}$" "$gitignore"; then
     printf 'OK: %s already lists %s\n' "$gitignore" "$entry"
+    return 0
+  fi
+
+  if [ "$mode" = "add" ]; then
+    if [ -f "$gitignore" ]; then
+      printf '\n%s\n' "$entry" >>"$gitignore"
+    else
+      printf '%s\n' "$entry" >"$gitignore"
+    fi
+    emit 'WRITE: %s\n' "$gitignore"
+    return 0
+  fi
+
+  if [ "$mode" = "skip" ]; then
+    emit 'Skipping .gitignore update for %s.\n' "$entry"
     return 0
   fi
 
@@ -1345,6 +1408,26 @@ if [ "${PROMPT_AVAILABLE:-0}" -ne 1 ]; then
   non_interactive=1
 fi
 
+recommended_mode=0
+if ! has_install_overrides; then
+  if [ "$non_interactive" -eq 1 ]; then
+    recommended_mode=1
+  else
+    if prompt_recommended_settings; then
+      recommended_mode=1
+    fi
+  fi
+fi
+
+if [ "$recommended_mode" -eq 1 ]; then
+  set_default_env "DCQ_INSTALL_MODE" "replace"
+  set_default_env "DCQ_INSTALL_DEPS" "install"
+  set_default_env "DCQ_INSTALL_NODE_DEPS" "root"
+  set_default_env "DCQ_PHPSTAN_LEVEL" "3"
+  set_default_env "DCQ_INSTALL_IDE_SETTINGS" "merge"
+  set_default_env "DCQ_INSTALL_GITIGNORE" "add"
+fi
+
 # Fail loudly if ddev exec cannot resolve a project. Silent skips later are
 # usually caused by running in a context where DDEV can't find .ddev/config.yaml.
 ddev_cmd="${DDEV_EXECUTABLE:-ddev}"
@@ -1757,7 +1840,7 @@ if [ "$core_package_json_present" -eq 1 ]; then
 fi
 
 emit '\n==> Optional: .gitignore update\n'
-maybe_add_gitignore_reports "$app_root"
+maybe_add_gitignore_reports "$app_root" "${DCQ_INSTALL_GITIGNORE:-}"
 
 ide_settings_root="${addon_root}/ide-settings/vscode"
 ide_settings_template="${ide_settings_root}/settings.json"

@@ -37,6 +37,8 @@ During installation, the add-on copies Drupal.org GitLab CI template default
 config files into the project root. If conflicts are detected, you can choose to
 back up and replace, skip, or abort. Skipping a config may diverge from the
 Drupal.org GitLab CI template defaults. The installer will prompt for:
+- Accept recommended settings (default: no). Choosing yes applies the
+  recommended defaults without further prompts.
 - Conflict handling (default: skip unless you choose replace/abort).
 - PHP tooling dependencies (install `drupal/core-dev` or run `ddev composer install`).
 - PHPStan default level (keep GitLab CI template level 0 or choose a local level 0-9; recommend 3).
@@ -45,6 +47,12 @@ Drupal.org GitLab CI template defaults. The installer will prompt for:
 - Optional `.gitignore` update for `dcq-reports/`.
 - IDE settings (merge/overwrite/skip when templates are available).
 The installer runs in bash so it does not require host PHP.
+
+Recommended settings apply these defaults without further prompts:
+replace conflicts (with backups), install PHP dev tools, install JS deps in the
+project root, set PHPStan level 3, merge IDE settings, and add `dcq-reports/`
+to `.gitignore`. Non-interactive runs with no overrides apply the recommended
+settings automatically.
 
 If PHPStan/PHPCS/PHPCBF binaries are missing, the installer prompts to add
 `drupal/core-dev` (or to run `ddev composer install` if it is already required).
@@ -137,7 +145,8 @@ The template points PHP tooling at `.ddev/drupal-code-quality/tooling/bin` and J
 ## Installer environment variables
 
 - `DCQ_INSTALL_MODE`: `replace`, `skip`, or `abort` for conflict handling.
-- `DCQ_NONINTERACTIVE=true`: behave like `DCQ_INSTALL_MODE=replace`.
+- `DCQ_NONINTERACTIVE=true`: disable prompts; if no overrides are set, applies
+  the recommended settings automatically.
 - `DCQ_PHPSTAN_LEVEL`: set `phpstan.neon` level (0-9) without prompting.
 - `DCQ_INSTALL_DEPS`: `install`/`true` to auto-install missing `drupal/core-dev`,
   `skip`/`false` to skip, or unset to prompt when interactive.
@@ -147,6 +156,8 @@ The template points PHP tooling at `.ddev/drupal-code-quality/tooling/bin` and J
   exists), `install`/`true` to auto-install in the project root, `skip`/`false`
   to skip, or unset to prompt (default: install in the project root). The
   installer selects npm/yarn based on existing lockfiles.
+- `DCQ_INSTALL_GITIGNORE`: `add`/`true` to add `dcq-reports/` to `.gitignore`
+  without prompting, `skip`/`false` to skip, or unset to prompt when interactive.
 - `DCQ_INSTALL_IDE_SETTINGS`: `merge` to add missing VS Code settings and
   extension recommendations, `overwrite` to back up and replace, `skip` to
   handle manually, or unset to prompt.

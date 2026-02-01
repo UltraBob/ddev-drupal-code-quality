@@ -858,16 +858,40 @@ merge_phpstan_config() {
     return 0
   fi
 
-  # Append DCQ amendments to the target (already contains base phpstan.neon)
+  # Append DCQ amendments to the target (already contains base phpstan.neon).
   tmp="$(mktemp "${TMPDIR:-/tmp}/dcq-phpstan-XXXXXX")"
   cat "$target" > "$tmp"
   printf '\n' >> "$tmp"
-  # Strip the #ddev-generated header from dcq file before appending
-  tail -n +2 "$phpstan_dcq_source" >> "$tmp"
+  tail -n +2 "$phpstan_dcq_source" | awk 'BEGIN { seen = 0 }
+    {
+      if (seen == 0 && $0 ~ /^[[:space:]]*parameters:/) {
+        seen = 1
+        next
+      }
+      if (seen == 1) {
+        print
+      }
+    }' >> "$tmp"
 
-  # Substitute __DOCROOT__ placeholder with actual docroot
+  # Substitute __DOCROOT__ placeholder with actual docroot.
   sed "s|__DOCROOT__|${docroot}|g" "$tmp" > "$target"
   rm -f "$tmp"
+}
+
+ensure_phpstan_paths() {
+  local app_root="$1"
+  local docroot="${DCQ_DOCROOT:-web}"
+
+  # Create standard Drupal directories that PHPStan config expects
+  local paths=(
+    "${docroot}/modules/custom"
+    "${docroot}/themes/custom"
+    "${docroot}/sites"
+  )
+
+  for path in "${paths[@]}"; do
+    ensure_dir "${app_root%/}/${path}"
+  done
 }
 
 ensure_dir() {
@@ -1649,6 +1673,7 @@ while IFS= read -r -d '' source; do
   if [ "$target" = "${app_root%/}/phpstan.neon" ]; then
     phpstan_dcq_source="${addon_root}/config-amendments/phpstan.dcq.neon"
     merge_phpstan_config "$source" "$phpstan_dcq_source" "$target"
+    ensure_phpstan_paths "$app_root"
     phpstan_updated=1
   fi
 
@@ -1898,6 +1923,21 @@ if [ -f "$ide_settings_template" ] || [ -f "$ide_extensions_template" ]; then
 
       if [ -z "$ide_node_mode" ] && [ "$has_root_node_modules" -eq 1 ]; then
         ide_node_mode="root"
+      fi
+
+      # Re-check for node_modules after installation (may have been installed in Phase 3)
+      if [ "$has_root_node_modules" -eq 0 ]; then
+        if [ -d "${app_root%/}/node_modules" ]; then
+          has_root_node_modules=1
+        elif command_available "${DDEV_EXECUTABLE:-ddev}"; then
+          ddev_cmd="${DDEV_EXECUTABLE:-ddev}"
+          if "$ddev_cmd" exec test -d "/var/www/html/node_modules" >/dev/null 2>&1; then
+            has_root_node_modules=1
+          fi
+        fi
+        if [ "$has_root_node_modules" -eq 1 ] && [ -z "$ide_node_mode" ]; then
+          ide_node_mode="root"
+        fi
       fi
 
       ide_js_paths_set=0

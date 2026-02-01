@@ -528,8 +528,6 @@ teardown() {
   echo "# ddev add-on get ${DIR} with project ${PROJNAME} in $(pwd)" >&3
   run ddev add-on get "${DIR}"
   assert_success
-  run ddev restart -y
-  assert_success
   assert_addon_installed
   assert_phpstan_level "3"
   if command -v rg >/dev/null 2>&1; then
@@ -733,8 +731,6 @@ PY
   set -u -o pipefail
   run ddev add-on get "${DIR}"
   assert_success
-  run ddev restart -y
-  assert_success
   run ddev exec bash -lc 'export DDEV_HOST_PROJECT_ROOT="/tmp/dcq-host-root"; source /mnt/ddev_config/commands/helpers/path-map.sh; map_path "/tmp/dcq-host-root/path/to/file.php"'
   assert_success
   assert_output "/var/www/html/path/to/file.php"
@@ -751,8 +747,6 @@ PY
   run ddev restart -y
   assert_success
   run ddev add-on get "${DIR}"
-  assert_success
-  run ddev restart -y
   assert_success
   assert_addon_installed
   assert_file_exist ".ddev/.dcq-docroot"
@@ -779,8 +773,6 @@ PY
   export DCQ_PHPSTAN_LEVEL=3
   run ddev add-on get "${DIR}"
   assert_success
-  run ddev restart -y
-  assert_success
   assert_addon_installed
   assert_phpstan_level "3"
 }
@@ -788,8 +780,6 @@ PY
 @test "phpstan config includes default paths and excludes after install" {
   set -u -o pipefail
   run ddev add-on get "${DIR}"
-  assert_success
-  run ddev restart -y
   assert_success
 
   # Check that paths section exists
@@ -815,8 +805,6 @@ PY
   set -u -o pipefail
   run ddev add-on get "${DIR}"
   assert_success
-  run ddev restart -y
-  assert_success
   assert_addon_installed
 
   run ddev add-on remove "${DIR}"
@@ -837,8 +825,6 @@ PY
         ;;
     esac
   fi
-  assert_success
-  run ddev restart -y
   assert_success
   assert_addon_installed
   health_checks

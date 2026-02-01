@@ -968,6 +968,7 @@ merge_json_settings() {
   fi
 
   if ! "$python_bin" - "$existing" "$template" "$dest" <<'PY'
+import copy
 import json
 import sys
 
@@ -1078,9 +1079,14 @@ except Exception as exc:
 if not isinstance(existing, dict) or not isinstance(template, dict):
     raise SystemExit("settings JSON must be objects")
 
+original = copy.deepcopy(existing)
+
 for key, value in template.items():
     if key not in existing:
         existing[key] = value
+
+if existing == original:
+    raise SystemExit(3)
 
 with open(dest_path, "w", encoding="utf-8") as f:
     json.dump(existing, f, indent=2, ensure_ascii=True)
@@ -1247,6 +1253,9 @@ for key, value in template.items():
         continue
     if key not in merged:
         merged[key] = value
+
+if merged == existing:
+    raise SystemExit(3)
 
 with open(dest_path, "w", encoding="utf-8") as f:
     json.dump(merged, f, indent=2, ensure_ascii=True)
@@ -1834,11 +1843,21 @@ if [ -f "$ide_settings_template" ] || [ -f "$ide_extensions_template" ]; then
       fi
 
       if [ "$ide_mode" = "merge" ] && [ -f "$ide_target_settings" ]; then
-        if merge_json_settings "$ide_target_settings" "$ide_tmp" "$ide_target_settings"; then
+        merge_tmp="$(mktemp "${TMPDIR:-/tmp}/dcq-ide-merge-XXXXXX")"
+        if merge_json_settings "$ide_target_settings" "$ide_tmp" "$merge_tmp"; then
+          backup="$(backup_file "$ide_target_settings")"
+          printf 'BACKUP: %s\n' "$backup"
+          cat "$merge_tmp" >"$ide_target_settings"
           printf 'MERGE: %s\n' "$ide_target_settings"
         else
-          emit 'Unable to merge IDE settings; install manually from %s.\n' "$ide_settings_doc"
+          merge_status=$?
+          if [ "$merge_status" -eq 3 ]; then
+            printf 'OK: %s already includes DCQ settings.\n' "$ide_target_settings"
+          else
+            emit 'Unable to merge IDE settings; install manually from %s.\n' "$ide_settings_doc"
+          fi
         fi
+        rm -f "$merge_tmp"
       else
         ensure_dir "$ide_target_dir"
         if [ -f "$ide_target_settings" ]; then
@@ -1854,11 +1873,21 @@ if [ -f "$ide_settings_template" ] || [ -f "$ide_extensions_template" ]; then
 
     if [ -f "$ide_extensions_template" ]; then
       if [ "$ide_mode" = "merge" ] && [ -f "$ide_target_extensions" ]; then
-        if merge_json_extensions "$ide_target_extensions" "$ide_extensions_template" "$ide_target_extensions"; then
+        merge_tmp="$(mktemp "${TMPDIR:-/tmp}/dcq-ide-merge-XXXXXX")"
+        if merge_json_extensions "$ide_target_extensions" "$ide_extensions_template" "$merge_tmp"; then
+          backup="$(backup_file "$ide_target_extensions")"
+          printf 'BACKUP: %s\n' "$backup"
+          cat "$merge_tmp" >"$ide_target_extensions"
           printf 'MERGE: %s\n' "$ide_target_extensions"
         else
-          emit 'Unable to merge IDE extensions; install manually from %s.\n' "$ide_settings_doc"
+          merge_status=$?
+          if [ "$merge_status" -eq 3 ]; then
+            printf 'OK: %s already includes DCQ extensions.\n' "$ide_target_extensions"
+          else
+            emit 'Unable to merge IDE extensions; install manually from %s.\n' "$ide_settings_doc"
+          fi
         fi
+        rm -f "$merge_tmp"
       else
         ensure_dir "$ide_target_dir"
         if [ -f "$ide_target_extensions" ]; then

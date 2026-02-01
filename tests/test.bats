@@ -493,12 +493,21 @@ teardown() {
   mkdir -p ".vscode"
   write_jsonc_settings ".vscode/settings.json"
   write_jsonc_extensions ".vscode/extensions.json"
+  cp ".vscode/settings.json" ".vscode/settings.json.original"
+  cp ".vscode/extensions.json" ".vscode/extensions.json.original"
 
   run bash -lc "ddev add-on get \"${DIR}\" 2>&1"
   assert_success
   assert_output --partial "MERGE: "
   assert_output --partial ".vscode/settings.json"
   assert_output --partial ".vscode/extensions.json"
+
+  assert_file_exist ".vscode/settings.json.bak"
+  assert_file_exist ".vscode/extensions.json.bak"
+  run cmp -s ".vscode/settings.json.original" ".vscode/settings.json.bak"
+  assert_success
+  run cmp -s ".vscode/extensions.json.original" ".vscode/extensions.json.bak"
+  assert_success
 
   run python3 - ".vscode/settings.json" <<'PY'
 import json
@@ -525,6 +534,36 @@ recs = data.get("recommendations", [])
 assert "example.extension" in recs
 assert "dbaeumer.vscode-eslint" in recs
 PY
+  assert_success
+}
+
+@test "VS Code settings merge skips backup when no changes" {
+  set -u -o pipefail
+  export DCQ_INSTALL_DEPS=skip
+  export DCQ_INSTALL_NODE_DEPS=skip
+  export DCQ_INSTALL_MODE=skip
+  export DCQ_INSTALL_IDE_SETTINGS=overwrite
+
+  run ddev add-on get "${DIR}"
+  assert_success
+
+  assert_file_exist ".vscode/settings.json"
+  assert_file_exist ".vscode/extensions.json"
+  cp ".vscode/settings.json" ".vscode/settings.json.original"
+  cp ".vscode/extensions.json" ".vscode/extensions.json.original"
+
+  export DCQ_INSTALL_IDE_SETTINGS=merge
+  run bash -lc "ddev add-on get \"${DIR}\" 2>&1"
+  assert_success
+
+  run bash -lc 'compgen -G ".vscode/settings.json.bak*"'
+  assert_failure
+  run bash -lc 'compgen -G ".vscode/extensions.json.bak*"'
+  assert_failure
+
+  run cmp -s ".vscode/settings.json.original" ".vscode/settings.json"
+  assert_success
+  run cmp -s ".vscode/extensions.json.original" ".vscode/extensions.json"
   assert_success
 }
 

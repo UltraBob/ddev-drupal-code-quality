@@ -6,7 +6,6 @@ parameters:
     paths:
         - __DOCROOT__/modules/custom
         - __DOCROOT__/themes/custom
-        - __DOCROOT__/profiles/custom
         - __DOCROOT__/sites
     excludePaths:
         analyseAndScan:

@@ -352,6 +352,57 @@ assert_container_contains() {
   return 1
 }
 
+run_with_prompt_yes() {
+  local prompt="$1"
+  shift
+
+  local python_bin=""
+  if command -v python3 >/dev/null 2>&1; then
+    python_bin="python3"
+  elif command -v python >/dev/null 2>&1; then
+    python_bin="python"
+  else
+    skip "python not available for prompt automation"
+  fi
+
+  run "$python_bin" - "$prompt" "$@" <<'PY'
+import os
+import pty
+import select
+import sys
+
+prompt = sys.argv[1].encode()
+cmd = sys.argv[2:]
+sent = False
+buf = b""
+
+pid, fd = pty.fork()
+if pid == 0:
+    os.execvp(cmd[0], cmd)
+
+try:
+    while True:
+        r, _, _ = select.select([fd], [], [], 1)
+        if fd in r:
+            data = os.read(fd, 1024)
+            if not data:
+                break
+            sys.stdout.buffer.write(data)
+            sys.stdout.buffer.flush()
+            if not sent:
+                buf = (buf + data)[-4096:]
+                if prompt in buf:
+                    os.write(fd, b"y\n")
+                    sent = True
+except OSError:
+    pass
+
+_, status = os.waitpid(pid, 0)
+code = os.waitstatus_to_exitcode(status)
+sys.exit(code)
+PY
+}
+
 create_fixture_code() {
   local module_dir="web/modules/custom/dcq_test"
   local theme_dir="web/themes/custom/dcq_theme"
@@ -921,6 +972,13 @@ PY
   run wait_for_container_path "/var/www/html/web/themes/custom/dcq_theme/css/fixable.css"
   assert_success
 
+  run ddev exec bash -lc "command -v git >/dev/null"
+  assert_success
+  run ddev exec bash -lc "cd /var/www/html && git rev-parse --is-inside-work-tree >/dev/null 2>&1 || git init >/dev/null"
+  assert_success
+  run ddev exec bash -lc "cd /var/www/html && printf 'unrelated change' > unrelated.txt"
+  assert_success
+
   run ./.ddev/drupal-code-quality/tooling/bin/checks
   assert_failure
 
@@ -952,24 +1010,30 @@ PY
   assert_not_equal "$before_phpcbf" "$after_phpcbf"
 
   before_eslint="$(read_container_file /var/www/html/web/themes/custom/dcq_theme/js/fixable.js)"
-  run ./.ddev/drupal-code-quality/tooling/bin/eslint-fix --yes --allow-dirty-outside-targets ./web/themes/custom/dcq_theme/js/fixable.js
+  run_with_prompt_yes "Apply these changes? [y/N]" ./.ddev/drupal-code-quality/tooling/bin/eslint-fix ./web/themes/custom/dcq_theme/js/fixable.js
   if [ "$status" -ne 0 ] && [ "$status" -ne 1 ]; then
     echo "Expected ESLint-fix to exit 0 or 1, got $status"
     return 1
   fi
+  assert_output --partial "Warning: unstaged changes detected outside target paths."
+  assert_output --partial "Apply these changes? [y/N]"
   assert_output --partial "ESLint-fix summary:"
   after_eslint="$(read_container_file /var/www/html/web/themes/custom/dcq_theme/js/fixable.js)"
   assert_not_equal "$before_eslint" "$after_eslint"
 
   before_prettier="$(read_container_file /var/www/html/web/themes/custom/dcq_theme/js/prettier.js)"
-  run ./.ddev/drupal-code-quality/tooling/bin/prettier-fix --yes --allow-dirty-outside-targets web/themes/custom/dcq_theme/js/prettier.js
+  run_with_prompt_yes "Apply these changes? [y/N]" ./.ddev/drupal-code-quality/tooling/bin/prettier-fix web/themes/custom/dcq_theme/js/prettier.js
   assert_success
+  assert_output --partial "Warning: unstaged changes detected outside target paths."
+  assert_output --partial "Apply these changes? [y/N]"
   after_prettier="$(read_container_file /var/www/html/web/themes/custom/dcq_theme/js/prettier.js)"
   assert_not_equal "$before_prettier" "$after_prettier"
 
   before_stylelint="$(read_container_file /var/www/html/web/themes/custom/dcq_theme/css/fixable.css)"
-  run ./.ddev/drupal-code-quality/tooling/bin/stylelint-fix --yes --allow-dirty-outside-targets web/themes/custom/dcq_theme/css/fixable.css
+  run_with_prompt_yes "Apply these changes? [y/N]" ./.ddev/drupal-code-quality/tooling/bin/stylelint-fix web/themes/custom/dcq_theme/css/fixable.css
   assert_success
+  assert_output --partial "Warning: unstaged changes detected outside target paths."
+  assert_output --partial "Apply these changes? [y/N]"
   after_stylelint="$(read_container_file /var/www/html/web/themes/custom/dcq_theme/css/fixable.css)"
   assert_not_equal "$before_stylelint" "$after_stylelint"
   assert_container_contains "display: block;" "/var/www/html/web/themes/custom/dcq_theme/css/fixable.css"

@@ -90,6 +90,10 @@ IDE tool paths or tools that require a local binary path:
 ./.ddev/drupal-code-quality/tooling/bin/checks-full
 ```
 
+## Fix commands
+
+`ddev eslint-fix`, `ddev prettier-fix`, and `ddev stylelint-fix` always build a patch preview (saved under `dcq-reports/`) before making any changes. When unrelated work exists outside the lint targets, the commands warn about it and stop execution to prompt `Apply these changes? [y/N]` before applying the fixes. The old `--allow-dirty-outside-targets`/`--allow-dirty` bypass flags were removed; rely on the patch preview plus the explicit confirmation (or `--yes` in automated workflows) instead.
+
 ## IDE settings (VS Code/Codium)
 
 Starter settings live in `.ddev/drupal-code-quality/ide-settings/vscode`. During install, you can

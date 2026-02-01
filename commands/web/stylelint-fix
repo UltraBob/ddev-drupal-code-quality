@@ -12,10 +12,8 @@ Previews Stylelint fixes and applies them only after confirmation.
 
 By default, fixes are not auto-applied when the working tree has changes
 outside the target paths. This prevents mixing unrelated work with automated
-style updates and makes it easier to review and revert fixes. If you are
-intentionally running fixes while the worktree is dirty outside the target
-paths, pass --allow-dirty-outside-targets (or --allow-dirty) to bypass this
-protection.
+style updates and makes it easier to review and revert fixes. You'll always get
+a patch preview and a confirmation prompt before changes are applied.
 USAGE
 }
 
@@ -34,7 +32,7 @@ has_config=false
 seen_double_dash=false
 explicit_paths=false
 auto_yes=false
-allow_dirty_outside_targets=false
+removed_flag_used=false
 clean_args=()
 
 for arg in "$@"; do
@@ -43,12 +41,16 @@ for arg in "$@"; do
     continue
   fi
   if [ "$arg" = "--allow-dirty-outside-targets" ] || [ "$arg" = "--allow-dirty" ]; then
-    # Allow applying fixes even when unrelated files are dirty.
-    allow_dirty_outside_targets=true
+    removed_flag_used=true
     continue
   fi
   clean_args+=("$arg")
 done
+
+if [ "$removed_flag_used" = true ]; then
+  echo "Error: --allow-dirty-outside-targets/--allow-dirty has been removed. Review the patch preview and confirm to apply fixes." >&2
+  exit 2
+fi
 
 for arg in "${clean_args[@]}"; do
   if [ "$seen_double_dash" = true ]; then
@@ -544,14 +546,7 @@ if [ "$skip_fix_apply" = false ]; then
   echo "Patch: ${PATCH_FILE}" >&2
 
   if [ "$unrelated_changes" = true ]; then
-    if [ "$allow_dirty_outside_targets" = false ]; then
-      echo "Unstaged changes detected outside target paths. Patch-only mode: not applying automatically." >&2
-      echo "Re-run with --allow-dirty-outside-targets (or --allow-dirty) to apply fixes anyway." >&2
-      echo "To apply the patch manually, run: git apply ${PATCH_FILE}" >&2
-      echo "Stylelint-fix summary: fixes not applied (patch-only mode). Lint not run." >&2
-      exit 0
-    fi
-    echo "Unstaged changes detected outside target paths; continuing because --allow-dirty-outside-targets was set." >&2
+    echo "Warning: unstaged changes detected outside target paths." >&2
   fi
 
   if [ "$auto_yes" = false ]; then

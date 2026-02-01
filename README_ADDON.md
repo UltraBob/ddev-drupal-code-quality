@@ -92,7 +92,7 @@ IDE tool paths or tools that require a local binary path:
 
 ## Fix commands
 
-`ddev eslint-fix`, `ddev prettier-fix`, and `ddev stylelint-fix` always build a patch preview (saved under `dcq-reports/`) before making any changes. When unrelated work exists outside the lint targets, the commands warn about it and stop execution to prompt `Apply these changes? [y/N]` before applying the fixes. The old `--allow-dirty-outside-targets`/`--allow-dirty` bypass flags were removed; rely on the patch preview plus the explicit confirmation (or `--yes` in automated workflows) instead.
+`ddev eslint-fix`, `ddev prettier-fix`, and `ddev stylelint-fix` always build a patch preview (saved under `dcq-reports/`) before making any changes. When unrelated work exists outside the lint targets, the commands warn about it and stop execution to prompt `Apply these changes? [y/N]` before applying the fixes. Confirming applies the patch, and `--yes` can be used when automation is desired while keeping the warning + prompt safety in place.
 
 ## IDE settings (VS Code/Codium)
 

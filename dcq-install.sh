@@ -878,8 +878,8 @@ merge_phpcs_config() {
     return 0
   fi
 
-  # Copy base phpcs.xml to target
-  cat "$phpcs_source" > "$target"
+  # NOTE: $target already has the cleaned base config (header stripped, docroot substituted)
+  # from the main copy loop. We just need to merge in the amendments.
 
   # Prepare amendments with docroot substitution
   tmp="$(mktemp "${TMPDIR:-/tmp}/dcq-phpcs-XXXXXX")"

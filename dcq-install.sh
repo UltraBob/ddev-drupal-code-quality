@@ -616,17 +616,14 @@ prompt_recommended_settings() {
 set_default_env() {
   local name="$1"
   local value="$2"
-  local was_set=0
-  if [ -n "${!name:-}" ]; then
-    was_set=1
-  fi
   if [ -z "${!name:-}" ]; then
     printf -v "$name" '%s' "$value"
     if [ "$non_interactive" -eq 1 ]; then
       emit 'Using recommended default: %s=%s (override with env var)\n' "$name" "$value"
     fi
   fi
-  return $was_set
+  # Always return success - this is just setting defaults
+  return 0
 }
 
 prompt_ide_settings_mode() {

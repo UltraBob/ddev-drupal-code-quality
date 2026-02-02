@@ -108,28 +108,8 @@ load_bats_helpers() {
 }
 
 setup_file() {
-  # Pre-warm shared DDEV infrastructure to reduce parallel startup contention
-  # Create a minimal temporary project to ensure router and ssh-agent are fully initialized
-  local temp_project="dcq-warmup-$$"
-  local temp_dir="${HOME}/tmp/${temp_project}"
-
-  # Clean up any existing warmup project
-  ddev delete -Oy "$temp_project" >/dev/null 2>&1 || true
-  rm -rf "$temp_dir" 2>/dev/null || true
-
-  # Create and start minimal project to initialize shared infrastructure
-  mkdir -p "$temp_dir"
-  cd "$temp_dir"
-  ddev config --project-name="$temp_project" --project-type=php >/dev/null 2>&1 || true
-  ddev start -y >/dev/null 2>&1 || true
-
-  # Give router and ssh-agent time to become fully healthy
-  sleep 3
-
-  # Clean up warmup project
-  ddev delete -Oy "$temp_project" >/dev/null 2>&1 || true
-  cd /
-  rm -rf "$temp_dir" 2>/dev/null || true
+  # No setup needed - progressive backoff + staggered starts handle parallel conflicts
+  :
 }
 
 # Retry helper for DDEV commands that may fail due to parallel execution conflicts
@@ -175,7 +155,7 @@ setup() {
 
   # Stagger parallel test starts to reduce shared resource contention
   # Only delay if running in parallel mode (bats --jobs N)
-  if [ -z "${BATS_NO_PARALLELIZE_WITHIN_FILE:-}" ]; then
+  if [ -n "${BATS_SEMAPHORE_NUMBER:-}" ]; then
     # Random delay 0-4 seconds to spread out simultaneous DDEV starts
     sleep $((RANDOM % 5))
   fi
@@ -216,6 +196,9 @@ path.write_text("\n".join(data) + "\n", encoding="utf-8")
 PY
   retry_ddev_command ddev start -y
   assert_success
+
+  # Start timing the test execution
+  SECONDS=0
 }
 
 health_checks() {
@@ -589,6 +572,10 @@ JSON
 
 teardown() {
   set -u -o pipefail
+
+  # Report test execution time with test name
+  echo "# ${BATS_TEST_NAME} completed in ${SECONDS}s" >&3
+
   if [ -n "${PROJNAME:-}" ]; then
     ddev delete -Oy "${PROJNAME}" >/dev/null 2>&1
   fi

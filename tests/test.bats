@@ -151,14 +151,22 @@ PY
 health_checks() {
   local commands=(phpstan phpcs phpcbf eslint stylelint prettier cspell)
 
+  # Host-side checks
   for command in "${commands[@]}"; do
     assert_file_exist ".ddev/commands/web/${command}"
     assert_file_exist ".ddev/drupal-code-quality/tooling/bin/${command}"
-    run ddev exec test -x "/var/www/html/.ddev/commands/web/${command}"
-    assert_success
-    run ddev exec test -x "/mnt/ddev_config/drupal-code-quality/tooling/bin/${command}"
-    assert_success
   done
+
+  # Batch all container checks into single ddev exec call
+  local checks=""
+  for command in "${commands[@]}"; do
+    checks+="test -x /var/www/html/.ddev/commands/web/${command} && "
+    checks+="test -x /mnt/ddev_config/drupal-code-quality/tooling/bin/${command} && "
+  done
+  checks="${checks% && }"  # Remove trailing &&
+
+  run ddev exec bash -c "$checks"
+  assert_success
 }
 
 assert_addon_installed() {

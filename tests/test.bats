@@ -15,7 +15,8 @@
 #   bats ./tests/test.bats --filter-tags 'node'
 # For debugging:
 #   bats ./tests/test.bats --show-output-of-passing-tests --verbose-run --print-output-on-failure
-# Note: Tests do not currently support parallel execution (--jobs > 1)
+# For parallel execution (faster):
+#   bats ./tests/test.bats --jobs 4
 
 load_bats_helpers() {
   local load_failed=0
@@ -106,6 +107,40 @@ load_bats_helpers() {
   }
 }
 
+setup_file() {
+  # Ensure ddev-router is running before parallel tests start
+  # This prevents race conditions when multiple tests try to start DDEV simultaneously
+  # Use a simple command that initializes the router if needed
+  ddev hostname >/dev/null 2>&1 || true
+}
+
+# Retry helper for DDEV commands that may fail due to parallel execution conflicts
+retry_ddev_command() {
+  local max_attempts=3
+  local sleep_time=3
+  local attempts=0
+
+  while [ "$attempts" -lt "$max_attempts" ]; do
+    run "$@"
+    if [ "$status" -eq 0 ]; then
+      return 0
+    fi
+
+    # Check for known transient errors in parallel execution
+    if echo "$output" | grep -qE "(container name.*already in use|global-cache|ddev-router|unhealthy|FAILED phpstatus|FAILED mailpit|Permission denied|address already in use|removal.*already in progress|container exited)"; then
+      attempts=$((attempts + 1))
+      if [ "$attempts" -lt "$max_attempts" ]; then
+        echo "# DDEV conflict detected, retrying (attempt $((attempts + 1))/$max_attempts)..." >&3
+        sleep "$sleep_time"
+        continue
+      fi
+    fi
+
+    # Non-transient error or max attempts reached, return failure
+    return 1
+  done
+}
+
 setup() {
   set -o pipefail
 
@@ -117,9 +152,12 @@ setup() {
   load_bats_helpers
 
   export DIR="$(cd "$(dirname "${BATS_TEST_FILENAME}")/.." >/dev/null 2>&1 && pwd)"
-  export PROJNAME="test-$(basename "${GITHUB_REPO}")"
   mkdir -p "${HOME}/tmp"
-  export TESTDIR="$(mktemp -d "${HOME}/tmp/${PROJNAME}.XXXXXX")"
+  local base_name="test-$(basename "${GITHUB_REPO}")"
+  export TESTDIR="$(mktemp -d "${HOME}/tmp/${base_name}.XXXXXX")"
+  # Extract unique suffix from TESTDIR for parallel-safe project naming
+  local unique_suffix="$(basename "${TESTDIR}" | sed "s/^${base_name}\.//")"
+  export PROJNAME="${base_name}-${unique_suffix}"
   export DDEV_NONINTERACTIVE=true
   export DDEV_NO_INSTRUMENTATION=true
   export DCQ_NONINTERACTIVE=true
@@ -144,7 +182,7 @@ if not found:
     data.append("corepack_enable: true")
 path.write_text("\n".join(data) + "\n", encoding="utf-8")
 PY
-  run ddev start -y
+  retry_ddev_command ddev start -y
   assert_success
 }
 
@@ -269,9 +307,9 @@ assert_container_file_exist() {
 }
 
 restart_or_start_ddev() {
-  run ddev restart -y
+  retry_ddev_command ddev restart -y
   if [ "$status" -ne 0 ]; then
-    run ddev start -y
+    retry_ddev_command ddev start -y
   fi
   assert_success
 }
@@ -752,7 +790,7 @@ PY
   mkdir -p docroot
   run ddev config --docroot=docroot
   assert_success
-  run ddev restart -y
+  retry_ddev_command ddev restart -y
   assert_success
   run ddev add-on get "${DIR}"
   assert_success

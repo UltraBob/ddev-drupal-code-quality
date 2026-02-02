@@ -613,21 +613,20 @@ prompt_recommended_settings() {
   return 1
 }
 
-has_install_overrides() {
-  [ -n "${DCQ_INSTALL_MODE:-}" ] \
-    || [ -n "${DCQ_INSTALL_DEPS:-}" ] \
-    || [ -n "${DCQ_INSTALL_NODE_DEPS:-}" ] \
-    || [ -n "${DCQ_PHPSTAN_LEVEL:-}" ] \
-    || [ -n "${DCQ_INSTALL_IDE_SETTINGS:-}" ] \
-    || [ -n "${DCQ_INSTALL_GITIGNORE:-}" ]
-}
-
 set_default_env() {
   local name="$1"
   local value="$2"
+  local was_set=0
+  if [ -n "${!name:-}" ]; then
+    was_set=1
+  fi
   if [ -z "${!name:-}" ]; then
     printf -v "$name" '%s' "$value"
+    if [ "$non_interactive" -eq 1 ]; then
+      emit 'Using recommended default: %s=%s (override with env var)\n' "$name" "$value"
+    fi
   fi
+  return $was_set
 }
 
 prompt_ide_settings_mode() {
@@ -719,19 +718,15 @@ prompt_phpstan_level() {
   fi
 
   env_level="$(string_lower "${DCQ_PHPSTAN_LEVEL:-}")"
-  if [ -n "$env_level" ]; then
-    if [[ "$env_level" =~ ^[0-9]$ ]]; then
-      if set_phpstan_level "$config_path" "$env_level"; then
-        emit 'WRITE: %s (level %s)\n' "$config_path" "$env_level"
-      else
-        printf 'Unable to update phpstan.neon level.\n' >&2
-      fi
+  # env_level should now always be set via set_default_env or user override
+  if [[ "$env_level" =~ ^[0-9]$ ]]; then
+    if set_phpstan_level "$config_path" "$env_level"; then
+      emit 'WRITE: %s (level %s)\n' "$config_path" "$env_level"
     else
-      printf 'Invalid DCQ_PHPSTAN_LEVEL "%s"; keeping current phpstan.neon level.\n' "$env_level" >&2
+      printf 'Unable to update phpstan.neon level.\n' >&2
     fi
-  elif [ "$non_interactive" -eq 1 ] || [ "${PROMPT_AVAILABLE:-0}" -ne 1 ]; then
-    printf 'No interactive terminal detected; keeping current phpstan.neon level.\n'
-  else
+  elif [ "$non_interactive" -eq 0 ] && [ "${PROMPT_AVAILABLE:-0}" -eq 1 ]; then
+    # Interactive mode with invalid/missing level - prompt user
     printf '\n'
     emit 'Set phpstan.neon level (0-9) (default: 0): '
     if ! IFS= read -r -u "$PROMPT_IN_FD" answer; then
@@ -775,7 +770,7 @@ maybe_add_gitignore_reports() {
   case "$mode_raw" in
     1|true|yes|on|add|install|auto) mode="add" ;;
     0|false|no|off|skip) mode="skip" ;;
-    *) mode="prompt" ;;
+    *) mode="add" ;;  # Default is now set via set_default_env
   esac
 
   if [ -f "$gitignore" ] && grep -q "^${entry}$" "$gitignore"; then
@@ -798,14 +793,10 @@ maybe_add_gitignore_reports() {
     return 0
   fi
 
-  if [ "$non_interactive" -eq 1 ] || [ "${PROMPT_AVAILABLE:-0}" -ne 1 ]; then
-    emit 'No interactive terminal detected; skipping .gitignore update for %s.\n' "$entry"
-    return 0
-  fi
-
+  # mode should now be "add" due to set_default_env, unless explicitly overridden
   emit 'Add %s to .gitignore to avoid committing report logs.\n' "$entry"
   printf '\n'
-  if prompt_yes_no "Add '${entry}' to .gitignore?" 1; then
+  if [ "$mode" = "add" ] || prompt_yes_no "Add '${entry}' to .gitignore?" 1; then
     if [ -f "$gitignore" ]; then
       printf '\n%s\n' "$entry" >>"$gitignore"
     else
@@ -1432,25 +1423,23 @@ if [ "${PROMPT_AVAILABLE:-0}" -ne 1 ]; then
   non_interactive=1
 fi
 
+# In interactive mode, offer to accept all recommended settings at once.
+# In non-interactive mode, or if user accepts, set recommended defaults for any unset vars.
 recommended_mode=0
-if ! has_install_overrides; then
-  if [ "$non_interactive" -eq 1 ]; then
+if [ "$non_interactive" -eq 0 ] && [ "${PROMPT_AVAILABLE:-0}" -eq 1 ]; then
+  if prompt_recommended_settings; then
     recommended_mode=1
-  else
-    if prompt_recommended_settings; then
-      recommended_mode=1
-    fi
   fi
 fi
 
-if [ "$recommended_mode" -eq 1 ]; then
-  set_default_env "DCQ_INSTALL_MODE" "replace"
-  set_default_env "DCQ_INSTALL_DEPS" "install"
-  set_default_env "DCQ_INSTALL_NODE_DEPS" "root"
-  set_default_env "DCQ_PHPSTAN_LEVEL" "3"
-  set_default_env "DCQ_INSTALL_IDE_SETTINGS" "merge"
-  set_default_env "DCQ_INSTALL_GITIGNORE" "add"
-fi
+# Always set recommended defaults for unset environment variables.
+# This ensures sensible defaults in non-interactive mode and when using recommended_mode.
+set_default_env "DCQ_INSTALL_MODE" "replace"
+set_default_env "DCQ_INSTALL_DEPS" "install"
+set_default_env "DCQ_INSTALL_NODE_DEPS" "root"
+set_default_env "DCQ_PHPSTAN_LEVEL" "3"
+set_default_env "DCQ_INSTALL_IDE_SETTINGS" "merge"
+set_default_env "DCQ_INSTALL_GITIGNORE" "add"
 
 # Fail loudly if ddev exec cannot resolve a project. Silent skips later are
 # usually caused by running in a context where DDEV can't find .ddev/config.yaml.
@@ -1465,10 +1454,6 @@ if command_available "$ddev_cmd"; then
 fi
 
 install_mode="$(string_lower "${DCQ_INSTALL_MODE:-}")"
-if [ "$non_interactive" -eq 1 ] && [ -z "$install_mode" ]; then
-  install_mode="replace"
-fi
-
 replace_all=0
 skip_all=0
 abort_on_conflict=0
@@ -1496,18 +1481,13 @@ if [ "${#missing_tools[@]}" -gt 0 ]; then
 
   ddev_cmd="${DDEV_EXECUTABLE:-ddev}"
   deps_mode_raw="$(string_lower "${DCQ_INSTALL_DEPS:-}")"
-  if [ -z "$deps_mode_raw" ]; then
-    if [ "$non_interactive" -eq 1 ]; then
-      deps_mode="skip"
-    else
-      deps_mode="prompt"
-    fi
-  elif [ "$deps_mode_raw" = "1" ] || [ "$deps_mode_raw" = "true" ] || [ "$deps_mode_raw" = "yes" ] || [ "$deps_mode_raw" = "on" ] || [ "$deps_mode_raw" = "install" ] || [ "$deps_mode_raw" = "auto" ]; then
+  if [ "$deps_mode_raw" = "1" ] || [ "$deps_mode_raw" = "true" ] || [ "$deps_mode_raw" = "yes" ] || [ "$deps_mode_raw" = "on" ] || [ "$deps_mode_raw" = "install" ] || [ "$deps_mode_raw" = "auto" ]; then
     deps_mode="install"
   elif [ "$deps_mode_raw" = "0" ] || [ "$deps_mode_raw" = "false" ] || [ "$deps_mode_raw" = "no" ] || [ "$deps_mode_raw" = "off" ] || [ "$deps_mode_raw" = "skip" ]; then
     deps_mode="skip"
   else
-    deps_mode="prompt"
+    # Default is now set via set_default_env, so this should be install unless overridden
+    deps_mode="install"
   fi
 
   emit 'Missing dev tools: %s.\n' "$(printf '%s ' "${missing_tools[@]}" | sed 's/[[:space:]]*$//')"
@@ -1874,20 +1854,12 @@ ide_settings_doc="${ide_settings_root}/README.md"
 if [ -f "$ide_settings_template" ] || [ -f "$ide_extensions_template" ]; then
   emit '\n==> Phase 4: IDE settings\n'
   ide_mode_raw="$(string_lower "${DCQ_INSTALL_IDE_SETTINGS:-}")"
-  if [ -z "$ide_mode_raw" ]; then
-    if [ "$non_interactive" -eq 1 ]; then
-      ide_mode="skip"
-    else
-      ide_mode="prompt"
-    fi
-  else
-    case "$ide_mode_raw" in
-      merge|m) ide_mode="merge" ;;
-      overwrite|replace|o) ide_mode="overwrite" ;;
-      manual|skip|s) ide_mode="skip" ;;
-      *) ide_mode="prompt" ;;
-    esac
-  fi
+  case "$ide_mode_raw" in
+    merge|m) ide_mode="merge" ;;
+    overwrite|replace|o) ide_mode="overwrite" ;;
+    manual|skip|s) ide_mode="skip" ;;
+    *) ide_mode="merge" ;;  # Default is now set via set_default_env
+  esac
 
   if [ "$ide_mode" = "prompt" ]; then
     emit 'VS Code/Codium settings/extensions: choose merge, overwrite (with backup), or skip.\n'

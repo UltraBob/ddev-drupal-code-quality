@@ -939,8 +939,9 @@ expand_cspell_config() {
 
     # Run the script in container from project root
     # Capture both stdout and stderr, but don't fail the installer if it errors
+    # Pass the docroot via _WEB_ROOT environment variable
     local output
-    if output=$("$ddev_cmd" exec php .prepare-cspell-tmp.php 2>&1); then
+    if output=$("$ddev_cmd" exec bash -c "export _WEB_ROOT='${DCQ_DOCROOT:-web}' && php .prepare-cspell-tmp.php" 2>&1); then
       if echo "$output" | grep -q "Writing json"; then
         emit 'Successfully expanded .cspell.json\n'
       else

@@ -1,0 +1,8 @@
+#ddev-generated
+<!-- DCQ amendments for local development -->
+<!-- These rules and exclusions will be merged into .phpcs.xml during installation -->
+
+  <rule ref="DrupalPractice"/>
+
+  <exclude-pattern>**/node_modules/**</exclude-pattern>
+  <exclude-pattern>__DOCROOT__/sites/*/files/**</exclude-pattern>

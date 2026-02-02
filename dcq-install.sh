@@ -869,6 +869,86 @@ merge_phpstan_config() {
   rm -f "$tmp"
 }
 
+merge_phpcs_config() {
+  local phpcs_source="$1"
+  local phpcs_dcq_source="$2"
+  local target="$3"
+  local docroot="${DCQ_DOCROOT:-web}"
+  local tmp
+
+  if [ ! -f "$phpcs_dcq_source" ]; then
+    # If dcq amendments don't exist, just use the base config
+    return 0
+  fi
+
+  # Copy base phpcs.xml to target
+  cat "$phpcs_source" > "$target"
+
+  # Prepare amendments with docroot substitution
+  tmp="$(mktemp "${TMPDIR:-/tmp}/dcq-phpcs-XXXXXX")"
+  tail -n +2 "$phpcs_dcq_source" | sed "s|__DOCROOT__|${docroot}|g" > "$tmp"
+
+  # Insert amendments before the closing </ruleset> tag
+  # Create a new temp file with the merged content
+  local merged
+  merged="$(mktemp "${TMPDIR:-/tmp}/dcq-phpcs-merged-XXXXXX")"
+
+  # Copy everything except the closing </ruleset> tag
+  sed '/<\/ruleset>/d' "$target" > "$merged"
+
+  # Append our amendments
+  cat "$tmp" >> "$merged"
+
+  # Add closing tag back
+  printf '\n</ruleset>\n' >> "$merged"
+
+  # Move merged content to target
+  cat "$merged" > "$target"
+
+  # Cleanup
+  rm -f "$tmp" "$merged"
+}
+
+expand_cspell_config() {
+  local app_root="$1"
+  local prepare_script="${DDEV_APPROOT}/.ddev/drupal-code-quality/tooling/scripts/prepare-cspell.php"
+  local cspell_config="${app_root%/}/.cspell.json"
+
+  # Check if CSpell config exists
+  if [ ! -f "$cspell_config" ]; then
+    emit 'No .cspell.json found; skipping CSpell expansion.\n'
+    return 0
+  fi
+
+  # Check if prepare-cspell.php exists
+  if [ ! -f "$prepare_script" ]; then
+    emit 'prepare-cspell.php not found; skipping CSpell expansion.\n'
+    return 0
+  fi
+
+  # Run prepare-cspell.php in the container to expand .cspell.json
+  if command_available "${DDEV_EXECUTABLE:-ddev}"; then
+    emit 'Expanding .cspell.json with project-specific settings...\n'
+    local ddev_cmd="${DDEV_EXECUTABLE:-ddev}"
+
+    # Copy prepare-cspell.php to project root for execution
+    local project_script="${app_root%/}/.prepare-cspell-tmp.php"
+    cp "$prepare_script" "$project_script"
+
+    # Run the script in container from project root
+    if "$ddev_cmd" exec php .prepare-cspell-tmp.php 2>&1 | grep -q "Writing json"; then
+      emit 'Successfully expanded .cspell.json\n'
+    else
+      emit 'Warning: CSpell expansion may have failed. Check .cspell.json\n'
+    fi
+
+    # Clean up temp script
+    rm -f "$project_script"
+  else
+    emit 'DDEV not available; skipping CSpell expansion.\n'
+  fi
+}
+
 ensure_phpstan_paths() {
   local app_root="$1"
   local docroot="${DCQ_DOCROOT:-web}"
@@ -1657,6 +1737,12 @@ while IFS= read -r -d '' source; do
     phpstan_updated=1
   fi
 
+  # Merge .phpcs.dcq.xml into .phpcs.xml if this is the phpcs config
+  if [ "$target" = "${app_root%/}/.phpcs.xml" ]; then
+    phpcs_dcq_source="${addon_root}/config-amendments/.phpcs.dcq.xml"
+    merge_phpcs_config "$source" "$phpcs_dcq_source" "$target"
+  fi
+
   if [ -x "$source" ] || [[ "$target" == "$shim_dir"* ]]; then
     chmod 0755 "$target" || true
   fi
@@ -1679,6 +1765,9 @@ if [ ! -f "$project_cspell_words" ]; then
   printf '# Project-specific CSpell words (managed via ddev cspell-suggest).\n' > "$project_cspell_words"
   emit_copy 'WRITE: %s\n' "$project_cspell_words"
 fi
+
+# Expand CSpell configuration with project-specific settings
+expand_cspell_config "$app_root"
 
 emit '\n==> Phase 3: JS toolchain dependencies\n'
 core_package_json="${app_root%/}/${DCQ_DOCROOT}/core/package.json"

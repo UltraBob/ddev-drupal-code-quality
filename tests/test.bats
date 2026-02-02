@@ -801,6 +801,39 @@ PY
   assert_success
 }
 
+@test "cspell config is expanded during installation" {
+  set -u -o pipefail
+  run ddev add-on get "${DIR}"
+  assert_success
+
+  # Verify expanded dictionaries array includes Drupal and project-words
+  run grep -q '"drupal"' .cspell.json
+  assert_success
+  run grep -q '"project-words"' .cspell.json
+  assert_success
+
+  # Verify dictionaryDefinitions were added
+  run grep -q 'web/core/misc/cspell/drupal-dictionary.txt' .cspell.json
+  assert_success
+  run grep -q '.cspell-project-words.txt' .cspell.json
+  assert_success
+
+  # Verify expanded words array includes standard additions
+  run grep -q '"lando"' .cspell.json
+  assert_success
+  run grep -q '"ddev"' .cspell.json
+  assert_success
+  run grep -q '"endapply"' .cspell.json
+  assert_success
+
+  # Verify expanded ignorePaths includes dcq-reports
+  run grep -q 'dcq-reports' .cspell.json
+  assert_success
+
+  # Verify .cspell-project-words.txt was created
+  assert_file_exist ".cspell-project-words.txt"
+}
+
 @test "remove cleans ddev assets and shims" {
   set -u -o pipefail
   run ddev add-on get "${DIR}"

@@ -32,7 +32,17 @@ $quiet ?: print 'At start cspell_json=' . print_r($cspell_json, TRUE) . PHP_EOL;
 
 // Some directories in the project root are not part of the project.
 $webRoot = getenv('_WEB_ROOT') ?: 'web';
-$non_project_directories = ["$webRoot", 'vendor', 'node_modules', '.git', 'recipes'];
+// Exclude specific directories but allow scanning custom code
+$non_project_directories = [
+  "$webRoot/core",
+  "$webRoot/modules/contrib",
+  "$webRoot/themes/contrib",
+  "$webRoot/profiles/contrib",
+  "vendor",
+  "node_modules",
+  ".git",
+  "recipes",
+];
 
 if (($composer_bin_dir = getenv('COMPOSER_BIN_DIR')) && ($ci_project_dir = getenv('CI_PROJECT_DIR'))) {
   $relative_bin_dir = str_replace("$ci_project_dir/", "", $composer_bin_dir);

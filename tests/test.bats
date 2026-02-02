@@ -108,16 +108,33 @@ load_bats_helpers() {
 }
 
 setup_file() {
-  # Ensure ddev-router is running before parallel tests start
-  # This prevents race conditions when multiple tests try to start DDEV simultaneously
-  # Use a simple command that initializes the router if needed
-  ddev hostname >/dev/null 2>&1 || true
+  # Pre-warm shared DDEV infrastructure to reduce parallel startup contention
+  # Create a minimal temporary project to ensure router and ssh-agent are fully initialized
+  local temp_project="dcq-warmup-$$"
+  local temp_dir="${HOME}/tmp/${temp_project}"
+
+  # Clean up any existing warmup project
+  ddev delete -Oy "$temp_project" >/dev/null 2>&1 || true
+  rm -rf "$temp_dir" 2>/dev/null || true
+
+  # Create and start minimal project to initialize shared infrastructure
+  mkdir -p "$temp_dir"
+  cd "$temp_dir"
+  ddev config --project-name="$temp_project" --project-type=php >/dev/null 2>&1 || true
+  ddev start -y >/dev/null 2>&1 || true
+
+  # Give router and ssh-agent time to become fully healthy
+  sleep 3
+
+  # Clean up warmup project
+  ddev delete -Oy "$temp_project" >/dev/null 2>&1 || true
+  cd /
+  rm -rf "$temp_dir" 2>/dev/null || true
 }
 
 # Retry helper for DDEV commands that may fail due to parallel execution conflicts
 retry_ddev_command() {
-  local max_attempts=3
-  local sleep_time=3
+  local max_attempts=8
   local attempts=0
 
   while [ "$attempts" -lt "$max_attempts" ]; do
@@ -127,10 +144,13 @@ retry_ddev_command() {
     fi
 
     # Check for known transient errors in parallel execution
-    if echo "$output" | grep -qE "(container name.*already in use|global-cache|ddev-router|unhealthy|FAILED phpstatus|FAILED mailpit|Permission denied|address already in use|removal.*already in progress|container exited)"; then
+    if echo "$output" | grep -qE "(container name.*already in use|global-cache|ddev-router|ddev-ssh-agent|unhealthy|FAILED phpstatus|FAILED mailpit|Permission denied|address already in use|removal.*already in progress|container exited|health check timed out|failed to become ready)"; then
       attempts=$((attempts + 1))
       if [ "$attempts" -lt "$max_attempts" ]; then
-        echo "# DDEV conflict detected, retrying (attempt $((attempts + 1))/$max_attempts)..." >&3
+        # Progressive backoff: 3s, 6s, 9s, 12s, 15s, 18s, 21s
+        # Quick retry for transient issues, longer waits for serious contention
+        local sleep_time=$((3 * (attempts + 1)))
+        echo "# DDEV conflict detected, retrying (attempt $((attempts + 1))/$max_attempts) in ${sleep_time}s..." >&3
         sleep "$sleep_time"
         continue
       fi
@@ -152,6 +172,14 @@ setup() {
   load_bats_helpers
 
   export DIR="$(cd "$(dirname "${BATS_TEST_FILENAME}")/.." >/dev/null 2>&1 && pwd)"
+
+  # Stagger parallel test starts to reduce shared resource contention
+  # Only delay if running in parallel mode (bats --jobs N)
+  if [ -z "${BATS_NO_PARALLELIZE_WITHIN_FILE:-}" ]; then
+    # Random delay 0-4 seconds to spread out simultaneous DDEV starts
+    sleep $((RANDOM % 5))
+  fi
+
   mkdir -p "${HOME}/tmp"
   local base_name="test-$(basename "${GITHUB_REPO}")"
   export TESTDIR="$(mktemp -d "${HOME}/tmp/${base_name}.XXXXXX")"
@@ -159,7 +187,9 @@ setup() {
   local unique_suffix="$(basename "${TESTDIR}" | sed "s/^${base_name}\.//")"
   # Sanitize test name for project name: strip "test" prefix, lowercase, replace special chars, remove "test" words, truncate to 30 chars
   local test_slug="$(echo "${BATS_TEST_NAME}" | sed -E 's/^test[[:space:]]+//' | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/-test-/-/g; s/^test-//; s/-test$//' | sed 's/-\+/-/g' | sed 's/^-//' | sed 's/-$//' | cut -c1-30)"
-  export PROJNAME="dcq-${test_slug}-${unique_suffix}"
+  # Include test number for progress tracking in OrbStack
+  local test_num="${BATS_TEST_NUMBER:-0}"
+  export PROJNAME="dcq-${test_num}-${test_slug}-${unique_suffix}"
   export DDEV_NONINTERACTIVE=true
   export DDEV_NO_INSTRUMENTATION=true
   export DCQ_NONINTERACTIVE=true

@@ -908,8 +908,10 @@ merge_phpcs_config() {
 
 expand_cspell_config() {
   local app_root="$1"
-  local prepare_script="${DDEV_APPROOT}/.ddev/drupal-code-quality/tooling/scripts/prepare-cspell.php"
+  local ddev_approot="${DDEV_APPROOT:-$app_root}"
+  local prepare_script="${ddev_approot}/.ddev/drupal-code-quality/tooling/scripts/prepare-cspell.php"
   local cspell_config="${app_root%/}/.cspell.json"
+
 
   # Check if CSpell config exists
   if [ ! -f "$cspell_config" ]; then
@@ -930,13 +932,23 @@ expand_cspell_config() {
 
     # Copy prepare-cspell.php to project root for execution
     local project_script="${app_root%/}/.prepare-cspell-tmp.php"
-    cp "$prepare_script" "$project_script"
+    cp "$prepare_script" "$project_script" || {
+      emit 'Failed to copy prepare-cspell.php; skipping expansion.\n'
+      return 0
+    }
 
     # Run the script in container from project root
-    if "$ddev_cmd" exec php .prepare-cspell-tmp.php 2>&1 | grep -q "Writing json"; then
-      emit 'Successfully expanded .cspell.json\n'
+    # Capture both stdout and stderr, but don't fail the installer if it errors
+    local output
+    if output=$("$ddev_cmd" exec php .prepare-cspell-tmp.php 2>&1); then
+      if echo "$output" | grep -q "Writing json"; then
+        emit 'Successfully expanded .cspell.json\n'
+      else
+        emit 'CSpell expansion completed (no changes needed)\n'
+      fi
     else
-      emit 'Warning: CSpell expansion may have failed. Check .cspell.json\n'
+      # Script failed - likely no Drupal core installed yet
+      emit 'Skipping CSpell expansion (Drupal core may not be installed yet)\n'
     fi
 
     # Clean up temp script
@@ -944,6 +956,9 @@ expand_cspell_config() {
   else
     emit 'DDEV not available; skipping CSpell expansion.\n'
   fi
+
+  # Always return success - CSpell expansion is optional
+  return 0
 }
 
 ensure_phpstan_paths() {
@@ -1456,6 +1471,7 @@ run_command() {
 
 prompt_setup
 
+
 cwd="$(pwd)"
 app_root="${DDEV_APPROOT:-}"
 if [ -z "$app_root" ]; then
@@ -1477,6 +1493,7 @@ else
   emit_copy 'WRITE: %s\n' "$docroot_file"
 fi
 
+
 node_target_choice=""
 
 addon_root="${cwd}/drupal-code-quality"
@@ -1496,6 +1513,7 @@ fi
 if truthy "${DCQ_NONINTERACTIVE:-}"; then
   non_interactive=1
 fi
+
 if [ "${PROMPT_AVAILABLE:-0}" -ne 1 ]; then
   non_interactive=1
 fi
@@ -1627,6 +1645,7 @@ phpstan_updated=0
 copy_changed=0
 copy_skipped=0
 copy_unchanged=0
+
 
 # Copy add-on assets/shims into project, respecting conflict handling mode.
 while IFS= read -r -d '' source; do

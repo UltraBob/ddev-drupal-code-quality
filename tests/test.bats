@@ -292,7 +292,7 @@ wait_for_container_path() {
   local path="$1"
   local attempts=0
 
-  while [ "$attempts" -lt 15 ]; do
+  while [ "$attempts" -lt 5 ]; do
     if ddev exec test -r "$path" >/dev/null 2>&1; then
       return 0
     fi
@@ -999,11 +999,8 @@ PY
   run wait_for_container_path "/var/www/html/web/themes/custom/dcq_theme/css/fixable.css"
   assert_success
 
-  run ddev exec bash -lc "command -v git >/dev/null"
-  assert_success
-  run ddev exec bash -lc "cd /var/www/html && git rev-parse --is-inside-work-tree >/dev/null 2>&1 || git init >/dev/null"
-  assert_success
-  run ddev exec bash -lc "cd /var/www/html && printf 'unrelated change' > unrelated.txt"
+  # Batch git setup commands into single exec call
+  run ddev exec bash -lc "command -v git >/dev/null && cd /var/www/html && (git rev-parse --is-inside-work-tree >/dev/null 2>&1 || git init >/dev/null) && printf 'unrelated change' > unrelated.txt"
   assert_success
 
   run ./.ddev/drupal-code-quality/tooling/bin/checks

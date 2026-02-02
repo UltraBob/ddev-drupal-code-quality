@@ -157,7 +157,9 @@ setup() {
   export TESTDIR="$(mktemp -d "${HOME}/tmp/${base_name}.XXXXXX")"
   # Extract unique suffix from TESTDIR for parallel-safe project naming
   local unique_suffix="$(basename "${TESTDIR}" | sed "s/^${base_name}\.//")"
-  export PROJNAME="${base_name}-${unique_suffix}"
+  # Sanitize test name for project name: strip "test" prefix, lowercase, replace special chars, remove "test" words, truncate to 30 chars
+  local test_slug="$(echo "${BATS_TEST_NAME}" | sed -E 's/^test[[:space:]]+//' | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/-test-/-/g; s/^test-//; s/-test$//' | sed 's/-\+/-/g' | sed 's/^-//' | sed 's/-$//' | cut -c1-30)"
+  export PROJNAME="dcq-${test_slug}-${unique_suffix}"
   export DDEV_NONINTERACTIVE=true
   export DDEV_NO_INSTRUMENTATION=true
   export DCQ_NONINTERACTIVE=true

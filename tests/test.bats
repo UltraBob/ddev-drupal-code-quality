@@ -1116,32 +1116,94 @@ PY
   after_phpcbf="$(read_container_file /var/www/html/web/modules/custom/dcq_test/dcq_fixable.php)"
   assert_not_equal "$before_phpcbf" "$after_phpcbf"
 
+  # Test eslint-fix applies directly (default mode)
   before_eslint="$(read_container_file /var/www/html/web/themes/custom/dcq_theme/js/fixable.js)"
-  run_with_prompt_yes "Apply these changes? [y/N]" ./.ddev/drupal-code-quality/tooling/bin/eslint-fix ./web/themes/custom/dcq_theme/js/fixable.js
+  run ./.ddev/drupal-code-quality/tooling/bin/eslint-fix ./web/themes/custom/dcq_theme/js/fixable.js
   if [ "$status" -ne 0 ] && [ "$status" -ne 1 ]; then
     echo "Expected ESLint-fix to exit 0 or 1, got $status"
     return 1
   fi
-  assert_output --partial "Warning: unstaged changes detected outside target paths."
+  after_eslint="$(read_container_file /var/www/html/web/themes/custom/dcq_theme/js/fixable.js)"
+  assert_not_equal "$before_eslint" "$after_eslint"
+
+  # Test prettier-fix applies directly (default mode)
+  before_prettier="$(read_container_file /var/www/html/web/themes/custom/dcq_theme/js/prettier.js)"
+  run ./.ddev/drupal-code-quality/tooling/bin/prettier-fix web/themes/custom/dcq_theme/js/prettier.js
+  assert_success
+  after_prettier="$(read_container_file /var/www/html/web/themes/custom/dcq_theme/js/prettier.js)"
+  assert_not_equal "$before_prettier" "$after_prettier"
+
+  # Test stylelint-fix applies directly (default mode)
+  before_stylelint="$(read_container_file /var/www/html/web/themes/custom/dcq_theme/css/fixable.css)"
+  run ./.ddev/drupal-code-quality/tooling/bin/stylelint-fix web/themes/custom/dcq_theme/css/fixable.css
+  assert_success
+  after_stylelint="$(read_container_file /var/www/html/web/themes/custom/dcq_theme/css/fixable.css)"
+  assert_not_equal "$before_stylelint" "$after_stylelint"
+  assert_container_contains "display: block;" "/var/www/html/web/themes/custom/dcq_theme/css/fixable.css"
+}
+
+# bats test_tags=full
+@test "fix commands preview mode" {
+  set -eu -o pipefail
+  if [ "${DCQ_FULL_TESTS:-}" != "1" ]; then
+    skip "Set DCQ_FULL_TESTS=1 to run preview mode tests."
+  fi
+
+  run ddev composer create-project "drupal/recommended-project:^11" .
+  assert_success
+  restart_or_start_ddev
+  run wait_for_ddev
+  assert_success
+  run ddev composer require drush/drush
+  assert_success
+  run wait_for_ddev
+  assert_success
+  run ddev drush site:install --account-name=admin --account-pass=admin -y
+  assert_success
+
+  export DCQ_INSTALL_DEPS=install
+  export DCQ_INSTALL_NODE_DEPS=install
+  run ddev add-on get "${DIR}"
+  assert_success
+  restart_or_start_ddev
+  ensure_node_toolchain
+
+  create_fixture_code
+  run wait_for_container_path "/var/www/html/web/themes/custom/dcq_theme/js/fixable.js"
+  assert_success
+  run wait_for_container_path "/var/www/html/web/themes/custom/dcq_theme/js/prettier.js"
+  assert_success
+  run wait_for_container_path "/var/www/html/web/themes/custom/dcq_theme/css/fixable.css"
+  assert_success
+
+  # Test eslint-fix --preview shows prompt and patch
+  before_eslint="$(read_container_file /var/www/html/web/themes/custom/dcq_theme/js/fixable.js)"
+  run_with_prompt_yes "Apply these changes? [y/N]" ./.ddev/drupal-code-quality/tooling/bin/eslint-fix --preview ./web/themes/custom/dcq_theme/js/fixable.js
+  if [ "$status" -ne 0 ] && [ "$status" -ne 1 ]; then
+    echo "Expected ESLint-fix --preview to exit 0 or 1, got $status"
+    return 1
+  fi
   assert_output --partial "Apply these changes? [y/N]"
   assert_output --partial "ESLint-fix summary:"
   after_eslint="$(read_container_file /var/www/html/web/themes/custom/dcq_theme/js/fixable.js)"
   assert_not_equal "$before_eslint" "$after_eslint"
+  assert_file_exist "dcq-reports/eslint-fix.patch"
 
+  # Test prettier-fix --preview shows prompt and patch
   before_prettier="$(read_container_file /var/www/html/web/themes/custom/dcq_theme/js/prettier.js)"
-  run_with_prompt_yes "Apply these changes? [y/N]" ./.ddev/drupal-code-quality/tooling/bin/prettier-fix web/themes/custom/dcq_theme/js/prettier.js
+  run_with_prompt_yes "Apply these changes? [y/N]" ./.ddev/drupal-code-quality/tooling/bin/prettier-fix --preview web/themes/custom/dcq_theme/js/prettier.js
   assert_success
-  assert_output --partial "Warning: unstaged changes detected outside target paths."
   assert_output --partial "Apply these changes? [y/N]"
   after_prettier="$(read_container_file /var/www/html/web/themes/custom/dcq_theme/js/prettier.js)"
   assert_not_equal "$before_prettier" "$after_prettier"
+  assert_file_exist "dcq-reports/prettier-fix.patch"
 
+  # Test stylelint-fix --preview shows prompt and patch
   before_stylelint="$(read_container_file /var/www/html/web/themes/custom/dcq_theme/css/fixable.css)"
-  run_with_prompt_yes "Apply these changes? [y/N]" ./.ddev/drupal-code-quality/tooling/bin/stylelint-fix web/themes/custom/dcq_theme/css/fixable.css
+  run_with_prompt_yes "Apply these changes? [y/N]" ./.ddev/drupal-code-quality/tooling/bin/stylelint-fix --preview web/themes/custom/dcq_theme/css/fixable.css
   assert_success
-  assert_output --partial "Warning: unstaged changes detected outside target paths."
   assert_output --partial "Apply these changes? [y/N]"
   after_stylelint="$(read_container_file /var/www/html/web/themes/custom/dcq_theme/css/fixable.css)"
   assert_not_equal "$before_stylelint" "$after_stylelint"
-  assert_container_contains "display: block;" "/var/www/html/web/themes/custom/dcq_theme/css/fixable.css"
+  assert_file_exist "dcq-reports/stylelint-fix.patch"
 }

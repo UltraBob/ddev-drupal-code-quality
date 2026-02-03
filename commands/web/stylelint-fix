@@ -8,12 +8,15 @@ print_help() {
   cat <<'USAGE'
 Usage: ddev stylelint-fix [args]
 
-Previews Stylelint fixes and applies them only after confirmation.
+Applies Stylelint fixes directly to files (matches standard stylelint --fix behavior).
 
-By default, fixes are not auto-applied when the working tree has changes
-outside the target paths. This prevents mixing unrelated work with automated
-style updates and makes it easier to review and revert fixes. You'll always get
-a patch preview and a confirmation prompt before changes are applied.
+Use --preview to see a patch preview and confirm before applying fixes.
+This generates a patch in dcq-reports/ and prompts for confirmation.
+
+Examples:
+  ddev stylelint-fix                    # Apply fixes directly
+  ddev stylelint-fix --preview          # Preview and confirm before applying
+  ddev stylelint-fix path/to/file.css   # Fix specific file
 USAGE
 }
 
@@ -31,26 +34,16 @@ has_positional=false
 has_config=false
 seen_double_dash=false
 explicit_paths=false
-auto_yes=false
-removed_flag_used=false
+preview_mode=false
 clean_args=()
 
 for arg in "$@"; do
-  if [ "$arg" = "--yes" ]; then
-    auto_yes=true
-    continue
-  fi
-  if [ "$arg" = "--allow-dirty-outside-targets" ] || [ "$arg" = "--allow-dirty" ]; then
-    removed_flag_used=true
+  if [ "$arg" = "--preview" ]; then
+    preview_mode=true
     continue
   fi
   clean_args+=("$arg")
 done
-
-if [ "$removed_flag_used" = true ]; then
-  echo "Error: --allow-dirty-outside-targets/--allow-dirty has been removed. Review the patch preview and confirm to apply fixes." >&2
-  exit 2
-fi
 
 for arg in "${clean_args[@]}"; do
   if [ "$seen_double_dash" = true ]; then
@@ -70,8 +63,6 @@ for arg in "${clean_args[@]}"; do
       ;;
     -c|--config|--config=*)
       has_config=true
-      ;;
-    --)
       ;;
     -* )
       ;;
@@ -107,8 +98,6 @@ else
   exit 127
 fi
 
-PROJECT_ROOT="/var/www/html"
-
 if [ "$has_help" = true ]; then
   node "$TOOLCHAIN_BIN" --help
   exit $?
@@ -119,13 +108,8 @@ if [ "$has_version" = true ]; then
   exit $?
 fi
 
-REPORT_DIR="dcq-reports"
-mkdir -p "$REPORT_DIR"
-PATCH_FILE="${REPORT_DIR}/_stylelint.patch"
-
 normalize_path() {
   local path="$1"
-  # Normalize paths into repo-relative paths for matching target prefixes.
   path="$(map_path "$path")"
   if [[ "$path" == /var/www/html/* ]]; then
     path="${path#/var/www/html/}"
@@ -166,7 +150,7 @@ while [ "$index" -lt "$arg_count" ]; do
       ;;
     --config=*)
       ;;
-    -* )
+    -*)
       ;;
     *)
       RAW_PATHS+=("$arg")
@@ -180,7 +164,6 @@ if [ "${#RAW_PATHS[@]}" -gt 0 ]; then
     TARGET_PREFIXES+=("$(normalize_path "$raw")")
   done
 else
-  # Default to custom code when no explicit paths are provided.
   for candidate in "${DOCROOT}/modules/custom" "${DOCROOT}/themes/custom" "${DOCROOT}/profiles/custom"; do
     if [ -d "$candidate" ]; then
       TARGET_PREFIXES+=("$candidate")
@@ -188,101 +171,17 @@ else
   done
 fi
 
-unrelated_changes=false
-if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  mapfile -t unstaged_files < <(git diff --name-only)
-  mapfile -t untracked_files < <(git ls-files --others --exclude-standard)
-  for file in "${unstaged_files[@]}" "${untracked_files[@]}"; do
-    [ -z "$file" ] && continue
-    matched=false
-    for prefix in "${TARGET_PREFIXES[@]}"; do
-      [ -z "$prefix" ] && continue
-      if [[ "$file" == "$prefix"* ]]; then
-        matched=true
-        break
-      fi
-    done
-    if [ "$matched" = false ]; then
-      # Guard against applying fixes when unrelated changes are present.
-      unrelated_changes=true
-      break
-    fi
-  done
-fi
-
-CMD_BASE=(env "NODE_PATH=$NODE_PATH" node "$TOOLCHAIN_BIN")
-if [ "$has_config" = false ]; then
-  if [ -f "${PROJECT_ROOT}/.stylelintrc.json" ]; then
-    CMD_BASE+=(--config="${PROJECT_ROOT}/.stylelintrc.json")
-  else
-    CMD_BASE+=(--config="${DOCROOT_PATH}/core/.stylelintrc.json")
-    echo "Warning: using core Stylelint config (${DOCROOT}/core/.stylelintrc.json); project config not found." >&2
-  fi
-fi
-
-find_stylelint_config() {
+FINAL_ARGS=()
+normalize_config_path() {
   local path="$1"
-  local dir="$path"
-  if [ -f "$dir" ]; then
-    dir="$(dirname "$dir")"
+  path="$(map_path "$path")"
+  if [[ "$path" == /var/www/html/* ]]; then
+    path="${path#/var/www/html/}"
   fi
-  while [ "$dir" != "." ] && [ "$dir" != "/" ]; do
-    for candidate in .stylelintrc .stylelintrc.json .stylelintrc.yaml .stylelintrc.yml .stylelintrc.js; do
-      if [ -f "$dir/$candidate" ]; then
-        echo "$dir/$candidate"
-        return 0
-      fi
-    done
-    dir="$(dirname "$dir")"
-  done
-  return 1
-}
-
-CUSTOM_SYNTAX_PATH=""
-find_scss_parser() {
-  local path
-  IFS=':' read -r -a paths <<< "$NODE_PATH"
-  for path in "${paths[@]}"; do
-    [ -z "$path" ] && continue
-    if [[ "$path" != /* ]]; then
-      path="${DOCROOT_PATH}/${path}"
-    fi
-    if [ -f "$path/postcss-scss/lib/scss-syntax.js" ]; then
-      CUSTOM_SYNTAX_PATH="$path/postcss-scss/lib/scss-syntax.js"
-      return 0
-    fi
-  done
-  return 1
-}
-
-DEFAULT_CONFIG_PATH=""
-if [ "$has_config" = false ]; then
-  if [ -f "${PROJECT_ROOT}/.stylelintrc.json" ]; then
-    CONFIG_PATH="${PROJECT_ROOT}/.stylelintrc.json"
-  else
-    CONFIG_PATH="${DOCROOT_PATH}/core/.stylelintrc.json"
+  if [ "$DOCROOT" != "web" ] && [[ "$path" == web/* ]]; then
+    path="${DOCROOT}/${path#web/}"
   fi
-  DEFAULT_CONFIG_PATH="$CONFIG_PATH"
-else
-  CONFIG_PATH=""
-fi
-
-config_supports_scss() {
-  local path="$1"
-  local full_path="$path"
-  if [ -z "$full_path" ]; then
-    return 1
-  fi
-  if [[ "$full_path" != /* ]]; then
-    full_path="${DOCROOT_PATH}/${full_path}"
-  fi
-  if [ ! -f "$full_path" ]; then
-    return 1
-  fi
-  if grep -E -q 'stylelint-scss|standard-scss|recommended-scss' "$full_path"; then
-    return 0
-  fi
-  return 1
+  echo "$path"
 }
 
 normalize_docroot_arg() {
@@ -292,7 +191,7 @@ normalize_docroot_arg() {
     arg="${arg#/var/www/html/}"
   fi
   if [ "$DOCROOT" != "web" ] && [[ "$arg" == web/* ]]; then
-    arg="${DOCROOT}/${arg#web/}"
+    arg="${DOCROOT}/${path#web/}"
   fi
   if [[ "$arg" == "${DOCROOT}/"* ]]; then
     arg="${arg#${DOCROOT}/}"
@@ -302,12 +201,8 @@ normalize_docroot_arg() {
   printf '%s' "$arg"
 }
 
-uses_scss=false
-has_scss_parser=false
-scss_allowed=false
-
-FINAL_ARGS=()
 if [ "$explicit_paths" = true ]; then
+  args=("${clean_args[@]}")
   arg_count=${#args[@]}
   index=0
   seen_double_dash=false
@@ -326,274 +221,163 @@ if [ "$explicit_paths" = true ]; then
         ;;
       -c|--config)
         next_arg="${args[$((index + 1))]:-}"
-        next_arg="$(normalize_docroot_arg "$next_arg")"
-        FINAL_ARGS+=("$arg" "$next_arg")
+        FINAL_ARGS+=("$arg" "$(normalize_config_path "$next_arg")")
         index=$((index + 1))
         ;;
       --config=*)
         config_value="${arg#*=}"
-        config_value="$(normalize_docroot_arg "$config_value")"
-        FINAL_ARGS+=("--config=$config_value")
+        FINAL_ARGS+=("--config=$(normalize_config_path "$config_value")")
         ;;
-      -* )
+      -*)
         FINAL_ARGS+=("$arg")
         ;;
       *)
-        arg="$(normalize_docroot_arg "$arg")"
-        FINAL_ARGS+=("$arg")
+        FINAL_ARGS+=("$(normalize_path "$arg")")
         ;;
     esac
     index=$((index + 1))
   done
-
-  if [ "$has_config" = false ] && [ "$CONFIG_PATH" = "$DEFAULT_CONFIG_PATH" ]; then
-    for path in "${FINAL_ARGS[@]}"; do
-      if config_candidate="$(find_stylelint_config "$path")"; then
-        CONFIG_PATH="$config_candidate"
-        config_dir="$(dirname "$CONFIG_PATH")"
-        if [[ "$config_dir" != /* ]]; then
-          config_dir="${DOCROOT_PATH}/${config_dir}"
-        fi
-        if [ -d "$config_dir/node_modules" ]; then
-          NODE_PATH="${NODE_PATH}:${config_dir}/node_modules"
-        fi
-        CMD_BASE=(env "NODE_PATH=$NODE_PATH" node "$TOOLCHAIN_BIN" --config="$CONFIG_PATH" --config-basedir="$config_dir")
-        break
-      fi
-    done
-  fi
-
-  for path in "${FINAL_ARGS[@]}"; do
-    if [[ "$path" == *.scss || "$path" == *.sass ]]; then
-      uses_scss=true
-      break
-    fi
-    if [ -d "$path" ]; then
-      if find "$path" -type f \( -name '*.scss' -o -name '*.sass' \) -print -quit 2>/dev/null | grep -q .; then
-        uses_scss=true
-        break
-      fi
-    fi
-  done
-  if [ "$uses_scss" = true ] && config_supports_scss "$CONFIG_PATH"; then
-    scss_allowed=true
-  fi
 fi
 
 DEFAULT_FILES=()
 if [ "$explicit_paths" = false ]; then
-  # Use docroot-relative paths for default discovery.
-  cd web
-  for candidate in modules/custom themes/custom profiles/custom; do
+  for candidate in "${DOCROOT}/modules/custom" "${DOCROOT}/themes/custom" "${DOCROOT}/profiles/custom"; do
     if [ -d "$candidate" ]; then
       while IFS= read -r file_path; do
         DEFAULT_FILES+=("$file_path")
-      done < <(find "$candidate" -type f \( -name '*.css' -o -name '*.scss' -o -name '*.sass' \))
+      done < <(find "$candidate" -path '*/node_modules/*' -prune -o -type f \( -name '*.css' -o -name '*.scss' \) -print)
     fi
   done
   if [ "${#DEFAULT_FILES[@]}" -eq 0 ]; then
-    echo "No custom style files found under modules/custom, themes/custom, or profiles/custom. Nothing to fix." >&2
+    echo "No custom CSS/SCSS files found under modules/custom, themes/custom, or profiles/custom. Nothing to fix." >&2
     exit 2
   fi
-  if [ "$has_config" = false ] && [ "$CONFIG_PATH" = "$DEFAULT_CONFIG_PATH" ]; then
-    for file_path in "${DEFAULT_FILES[@]}"; do
-      if config_candidate="$(find_stylelint_config "$file_path")"; then
-        CONFIG_PATH="$config_candidate"
-        config_dir="$(dirname "$CONFIG_PATH")"
-        if [[ "$config_dir" != /* ]]; then
-          config_dir="${DOCROOT_PATH}/${config_dir}"
-        fi
-        if [ -d "$config_dir/node_modules" ]; then
-          NODE_PATH="${NODE_PATH}:${config_dir}/node_modules"
-        fi
-        CMD_BASE=(env "NODE_PATH=$NODE_PATH" node "$TOOLCHAIN_BIN" --config="$CONFIG_PATH" --config-basedir="$config_dir")
-        break
-      fi
-    done
-  fi
+fi
+
+FILES=()
+if [ "$explicit_paths" = false ]; then
+  FILES=("${DEFAULT_FILES[@]}")
+else
+  FILES=("${FINAL_ARGS[@]}")
+fi
+
+DEFAULT_CONFIG=""
+if [ -f "${PROJECT_ROOT}/.stylelintrc.json" ]; then
+  DEFAULT_CONFIG="${PROJECT_ROOT}/.stylelintrc.json"
+elif [ -f "${DOCROOT_PATH}/core/.stylelintrc.json" ]; then
+  DEFAULT_CONFIG="${DOCROOT_PATH}/core/.stylelintrc.json"
+fi
+
+# ============================================================================
+# PREVIEW MODE: Generate patch, show preview, prompt to apply
+# ============================================================================
+if [ "$preview_mode" = true ]; then
+  REPORT_DIR="dcq-reports"
+  mkdir -p "$REPORT_DIR"
+  PATCH_FILE="${REPORT_DIR}/_stylelint.patch"
+
+  tmp_root="$(mktemp -d)"
+  trap 'rm -rf "$tmp_root"' EXIT
+
   cd "$PROJECT_ROOT"
-  for file_path in "${DEFAULT_FILES[@]}"; do
-    if [[ "$file_path" == *.scss || "$file_path" == *.sass ]]; then
-      uses_scss=true
-      break
+  tar -cf - \
+    --exclude=./.git \
+    --exclude=./.trunk \
+    --exclude=./node_modules \
+    --exclude=./vendor \
+    --exclude=./dcq-reports \
+    --exclude=./${DOCROOT}/core/node_modules \
+    --exclude='*/.git' \
+    --exclude='*/.git/*' \
+    . | (cd "$tmp_root" && tar -xf -)
+
+  preview_cmd=(env "NODE_PATH=$NODE_PATH" node "$TOOLCHAIN_BIN")
+  if [ -n "$DEFAULT_CONFIG" ] && [ "$has_config" = false ]; then
+    preview_cmd+=(--config "$DEFAULT_CONFIG")
+  fi
+  preview_cmd+=(--fix)
+  
+  (cd "$tmp_root" && "${preview_cmd[@]}" "${FILES[@]}")
+  preview_exit=$?
+
+  if [ "${preview_exit:-0}" -eq 2 ]; then
+    echo "Stylelint preview failed (configuration error)." >&2
+    exit "$preview_exit"
+  fi
+
+  : > "${PATCH_FILE}.raw"
+  for prefix in "${TARGET_PREFIXES[@]}"; do
+    [ -z "$prefix" ] && continue
+    if [ ! -e "$PROJECT_ROOT/$prefix" ] && [ ! -e "$tmp_root/$prefix" ]; then
+      continue
     fi
+    diff -ruN \
+      --exclude=.git \
+      --exclude='.git/*' \
+      "$PROJECT_ROOT/$prefix" "$tmp_root/$prefix" >> "${PATCH_FILE}.raw" || true
   done
-  if [ "$uses_scss" = true ] && config_supports_scss "$CONFIG_PATH"; then
-    scss_allowed=true
+
+  sed -E "s/diff -ruN( '--exclude=[^']+')+/diff -ruN/" "${PATCH_FILE}.raw" > "$PATCH_FILE"
+  rm -f "${PATCH_FILE}.raw"
+
+  change_count=$(grep -c '^diff -ruN ' "$PATCH_FILE" || true)
+  if [ "$change_count" -eq 0 ]; then
+    change_count=$(grep -c '^--- ' "$PATCH_FILE" || true)
   fi
-fi
 
-FILTERED_FILES=()
-FILTERED_ARGS=()
-if [ "$explicit_paths" = false ]; then
-  FILTERED_FILES=("${DEFAULT_FILES[@]}")
-else
-  FILTERED_ARGS=("${FINAL_ARGS[@]}")
-fi
-
-if [ "$uses_scss" = true ] && [ "$scss_allowed" = true ] && find_scss_parser; then
-  CMD_BASE+=(--custom-syntax="$CUSTOM_SYNTAX_PATH")
-  has_scss_parser=true
-fi
-
-if [ "$uses_scss" = true ] && [ "$scss_allowed" = false ]; then
-  if [ "$explicit_paths" = false ]; then
-    FILTERED_FILES=()
-    for file_path in "${DEFAULT_FILES[@]}"; do
-      if [[ "$file_path" == *.scss || "$file_path" == *.sass ]]; then
-        continue
-      fi
-      FILTERED_FILES+=("$file_path")
-    done
-    if [ "${#FILTERED_FILES[@]}" -eq 0 ]; then
-      echo "No CSS files left to fix after excluding SCSS/Sass (config does not support SCSS)." >&2
-      exit 2
-    fi
-  else
-    FILTERED_ARGS=()
-    for arg in "${FINAL_ARGS[@]}"; do
-      if [[ "$arg" == *.scss || "$arg" == *.sass ]]; then
-        continue
-      fi
-      FILTERED_ARGS+=("$arg")
-    done
-    if [ "${#FILTERED_ARGS[@]}" -eq 0 ]; then
-      echo "No CSS files left to fix after excluding SCSS/Sass (config does not support SCSS)." >&2
-      exit 2
-    fi
+  if [ "$change_count" -eq 0 ]; then
+    echo "No Stylelint fixes to apply. Preview reported no auto-fixable changes." >&2
+    exit 0
   fi
-fi
 
-if [ "$uses_scss" = true ] && [ "$has_scss_parser" = false ] && [ "$scss_allowed" = true ]; then
-  if [ "$explicit_paths" = false ]; then
-    FILTERED_FILES=()
-    for file_path in "${DEFAULT_FILES[@]}"; do
-      if [[ "$file_path" == *.scss || "$file_path" == *.sass ]]; then
-        continue
-      fi
-      FILTERED_FILES+=("$file_path")
-    done
-    if [ "${#FILTERED_FILES[@]}" -eq 0 ]; then
-      echo "No CSS files left to fix after excluding SCSS/Sass (SCSS parser not available)." >&2
-      exit 2
-    fi
-  else
-    FILTERED_ARGS=()
-    for arg in "${FINAL_ARGS[@]}"; do
-      if [[ "$arg" == *.scss || "$arg" == *.sass ]]; then
-        continue
-      fi
-      FILTERED_ARGS+=("$arg")
-    done
-    if [ "${#FILTERED_ARGS[@]}" -eq 0 ]; then
-      echo "No CSS files left to fix after excluding SCSS/Sass (SCSS parser not available)." >&2
-      exit 2
-    fi
-  fi
-fi
-
-tmp_root="$(mktemp -d)"
-trap 'rm -rf "$tmp_root"' EXIT
-
-cd "$PROJECT_ROOT"
-tar -cf - \
-  --exclude=./.git \
-  --exclude=./.trunk \
-  --exclude=./node_modules \
-  --exclude=./vendor \
-  --exclude=./dcq-reports \
-  --exclude=./${DOCROOT}/core/node_modules \
-  --exclude='*/.git' \
-  --exclude='*/.git/*' \
-  . | (cd "$tmp_root" && tar -xf -)
-
-if [ "$explicit_paths" = false ]; then
-  (cd "$tmp_root/${DOCROOT}" && "${CMD_BASE[@]}" --fix "${FILTERED_FILES[@]}")
-else
-  (cd "$tmp_root/${DOCROOT}" && "${CMD_BASE[@]}" --fix "${FILTERED_ARGS[@]}")
-fi
-
-: > "${PATCH_FILE}.raw"
-for prefix in "${TARGET_PREFIXES[@]}"; do
-  [ -z "$prefix" ] && continue
-  if [ ! -e "$PROJECT_ROOT/$prefix" ] && [ ! -e "$tmp_root/$prefix" ]; then
-    continue
-  fi
-  diff -ruN \
-    --exclude=.git \
-    --exclude='.git/*' \
-    "$PROJECT_ROOT/$prefix" "$tmp_root/$prefix" >> "${PATCH_FILE}.raw" || true
-done
-
-sed -E "s/diff -ruN( '--exclude=[^']+')+/diff -ruN/" "${PATCH_FILE}.raw" > "$PATCH_FILE"
-rm -f "${PATCH_FILE}.raw"
-
-change_count=$(grep -c '^diff -ruN ' "$PATCH_FILE" || true)
-if [ "$change_count" -eq 0 ]; then
-  change_count=$(grep -c '^--- ' "$PATCH_FILE" || true)
-fi
-skip_fix_apply=false
-fix_exit=0
-fix_summary="fixes not applied"
-if [ "$change_count" -eq 0 ]; then
-  echo "No Stylelint fixes to apply. Running Stylelint to report remaining issues." >&2
-  skip_fix_apply=true
-  fix_summary="no fixes to apply"
-fi
-
-if [ "$skip_fix_apply" = false ]; then
   echo "Preview: ${change_count} file(s) would change." >&2
   echo "Patch: ${PATCH_FILE}" >&2
 
-  if [ "$unrelated_changes" = true ]; then
-    echo "Warning: unstaged changes detected outside target paths." >&2
-  fi
-
-  if [ "$auto_yes" = false ]; then
-    if [ -t 0 ]; then
-      printf "Apply these changes? [y/N] "
-      read -r reply
-      case "$reply" in
-        y|Y) ;;
-        *) echo "Not applying changes." >&2; echo "Stylelint-fix summary: fixes not applied (prompt declined). Lint not run." >&2; exit 0 ;;
-      esac
-    else
-      echo "No TTY available. Not applying changes." >&2
-      echo "Stylelint-fix summary: fixes not applied (no TTY). Lint not run." >&2
-      exit 0
-    fi
-  fi
-
-  cd "$PROJECT_ROOT/web"
-  if [ "$explicit_paths" = false ]; then
-    "${CMD_BASE[@]}" --fix "${FILTERED_FILES[@]}"
+  if [ -t 0 ]; then
+    printf "Apply these changes? [y/N] "
+    read -r reply
+    case "$reply" in
+      y|Y) ;;
+      *) echo "Not applying changes." >&2; exit 0 ;;
+    esac
   else
-    "${CMD_BASE[@]}" --fix "${FILTERED_ARGS[@]}"
+    echo "No TTY available. Not applying changes." >&2
+    exit 0
   fi
+
+  # Apply fixes
+  cd "$PROJECT_ROOT"
+  fix_cmd=(env "NODE_PATH=$NODE_PATH" node "$TOOLCHAIN_BIN")
+  if [ -n "$DEFAULT_CONFIG" ] && [ "$has_config" = false ]; then
+    fix_cmd+=(--config "$DEFAULT_CONFIG")
+  fi
+  fix_cmd+=(--fix)
+  
+  "${fix_cmd[@]}" "${FILES[@]}"
   fix_exit=$?
 
   if [ "$fix_exit" -eq 0 ]; then
     echo "Stylelint fixes applied." >&2
-    fix_summary="fixes applied"
   else
-    echo "Stylelint fix run exited with status ${fix_exit}." >&2
-    fix_summary="fix step failed (exit ${fix_exit})"
+    echo "Stylelint fixes applied; some issues may remain (exit ${fix_exit})." >&2
   fi
+
+  echo "Running Stylelint to report any remaining issues..." >&2
+  ./.ddev/commands/web/stylelint "${clean_args[@]}"
+  check_exit=$?
+  exit "$check_exit"
 fi
 
+# ============================================================================
+# DEFAULT MODE: Apply fixes directly (standard stylelint --fix behavior)
+# ============================================================================
 cd "$PROJECT_ROOT"
-echo "Running Stylelint to report any remaining issues..." >&2
-./.ddev/commands/web/stylelint "${clean_args[@]}"
-check_exit=$?
 
-if [ "$check_exit" -ne 0 ]; then
-  lint_summary="remaining issues (exit ${check_exit})"
-else
-  lint_summary="no remaining issues"
+fix_cmd=(env "NODE_PATH=$NODE_PATH" node "$TOOLCHAIN_BIN")
+if [ -n "$DEFAULT_CONFIG" ] && [ "$has_config" = false ]; then
+  fix_cmd+=(--config "$DEFAULT_CONFIG")
 fi
-echo "Stylelint-fix summary: ${fix_summary}; lint ${lint_summary}." >&2
+fix_cmd+=(--fix)
 
-if [ "$fix_exit" -ne 0 ]; then
-  exit "$fix_exit"
-fi
-exit "$check_exit"
+"${fix_cmd[@]}" "${FILES[@]}"
+exit $?

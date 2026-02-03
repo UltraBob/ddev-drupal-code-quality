@@ -41,7 +41,7 @@ Drupal.org GitLab CI template defaults. The installer will prompt for:
   recommended defaults without further prompts.
 - Conflict handling (default: skip unless you choose replace/abort).
 - PHP tooling dependencies (install `drupal/core-dev` or run `ddev composer install`).
-- PHPStan default level (keep GitLab CI template level 0 or choose a local level 0-9; recommend 3).
+- PHPStan default level (keep GitLab CI template level 0 or choose a local level 0-10; recommend 3).
 - Node toolchain install in the project root and package manager selection.
 - Missing Drupal JS dependencies when a root `package.json` exists.
 - Optional `.gitignore` update for `dcq-reports/`.
@@ -144,14 +144,14 @@ The template points PHP tooling at `.ddev/drupal-code-quality/tooling/bin` and J
   - If no project `phpstan.neon*` exists, the wrapper uses the GitLab template
     config shipped with the add-on.
 - PHPStan level:
-- GitLab CI template defaults use level 0. The installer can set a local default level (0-9).
+- GitLab CI template defaults use level 0. The installer can set a local default level (0-10).
 
 ## Installer environment variables
 
 - `DCQ_INSTALL_MODE`: `replace`, `skip`, or `abort` for conflict handling.
 - `DCQ_NONINTERACTIVE=true`: disable prompts; if no overrides are set, applies
   the recommended settings automatically.
-- `DCQ_PHPSTAN_LEVEL`: set `phpstan.neon` level (0-9) without prompting.
+- `DCQ_PHPSTAN_LEVEL`: set `phpstan.neon` level (0-10) without prompting.
 - `DCQ_INSTALL_DEPS`: `install`/`true` to auto-install missing `drupal/core-dev`,
   `skip`/`false` to skip, or unset to prompt when interactive.
 - `DCQ_INSTALL_NODE_DEPS`: `root` to install JS deps in the project root (creates

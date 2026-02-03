@@ -14,6 +14,7 @@
 # - DCQ_INSTALL_NODE_DEPS: root|install|skip (JS tooling)
 # - DCQ_INSTALL_GITIGNORE: add|skip (dcq-reports entry)
 # - DCQ_INSTALL_IDE_SETTINGS: merge|overwrite|skip (IDE settings)
+# - DCQ_VERBOSE: 1|true (enable debug WRITE output, default: disabled)
 
 set -euo pipefail
 
@@ -89,7 +90,10 @@ emit() {
 }
 
 emit_copy() {
-  emit "$@"
+  # Only emit WRITE debug lines when DCQ_VERBOSE is enabled
+  if truthy "${DCQ_VERBOSE:-0}"; then
+    emit "$@"
+  fi
 }
 
 prompt_choice() {
@@ -716,7 +720,7 @@ prompt_phpstan_level() {
 
   env_level="$(string_lower "${DCQ_PHPSTAN_LEVEL:-}")"
   # env_level should now always be set via set_default_env or user override
-  if [[ "$env_level" =~ ^[0-9]$ ]]; then
+  if [[ "$env_level" =~ ^([0-9]|10)$ ]]; then
     if set_phpstan_level "$config_path" "$env_level"; then
       emit 'WRITE: %s (level %s)\n' "$config_path" "$env_level"
     else
@@ -725,7 +729,7 @@ prompt_phpstan_level() {
   elif [ "$non_interactive" -eq 0 ] && [ "${PROMPT_AVAILABLE:-0}" -eq 1 ]; then
     # Interactive mode with invalid/missing level - prompt user
     printf '\n'
-    emit 'Set phpstan.neon level (0-9) (default: 0): '
+    emit 'Set phpstan.neon level (0-10) (default: 0): '
     if ! IFS= read -r -u "$PROMPT_IN_FD" answer; then
       answer=""
     fi
@@ -736,7 +740,7 @@ prompt_phpstan_level() {
       answer="0"
     fi
     if [ -n "$answer" ]; then
-      if [[ "$answer" =~ ^[0-9]$ ]]; then
+      if [[ "$answer" =~ ^([0-9]|10)$ ]]; then
         if set_phpstan_level "$config_path" "$answer"; then
           emit 'WRITE: %s (level %s)\n' "$config_path" "$answer"
         else

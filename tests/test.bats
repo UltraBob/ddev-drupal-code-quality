@@ -144,6 +144,9 @@ retry_ddev_command() {
 setup() {
   set -o pipefail
 
+  # Start timing the full test lifecycle (setup + test + teardown)
+  SECONDS=0
+
   # Override this variable for your add-on:
   export GITHUB_REPO=UltraBob/ddev-drupal-code-quality
 
@@ -152,6 +155,9 @@ setup() {
   load_bats_helpers
 
   export DIR="$(cd "$(dirname "${BATS_TEST_FILENAME}")/.." >/dev/null 2>&1 && pwd)"
+
+  # Show test progress indicator
+  printf '[%2d/%d] Running: %s\n' "${BATS_TEST_NUMBER}" "${BATS_SUITE_TEST_NUMBER}" "${BATS_TEST_NAME}" >&3
 
   # Stagger parallel test starts to reduce shared resource contention
   # Only delay if running in parallel mode (bats --jobs N)
@@ -197,7 +203,8 @@ PY
   retry_ddev_command ddev start -y
   assert_success
 
-  # Start timing the test execution
+  # Record setup time and start test body timer
+  export SETUP_TIME=$SECONDS
   SECONDS=0
 }
 
@@ -573,12 +580,15 @@ JSON
 teardown() {
   set -u -o pipefail
 
-  # Report test execution time with test name
-  echo "# ${BATS_TEST_NAME} completed in ${SECONDS}s" >&3
+  # Record test body time and start teardown timer
+  local test_time=$SECONDS
+  local teardown_start=$SECONDS
 
+  # Perform cleanup operations
   if [ -n "${PROJNAME:-}" ]; then
     ddev delete -Oy "${PROJNAME}" >/dev/null 2>&1
   fi
+
   # Persist TESTDIR if running inside GitHub Actions. Useful for uploading test result artifacts
   # See example at https://github.com/ddev/github-action-add-on-test#preserving-artifacts
   if [ -n "${GITHUB_ENV:-}" ]; then
@@ -586,6 +596,13 @@ teardown() {
   else
     [ -n "${TESTDIR:-}" ] && rm -rf "${TESTDIR}"
   fi
+
+  # Calculate complete timing breakdown
+  local teardown_time=$((SECONDS - teardown_start))
+  local total_time=$((${SETUP_TIME:-0} + test_time + teardown_time))
+
+  # Report full test lifecycle timing
+  echo "# ${BATS_TEST_NAME} completed in ${total_time}s (setup: ${SETUP_TIME:-0}s, test: ${test_time}s, teardown: ${teardown_time}s)" >&3
 }
 
 @test "install from directory" {
@@ -840,6 +857,15 @@ PY
   assert_success
   assert_addon_installed
   assert_phpstan_level "3"
+}
+
+@test "install from directory with phpstan level 10" {
+  set -u -o pipefail
+  export DCQ_PHPSTAN_LEVEL=10
+  run ddev add-on get "${DIR}"
+  assert_success
+  assert_addon_installed
+  assert_phpstan_level "10"
 }
 
 @test "phpstan config includes default paths and excludes after install" {

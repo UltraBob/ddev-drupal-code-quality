@@ -8,12 +8,15 @@ print_help() {
   cat <<'USAGE'
 Usage: ddev eslint-fix [args]
 
-Previews ESLint fixes and applies them only after confirmation.
+Applies ESLint fixes directly to files (matches standard eslint --fix behavior).
 
-By default, fixes are not auto-applied when the working tree has changes
-outside the target paths. This prevents mixing unrelated work with automated
-fixes and makes it easier to review or revert. You'll always get a patch
-preview and a confirmation prompt before changes are applied.
+Use --preview to see a patch preview and confirm before applying fixes.
+This generates a patch in dcq-reports/ and prompts for confirmation.
+
+Examples:
+  ddev eslint-fix                    # Apply fixes directly
+  ddev eslint-fix --preview          # Preview and confirm before applying
+  ddev eslint-fix path/to/file.js    # Fix specific file
 USAGE
 }
 
@@ -23,28 +26,18 @@ has_positional=false
 has_config=false
 seen_double_dash=false
 explicit_paths=false
-auto_yes=false
-removed_flag_used=false
+preview_mode=false
 clean_args=()
 ESLINT_TOOLCHAIN="${ESLINT_TOOLCHAIN:-auto}"
 ESLINT_CONFIG_MODE="${ESLINT_CONFIG_MODE:-nearest}"
 
 for arg in "$@"; do
-  if [ "$arg" = "--yes" ]; then
-    auto_yes=true
-    continue
-  fi
-  if [ "$arg" = "--allow-dirty-outside-targets" ] || [ "$arg" = "--allow-dirty" ]; then
-    removed_flag_used=true
+  if [ "$arg" = "--preview" ]; then
+    preview_mode=true
     continue
   fi
   clean_args+=("$arg")
 done
-
-if [ "$removed_flag_used" = true ]; then
-  echo "Error: --allow-dirty-outside-targets/--allow-dirty has been removed. Review the patch preview and confirm to apply fixes." >&2
-  exit 2
-fi
 
 for arg in "${clean_args[@]}"; do
   if [ "$seen_double_dash" = true ]; then
@@ -129,10 +122,6 @@ if [ "$has_version" = true ]; then
   exit $?
 fi
 
-REPORT_DIR="dcq-reports"
-mkdir -p "$REPORT_DIR"
-PATCH_FILE="${REPORT_DIR}/_eslint.patch"
-
 normalize_path() {
   local path="$1"
   # Normalize paths into repo-relative paths for matching target prefixes.
@@ -197,28 +186,6 @@ else
   for candidate in "${DOCROOT}/modules/custom" "${DOCROOT}/themes/custom" "${DOCROOT}/profiles/custom"; do
     if [ -d "$candidate" ]; then
       TARGET_PREFIXES+=("$candidate")
-    fi
-  done
-fi
-
-unrelated_changes=false
-if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  mapfile -t unstaged_files < <(git diff --name-only)
-  mapfile -t untracked_files < <(git ls-files --others --exclude-standard)
-  for file in "${unstaged_files[@]}" "${untracked_files[@]}"; do
-    [ -z "$file" ] && continue
-    matched=false
-    for prefix in "${TARGET_PREFIXES[@]}"; do
-      [ -z "$prefix" ] && continue
-      if [[ "$file" == "$prefix"* ]]; then
-        matched=true
-        break
-      fi
-    done
-    if [ "$matched" = false ]; then
-      # Guard against applying fixes when unrelated changes are present.
-      unrelated_changes=true
-      break
     fi
   done
 fi
@@ -313,6 +280,7 @@ normalize_docroot_arg() {
   fi
   printf '%s' "$arg"
 }
+
 if [ "$explicit_paths" = true ]; then
   args=("${clean_args[@]}")
   arg_count=${#args[@]}
@@ -380,21 +348,187 @@ elif [ -f "${DOCROOT_PATH}/core/.eslintrc.passing.json" ]; then
   DEFAULT_CONFIG="${DOCROOT_PATH}/core/.eslintrc.passing.json"
 fi
 
-tmp_root="$(mktemp -d)"
-trap 'rm -rf "$tmp_root"' EXIT
+# ============================================================================
+# PREVIEW MODE: Generate patch, show preview, prompt to apply
+# ============================================================================
+if [ "$preview_mode" = true ]; then
+  REPORT_DIR="dcq-reports"
+  mkdir -p "$REPORT_DIR"
+  PATCH_FILE="${REPORT_DIR}/_eslint.patch"
 
+  tmp_root="$(mktemp -d)"
+  trap 'rm -rf "$tmp_root"' EXIT
+
+  cd "$PROJECT_ROOT"
+  # Create a temp copy to preview fixes and generate a patch without touching the worktree.
+  tar -cf - \
+    --exclude=./.git \
+    --exclude=./.trunk \
+    --exclude=./node_modules \
+    --exclude=./vendor \
+    --exclude=./dcq-reports \
+    --exclude=./${DOCROOT}/core/node_modules \
+    --exclude='*/.git' \
+    --exclude='*/.git/*' \
+    . | (cd "$tmp_root" && tar -xf -)
+
+  if [ "$ESLINT_CONFIG_MODE" = "nearest" ]; then
+    # Group files by nearest config to avoid plugin conflicts across modules/themes.
+    declare -A ESLINT_GROUPS
+    for file_path in "${FILES[@]}"; do
+      config_path="$(find_nearest_config "$file_path")"
+      if [ -z "$config_path" ]; then
+        # Fall back to the default passing config when nothing is found.
+        config_path="$DEFAULT_CONFIG"
+      fi
+      ESLINT_GROUPS["$config_path"]+="$file_path"$'\n'
+    done
+    preview_exit=0
+    for config_path in "${!ESLINT_GROUPS[@]}"; do
+      if [ -z "$config_path" ]; then
+        echo "No ESLint config found for nearest-mode run." >&2
+        exit 2
+      fi
+      mapfile -t group_files <<< "${ESLINT_GROUPS[$config_path]}"
+      filtered_files=()
+      for item in "${group_files[@]}"; do
+        [ -n "$item" ] || continue
+        filtered_files+=("$item")
+      done
+      if [ "${#filtered_files[@]}" -eq 0 ]; then
+        continue
+      fi
+      config_path_abs="$config_path"
+      if [[ "$config_path_abs" != /* ]]; then
+        config_path_abs="${PROJECT_ROOT}/${config_path_abs}"
+      fi
+      config_path_run="$config_path"
+      if [[ "$config_path_run" == /* ]]; then
+        config_path_run="$config_path_abs"
+      fi
+      config_dir="$(dirname "$config_path_abs")"
+      plugins_dir="$(resolve_plugins_dir "$config_dir")"
+      echo "ESLint-fix preview: config ${config_path_abs} (${#filtered_files[@]} file(s))." >&2
+      group_cmd=(env "NODE_PATH=$NODE_PATH" node "$TOOLCHAIN_BIN" --quiet --config="$config_path_run")
+      if [ -n "$plugins_dir" ]; then
+        group_cmd+=(--resolve-plugins-relative-to "$plugins_dir")
+      fi
+      group_cmd+=(--ext .js,.yml --ignore-pattern "**/node_modules/**" --fix)
+      (cd "$tmp_root" && "${group_cmd[@]}" "${filtered_files[@]}")
+      status=$?
+      if [ $status -ne 0 ]; then
+        preview_exit=$status
+      fi
+    done
+  else
+    (cd "$tmp_root" && "${CMD_BASE[@]}" --fix "${FILES[@]}")
+    preview_exit=$?
+  fi
+
+  if [ "${preview_exit:-0}" -eq 2 ]; then
+    echo "ESLint preview failed (configuration error)." >&2
+    exit "$preview_exit"
+  fi
+
+  : > "${PATCH_FILE}.raw"
+  for prefix in "${TARGET_PREFIXES[@]}"; do
+    [ -z "$prefix" ] && continue
+    if [ ! -e "$PROJECT_ROOT/$prefix" ] && [ ! -e "$tmp_root/$prefix" ]; then
+      continue
+    fi
+    diff -ruN \
+      --exclude=.git \
+      --exclude='.git/*' \
+      "$PROJECT_ROOT/$prefix" "$tmp_root/$prefix" >> "${PATCH_FILE}.raw" || true
+  done
+
+  sed -E "s/diff -ruN( '--exclude=[^']+')+/diff -ruN/" "${PATCH_FILE}.raw" > "$PATCH_FILE"
+  rm -f "${PATCH_FILE}.raw"
+
+  change_count=$(grep -c '^diff -ruN ' "$PATCH_FILE" || true)
+  if [ "$change_count" -eq 0 ]; then
+    change_count=$(grep -c '^--- ' "$PATCH_FILE" || true)
+  fi
+
+  if [ "$change_count" -eq 0 ]; then
+    echo "No ESLint fixes to apply. Preview reported no auto-fixable changes." >&2
+    exit 0
+  fi
+
+  echo "Preview: ${change_count} file(s) would change." >&2
+  echo "Patch: ${PATCH_FILE}" >&2
+
+  if [ -t 0 ]; then
+    printf "Apply these changes? [y/N] "
+    read -r reply
+    case "$reply" in
+      y|Y) ;;
+      *) echo "Not applying changes." >&2; exit 0 ;;
+    esac
+  else
+    echo "No TTY available. Not applying changes." >&2
+    exit 0
+  fi
+
+  # Apply fixes
+  cd "$PROJECT_ROOT"
+  if [ "$ESLINT_CONFIG_MODE" = "nearest" ]; then
+    fix_exit=0
+    for config_path in "${!ESLINT_GROUPS[@]}"; do
+      mapfile -t group_files <<< "${ESLINT_GROUPS[$config_path]}"
+      filtered_files=()
+      for item in "${group_files[@]}"; do
+        [ -n "$item" ] || continue
+        filtered_files+=("$item")
+      done
+      if [ "${#filtered_files[@]}" -eq 0 ]; then
+        continue
+      fi
+      config_path_abs="$config_path"
+      if [[ "$config_path_abs" != /* ]]; then
+        config_path_abs="${PROJECT_ROOT}/${config_path_abs}"
+      fi
+      config_path_run="$config_path"
+      if [[ "$config_path_run" == /* ]]; then
+        config_path_run="$config_path_abs"
+      fi
+      config_dir="$(dirname "$config_path_abs")"
+      plugins_dir="$(resolve_plugins_dir "$config_dir")"
+      echo "Applying ESLint fixes: config ${config_path_abs} (${#filtered_files[@]} file(s))." >&2
+      group_cmd=(env "NODE_PATH=$NODE_PATH" node "$TOOLCHAIN_BIN" --quiet --config="$config_path_run")
+      if [ -n "$plugins_dir" ]; then
+        group_cmd+=(--resolve-plugins-relative-to "$plugins_dir")
+      fi
+      group_cmd+=(--ext .js,.yml --ignore-pattern "**/node_modules/**" --fix)
+      "${group_cmd[@]}" "${filtered_files[@]}"
+      status=$?
+      if [ $status -ne 0 ]; then
+        fix_exit=$status
+      fi
+    done
+  else
+    "${CMD_BASE[@]}" --fix "${FILES[@]}"
+    fix_exit=$?
+  fi
+
+  if [ "$fix_exit" -eq 0 ]; then
+    echo "ESLint fixes applied." >&2
+  elif [ "$fix_exit" -eq 1 ]; then
+    echo "ESLint fixes applied; remaining issues still exist." >&2
+  else
+    echo "ESLint fix run exited with status ${fix_exit}." >&2
+  fi
+
+  echo "Running ESLint to report any remaining issues..." >&2
+  ./.ddev/commands/web/eslint "${clean_args[@]}"
+  check_exit=$?
+  exit "$check_exit"
+fi
+
+# ============================================================================
+# DEFAULT MODE: Apply fixes directly (standard eslint --fix behavior)
+# ============================================================================
 cd "$PROJECT_ROOT"
-# Create a temp copy to preview fixes and generate a patch without touching the worktree.
-tar -cf - \
-  --exclude=./.git \
-  --exclude=./.trunk \
-  --exclude=./node_modules \
-  --exclude=./vendor \
-  --exclude=./dcq-reports \
-  --exclude=./${DOCROOT}/core/node_modules \
-  --exclude='*/.git' \
-  --exclude='*/.git/*' \
-  . | (cd "$tmp_root" && tar -xf -)
 
 if [ "$ESLINT_CONFIG_MODE" = "nearest" ]; then
   # Group files by nearest config to avoid plugin conflicts across modules/themes.
@@ -407,7 +541,7 @@ if [ "$ESLINT_CONFIG_MODE" = "nearest" ]; then
     fi
     ESLINT_GROUPS["$config_path"]+="$file_path"$'\n'
   done
-  preview_exit=0
+  fix_exit=0
   for config_path in "${!ESLINT_GROUPS[@]}"; do
     if [ -z "$config_path" ]; then
       echo "No ESLint config found for nearest-mode run." >&2
@@ -432,107 +566,6 @@ if [ "$ESLINT_CONFIG_MODE" = "nearest" ]; then
     fi
     config_dir="$(dirname "$config_path_abs")"
     plugins_dir="$(resolve_plugins_dir "$config_dir")"
-    echo "ESLint-fix preview: config ${config_path_abs} (${#filtered_files[@]} file(s))." >&2
-    group_cmd=(env "NODE_PATH=$NODE_PATH" node "$TOOLCHAIN_BIN" --quiet --config="$config_path_run")
-    if [ -n "$plugins_dir" ]; then
-      group_cmd+=(--resolve-plugins-relative-to "$plugins_dir")
-    fi
-    group_cmd+=(--ext .js,.yml --ignore-pattern "**/node_modules/**" --fix)
-    (cd "$tmp_root" && "${group_cmd[@]}" "${filtered_files[@]}")
-    status=$?
-    if [ $status -ne 0 ]; then
-      preview_exit=$status
-    fi
-  done
-else
-  (cd "$tmp_root" && "${CMD_BASE[@]}" --fix "${FILES[@]}")
-  preview_exit=$?
-fi
-
-if [ "${preview_exit:-0}" -eq 2 ]; then
-  echo "ESLint preview failed (configuration error)." >&2
-  exit "$preview_exit"
-fi
-
-: > "${PATCH_FILE}.raw"
-for prefix in "${TARGET_PREFIXES[@]}"; do
-  [ -z "$prefix" ] && continue
-  if [ ! -e "$PROJECT_ROOT/$prefix" ] && [ ! -e "$tmp_root/$prefix" ]; then
-    continue
-  fi
-  diff -ruN \
-    --exclude=.git \
-    --exclude='.git/*' \
-    "$PROJECT_ROOT/$prefix" "$tmp_root/$prefix" >> "${PATCH_FILE}.raw" || true
-done
-
-sed -E "s/diff -ruN( '--exclude=[^']+')+/diff -ruN/" "${PATCH_FILE}.raw" > "$PATCH_FILE"
-rm -f "${PATCH_FILE}.raw"
-
-change_count=$(grep -c '^diff -ruN ' "$PATCH_FILE" || true)
-if [ "$change_count" -eq 0 ]; then
-  change_count=$(grep -c '^--- ' "$PATCH_FILE" || true)
-fi
-fix_summary="fixes not applied"
-if [ "$change_count" -eq 0 ]; then
-  if [ "$auto_yes" = true ]; then
-    echo "Preview patch empty; running fixes directly because --yes was set." >&2
-    skip_preview_patch=true
-  else
-    echo "No ESLint fixes to apply. Preview reported issues, but no auto-fixable changes were found; final lint not run." >&2
-    echo "ESLint-fix summary: no fixes to apply; preview only." >&2
-    exit 0
-  fi
-fi
-
-if [ "$unrelated_changes" = true ]; then
-  echo "Warning: unstaged changes detected outside target paths." >&2
-fi
-
-if [ "${skip_preview_patch:-false}" != true ]; then
-  echo "Preview: ${change_count} file(s) would change." >&2
-  echo "Patch: ${PATCH_FILE}" >&2
-fi
-
-if [ "$auto_yes" = false ]; then
-  if [ -t 0 ]; then
-    printf "Apply these changes? [y/N] "
-    read -r reply
-    case "$reply" in
-      y|Y) ;;
-      *) echo "Not applying changes." >&2; echo "ESLint-fix summary: fixes not applied (prompt declined); lint not run." >&2; exit 0 ;;
-    esac
-  else
-    echo "No TTY available. Not applying changes." >&2
-    echo "ESLint-fix summary: fixes not applied (no TTY); lint not run." >&2
-    exit 0
-  fi
-fi
-
-cd "$PROJECT_ROOT"
-if [ "$ESLINT_CONFIG_MODE" = "nearest" ]; then
-  fix_exit=0
-  for config_path in "${!ESLINT_GROUPS[@]}"; do
-    mapfile -t group_files <<< "${ESLINT_GROUPS[$config_path]}"
-    filtered_files=()
-    for item in "${group_files[@]}"; do
-      [ -n "$item" ] || continue
-      filtered_files+=("$item")
-    done
-    if [ "${#filtered_files[@]}" -eq 0 ]; then
-      continue
-    fi
-    config_path_abs="$config_path"
-    if [[ "$config_path_abs" != /* ]]; then
-      config_path_abs="${PROJECT_ROOT}/${config_path_abs}"
-    fi
-    config_path_run="$config_path"
-    if [[ "$config_path_run" == /* ]]; then
-      config_path_run="$config_path_abs"
-    fi
-    config_dir="$(dirname "$config_path_abs")"
-    plugins_dir="$(resolve_plugins_dir "$config_dir")"
-    echo "Applying ESLint fixes: config ${config_path_abs} (${#filtered_files[@]} file(s))." >&2
     group_cmd=(env "NODE_PATH=$NODE_PATH" node "$TOOLCHAIN_BIN" --quiet --config="$config_path_run")
     if [ -n "$plugins_dir" ]; then
       group_cmd+=(--resolve-plugins-relative-to "$plugins_dir")
@@ -549,34 +582,4 @@ else
   fix_exit=$?
 fi
 
-cd "$PROJECT_ROOT"
-if [ "$fix_exit" -eq 0 ]; then
-  fix_summary="fixes applied"
-  echo "ESLint fixes applied." >&2
-elif [ "$fix_exit" -eq 1 ]; then
-  fix_summary="fixes applied (remaining issues)"
-  echo "ESLint fixes applied; remaining issues still exist." >&2
-else
-  fix_summary="fix step failed (exit ${fix_exit})"
-  echo "ESLint fix run exited with status ${fix_exit}." >&2
-fi
-echo "Running ESLint to report any remaining issues..." >&2
-./.ddev/commands/web/eslint "${clean_args[@]}"
-check_exit=$?
-
-if [ "$check_exit" -ne 0 ]; then
-  lint_summary="remaining issues (exit ${check_exit})"
-else
-  lint_summary="no remaining issues"
-fi
-echo "ESLint-fix summary: ${fix_summary}; lint ${lint_summary}." >&2
-
-if [ "$fix_exit" -ne 0 ]; then
-  exit "$fix_exit"
-fi
-exit "$check_exit"
-if ! command -v node >/dev/null 2>&1; then
-  echo "Node.js is not available in the DDEV web container." >&2
-  echo "Install Node toolchain (e.g. in ${DOCROOT}/core via yarn) to run ESLint." >&2
-  exit 127
-fi
+exit "$fix_exit"

@@ -8,14 +8,25 @@ print_help() {
   cat <<'USAGE'
 Usage: ddev prettier-fix [args]
 
-Previews Prettier fixes and applies them only after confirmation.
+Applies Prettier formatting directly to files (matches standard prettier --write behavior).
 
-By default, fixes are not auto-applied when the working tree has changes
-outside the target paths. This prevents mixing unrelated work with automated
-fixes and makes it easier to review or revert. You'll always get a patch
-preview and a confirmation prompt before changes are applied.
+Use --preview to see a patch preview and confirm before applying fixes.
+This generates a patch in dcq-reports/ and prompts for confirmation.
+
+Examples:
+  ddev prettier-fix                    # Apply formatting directly
+  ddev prettier-fix --preview          # Preview and confirm before applying
+  ddev prettier-fix path/to/file.js    # Format specific file
 USAGE
 }
+
+PROJECT_ROOT="/var/www/html"
+DOCROOT="${DCQ_DOCROOT:-web}"
+DOCROOT_PATH="${PROJECT_ROOT}/${DOCROOT}"
+CORE_PRETTIER="${DOCROOT_PATH}/core/node_modules/prettier/bin/prettier.cjs"
+ROOT_PRETTIER="${PROJECT_ROOT}/node_modules/prettier/bin/prettier.cjs"
+TOOLCHAIN_BIN=""
+NODE_PATH=""
 
 has_help=false
 has_version=false
@@ -23,26 +34,16 @@ has_positional=false
 has_config=false
 seen_double_dash=false
 explicit_paths=false
-auto_yes=false
-removed_flag_used=false
+preview_mode=false
 clean_args=()
 
 for arg in "$@"; do
-  if [ "$arg" = "--yes" ]; then
-    auto_yes=true
-    continue
-  fi
-  if [ "$arg" = "--allow-dirty-outside-targets" ] || [ "$arg" = "--allow-dirty" ]; then
-    removed_flag_used=true
+  if [ "$arg" = "--preview" ]; then
+    preview_mode=true
     continue
   fi
   clean_args+=("$arg")
 done
-
-if [ "$removed_flag_used" = true ]; then
-  echo "Error: --allow-dirty-outside-targets/--allow-dirty has been removed. Review the patch preview and confirm to apply fixes." >&2
-  exit 2
-fi
 
 for arg in "${clean_args[@]}"; do
   if [ "$seen_double_dash" = true ]; then
@@ -63,8 +64,6 @@ for arg in "${clean_args[@]}"; do
     -c|--config|--config=*)
       has_config=true
       ;;
-    --)
-      ;;
     -* )
       ;;
     *)
@@ -81,25 +80,17 @@ if [ "$has_help" = true ]; then
   print_help
 fi
 
-PROJECT_ROOT="/var/www/html"
-DOCROOT="${DCQ_DOCROOT:-web}"
-DOCROOT_PATH="${PROJECT_ROOT}/${DOCROOT}"
-CORE_PRETTIER="${DOCROOT_PATH}/core/node_modules/.bin/prettier"
-ROOT_PRETTIER="${PROJECT_ROOT}/node_modules/.bin/prettier"
-PRETTIER_BIN=""
-NODE_PATH=""
-
 if ! command -v node >/dev/null 2>&1; then
   echo "Node.js is not available in the DDEV web container." >&2
   echo "Install the Drupal core JS toolchain (${DOCROOT}/core) to run Prettier." >&2
   exit 127
 fi
 
-if [ -x "$ROOT_PRETTIER" ]; then
-  PRETTIER_BIN="$ROOT_PRETTIER"
+if [ -f "$ROOT_PRETTIER" ]; then
+  TOOLCHAIN_BIN="$ROOT_PRETTIER"
   NODE_PATH="${PROJECT_ROOT}/node_modules"
-elif [ -x "$CORE_PRETTIER" ]; then
-  PRETTIER_BIN="$CORE_PRETTIER"
+elif [ -f "$CORE_PRETTIER" ]; then
+  TOOLCHAIN_BIN="$CORE_PRETTIER"
   NODE_PATH="${DOCROOT_PATH}/core/node_modules"
 else
   echo "Prettier is not installed in ${DOCROOT}/core/node_modules or node_modules." >&2
@@ -108,22 +99,17 @@ else
 fi
 
 if [ "$has_help" = true ]; then
-  "$PRETTIER_BIN" --help
+  node "$TOOLCHAIN_BIN" --help
   exit $?
 fi
 
 if [ "$has_version" = true ]; then
-  "$PRETTIER_BIN" --version
+  node "$TOOLCHAIN_BIN" --version
   exit $?
 fi
 
-REPORT_DIR="dcq-reports"
-mkdir -p "$REPORT_DIR"
-PATCH_FILE="${REPORT_DIR}/_prettier.patch"
-
 normalize_path() {
   local path="$1"
-  # Normalize paths into repo-relative paths for matching target prefixes.
   path="$(map_path "$path")"
   if [[ "$path" == /var/www/html/* ]]; then
     path="${path#/var/www/html/}"
@@ -138,25 +124,6 @@ normalize_path() {
   if [[ "$path" == modules/* || "$path" == themes/* || "$path" == profiles/* ]]; then
     echo "${DOCROOT}/$path"
     return
-  fi
-  echo "$path"
-}
-
-normalize_prettier_path() {
-  local path="$1"
-  path="$(map_path "$path")"
-  if [[ "$path" == /var/www/html/* ]]; then
-    path="${path#/var/www/html/}"
-  fi
-  if [ "$DOCROOT" != "web" ] && [[ "$path" == web/* ]]; then
-    path="${DOCROOT}/${path#web/}"
-  fi
-  if [ "$path" = "$DOCROOT" ]; then
-    echo "."
-    return
-  fi
-  if [[ "$path" == "${DOCROOT}/"* ]]; then
-    path="${path#${DOCROOT}/}"
   fi
   echo "$path"
 }
@@ -183,7 +150,7 @@ while [ "$index" -lt "$arg_count" ]; do
       ;;
     --config=*)
       ;;
-    -* )
+    -*)
       ;;
     *)
       RAW_PATHS+=("$arg")
@@ -192,7 +159,48 @@ while [ "$index" -lt "$arg_count" ]; do
   index=$((index + 1))
 done
 
+if [ "${#RAW_PATHS[@]}" -gt 0 ]; then
+  for raw in "${RAW_PATHS[@]}"; do
+    TARGET_PREFIXES+=("$(normalize_path "$raw")")
+  done
+else
+  for candidate in "${DOCROOT}/modules/custom" "${DOCROOT}/themes/custom" "${DOCROOT}/profiles/custom"; do
+    if [ -d "$candidate" ]; then
+      TARGET_PREFIXES+=("$candidate")
+    fi
+  done
+fi
+
 FINAL_ARGS=()
+normalize_config_path() {
+  local path="$1"
+  path="$(map_path "$path")"
+  if [[ "$path" == /var/www/html/* ]]; then
+    path="${path#/var/www/html/}"
+  fi
+  if [ "$DOCROOT" != "web" ] && [[ "$path" == web/* ]]; then
+    path="${DOCROOT}/${path#web/}"
+  fi
+  echo "$path"
+}
+
+normalize_docroot_arg() {
+  local arg="$1"
+  arg="$(map_path "$arg")"
+  if [[ "$arg" == /var/www/html/* ]]; then
+    arg="${arg#/var/www/html/}"
+  fi
+  if [ "$DOCROOT" != "web" ] && [[ "$arg" == web/* ]]; then
+    arg="${DOCROOT}/${arg#web/}"
+  fi
+  if [[ "$arg" == "${DOCROOT}/"* ]]; then
+    arg="${arg#${DOCROOT}/}"
+  elif [ "$arg" = "$DOCROOT" ]; then
+    arg="."
+  fi
+  printf '%s' "$arg"
+}
+
 if [ "$explicit_paths" = true ]; then
   args=("${clean_args[@]}")
   arg_count=${#args[@]}
@@ -201,7 +209,8 @@ if [ "$explicit_paths" = true ]; then
   while [ "$index" -lt "$arg_count" ]; do
     arg="${args[$index]}"
     if [ "$seen_double_dash" = true ]; then
-      FINAL_ARGS+=("$(normalize_prettier_path "$arg")")
+      arg="$(normalize_docroot_arg "$arg")"
+      FINAL_ARGS+=("$arg")
       index=$((index + 1))
       continue
     fi
@@ -210,198 +219,165 @@ if [ "$explicit_paths" = true ]; then
         seen_double_dash=true
         FINAL_ARGS+=("$arg")
         ;;
-      -c|--config|--ignore-path)
-        FINAL_ARGS+=("$arg")
+      -c|--config)
         next_arg="${args[$((index + 1))]:-}"
-        if [ -n "$next_arg" ]; then
-          FINAL_ARGS+=("$(map_path "$next_arg")")
-          index=$((index + 1))
-        fi
+        FINAL_ARGS+=("$arg" "$(normalize_config_path "$next_arg")")
+        index=$((index + 1))
         ;;
-      --config=*|--ignore-path=*)
-        key="${arg%%=*}"
-        value="${arg#*=}"
-        value="$(map_path "$value")"
-        FINAL_ARGS+=("${key}=${value}")
+      --config=*)
+        config_value="${arg#*=}"
+        FINAL_ARGS+=("--config=$(normalize_config_path "$config_value")")
         ;;
       -*)
         FINAL_ARGS+=("$arg")
         ;;
       *)
-        FINAL_ARGS+=("$(normalize_prettier_path "$arg")")
+        FINAL_ARGS+=("$(normalize_path "$arg")")
         ;;
     esac
     index=$((index + 1))
   done
 fi
 
-if [ "${#RAW_PATHS[@]}" -gt 0 ]; then
-  for raw in "${RAW_PATHS[@]}"; do
-    TARGET_PREFIXES+=("$(normalize_path "$raw")")
-  done
-else
-  # Default to custom code when no explicit paths are provided.
-  for candidate in "${DOCROOT}/modules/custom" "${DOCROOT}/themes/custom" "${DOCROOT}/profiles/custom"; do
-    if [ -d "$candidate" ]; then
-      TARGET_PREFIXES+=("$candidate")
-    fi
-  done
-fi
-
-unrelated_changes=false
-if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  mapfile -t unstaged_files < <(git diff --name-only)
-  mapfile -t untracked_files < <(git ls-files --others --exclude-standard)
-  for file in "${unstaged_files[@]}" "${untracked_files[@]}"; do
-    [ -z "$file" ] && continue
-    matched=false
-    for prefix in "${TARGET_PREFIXES[@]}"; do
-      [ -z "$prefix" ] && continue
-      if [[ "$file" == "$prefix"* ]]; then
-        matched=true
-        break
-      fi
-    done
-    if [ "$matched" = false ]; then
-      # Guard against applying fixes when unrelated changes are present.
-      unrelated_changes=true
-      break
-    fi
-  done
-fi
-
-CMD_BASE=(env "NODE_PATH=$NODE_PATH" "$PRETTIER_BIN")
-if [ "$has_config" = false ]; then
-  # Prefer project configs; warn when falling back to core.
-  if [ -f "${PROJECT_ROOT}/.prettierrc.json" ]; then
-    CMD_BASE+=(--config="${PROJECT_ROOT}/.prettierrc.json")
-  else
-    CMD_BASE+=(--config="${DOCROOT_PATH}/core/.prettierrc.json")
-    echo "Warning: using core Prettier config (${DOCROOT}/core/.prettierrc.json); project config not found." >&2
-  fi
-  if [ -f "${PROJECT_ROOT}/.prettierignore" ]; then
-    CMD_BASE+=(--ignore-path="${PROJECT_ROOT}/.prettierignore")
-  elif [ -f "${DOCROOT_PATH}/core/.prettierignore" ]; then
-    CMD_BASE+=(--ignore-path="${DOCROOT_PATH}/core/.prettierignore")
-    echo "Warning: using core Prettier ignore (${DOCROOT}/core/.prettierignore); project ignore not found." >&2
-  fi
-fi
-
 DEFAULT_FILES=()
 if [ "$explicit_paths" = false ]; then
-  # Use docroot-relative paths for default discovery.
-  cd web
-  for candidate in modules/custom themes/custom profiles/custom; do
+  for candidate in "${DOCROOT}/modules/custom" "${DOCROOT}/themes/custom" "${DOCROOT}/profiles/custom"; do
     if [ -d "$candidate" ]; then
       while IFS= read -r file_path; do
         DEFAULT_FILES+=("$file_path")
-      done < <(find "$candidate" -type f \( -name '*.js' -o -name '*.yml' -o -name '*.yaml' -o -name '*.css' -o -name '*.scss' -o -name '*.sass' \))
+      done < <(find "$candidate" -path '*/node_modules/*' -prune -o -type f \( -name '*.js' -o -name '*.yml' -o -name '*.yaml' -o -name '*.css' -o -name '*.scss' \) -print)
     fi
   done
   if [ "${#DEFAULT_FILES[@]}" -eq 0 ]; then
-    echo "No custom files found under modules/custom, themes/custom, or profiles/custom. Nothing to fix." >&2
+    echo "No custom files found under modules/custom, themes/custom, or profiles/custom. Nothing to format." >&2
+    exit 2
+  fi
+fi
+
+FILES=()
+if [ "$explicit_paths" = false ]; then
+  FILES=("${DEFAULT_FILES[@]}")
+else
+  FILES=("${FINAL_ARGS[@]}")
+fi
+
+DEFAULT_CONFIG=""
+if [ -f "${PROJECT_ROOT}/.prettierrc.json" ]; then
+  DEFAULT_CONFIG="${PROJECT_ROOT}/.prettierrc.json"
+elif [ -f "${DOCROOT_PATH}/core/.prettierrc.json" ]; then
+  DEFAULT_CONFIG="${DOCROOT_PATH}/core/.prettierrc.json"
+fi
+
+# ============================================================================
+# PREVIEW MODE: Generate patch, show preview, prompt to apply
+# ============================================================================
+if [ "$preview_mode" = true ]; then
+  REPORT_DIR="dcq-reports"
+  mkdir -p "$REPORT_DIR"
+  PATCH_FILE="${REPORT_DIR}/_prettier.patch"
+
+  tmp_root="$(mktemp -d)"
+  trap 'rm -rf "$tmp_root"' EXIT
+
+  cd "$PROJECT_ROOT"
+  tar -cf - \
+    --exclude=./.git \
+    --exclude=./.trunk \
+    --exclude=./node_modules \
+    --exclude=./vendor \
+    --exclude=./dcq-reports \
+    --exclude=./${DOCROOT}/core/node_modules \
+    --exclude='*/.git' \
+    --exclude='*/.git/*' \
+    . | (cd "$tmp_root" && tar -xf -)
+
+  preview_cmd=(env "NODE_PATH=$NODE_PATH" node "$TOOLCHAIN_BIN")
+  if [ -n "$DEFAULT_CONFIG" ] && [ "$has_config" = false ]; then
+    preview_cmd+=(--config "$DEFAULT_CONFIG")
+  fi
+  preview_cmd+=(--write)
+  
+  (cd "$tmp_root" && "${preview_cmd[@]}" "${FILES[@]}")
+  preview_exit=$?
+
+  if [ "${preview_exit:-0}" -ne 0 ]; then
+    echo "Prettier preview failed (exit ${preview_exit})." >&2
+    exit "$preview_exit"
+  fi
+
+  : > "${PATCH_FILE}.raw"
+  for prefix in "${TARGET_PREFIXES[@]}"; do
+    [ -z "$prefix" ] && continue
+    if [ ! -e "$PROJECT_ROOT/$prefix" ] && [ ! -e "$tmp_root/$prefix" ]; then
+      continue
+    fi
+    diff -ruN \
+      --exclude=.git \
+      --exclude='.git/*' \
+      "$PROJECT_ROOT/$prefix" "$tmp_root/$prefix" >> "${PATCH_FILE}.raw" || true
+  done
+
+  sed -E "s/diff -ruN( '--exclude=[^']+')+/diff -ruN/" "${PATCH_FILE}.raw" > "$PATCH_FILE"
+  rm -f "${PATCH_FILE}.raw"
+
+  change_count=$(grep -c '^diff -ruN ' "$PATCH_FILE" || true)
+  if [ "$change_count" -eq 0 ]; then
+    change_count=$(grep -c '^--- ' "$PATCH_FILE" || true)
+  fi
+
+  if [ "$change_count" -eq 0 ]; then
+    echo "No Prettier formatting changes to apply." >&2
     exit 0
   fi
-  cd "$PROJECT_ROOT"
-fi
 
-tmp_root="$(mktemp -d)"
-trap 'rm -rf "$tmp_root"' EXIT
+  echo "Preview: ${change_count} file(s) would change." >&2
+  echo "Patch: ${PATCH_FILE}" >&2
 
-cd "$PROJECT_ROOT"
-tar -cf - \
-  --exclude=./.git \
-  --exclude=./.trunk \
-  --exclude=./node_modules \
-  --exclude=./vendor \
-  --exclude=./dcq-reports \
-  --exclude=./${DOCROOT}/core/node_modules \
-  --exclude='*/.git' \
-  --exclude='*/.git/*' \
-  . | (cd "$tmp_root" && tar -xf -)
-
-if [ "$explicit_paths" = false ]; then
-  (cd "$tmp_root/web" && "${CMD_BASE[@]}" --write "${DEFAULT_FILES[@]}")
-else
-  (cd "$tmp_root/web" && "${CMD_BASE[@]}" --write "${FINAL_ARGS[@]}")
-fi
-
-: > "${PATCH_FILE}.raw"
-for prefix in "${TARGET_PREFIXES[@]}"; do
-  [ -z "$prefix" ] && continue
-  if [ ! -e "$PROJECT_ROOT/$prefix" ] && [ ! -e "$tmp_root/$prefix" ]; then
-    continue
-  fi
-  diff -ruN \
-    --exclude=.git \
-    --exclude='.git/*' \
-    "$PROJECT_ROOT/$prefix" "$tmp_root/$prefix" >> "${PATCH_FILE}.raw" || true
-done
-
-sed -E "s/diff -ruN( '--exclude=[^']+')+/diff -ruN/" "${PATCH_FILE}.raw" > "$PATCH_FILE"
-rm -f "${PATCH_FILE}.raw"
-
-change_count=$(grep -c '^diff -ruN ' "$PATCH_FILE" || true)
-if [ "$change_count" -eq 0 ]; then
-  change_count=$(grep -c '^--- ' "$PATCH_FILE" || true)
-fi
-fix_summary="fixes not applied"
-if [ "$change_count" -eq 0 ]; then
-  echo "No Prettier fixes to apply. Lint not run." >&2
-  echo "Prettier-fix summary: no fixes to apply; lint not run." >&2
-  exit 0
-fi
-
-echo "Preview: ${change_count} file(s) would change." >&2
-echo "Patch: ${PATCH_FILE}" >&2
-
-if [ "$unrelated_changes" = true ]; then
-  echo "Warning: unstaged changes detected outside target paths." >&2
-fi
-
-if [ "$auto_yes" = false ]; then
   if [ -t 0 ]; then
     printf "Apply these changes? [y/N] "
     read -r reply
     case "$reply" in
       y|Y) ;;
-      *) echo "Not applying changes." >&2; echo "Prettier-fix summary: fixes not applied (prompt declined); lint not run." >&2; exit 0 ;;
+      *) echo "Not applying changes." >&2; exit 0 ;;
     esac
   else
     echo "No TTY available. Not applying changes." >&2
-    echo "Prettier-fix summary: fixes not applied (no TTY); lint not run." >&2
     exit 0
   fi
+
+  # Apply fixes
+  cd "$PROJECT_ROOT"
+  fix_cmd=(env "NODE_PATH=$NODE_PATH" node "$TOOLCHAIN_BIN")
+  if [ -n "$DEFAULT_CONFIG" ] && [ "$has_config" = false ]; then
+    fix_cmd+=(--config "$DEFAULT_CONFIG")
+  fi
+  fix_cmd+=(--write)
+  
+  "${fix_cmd[@]}" "${FILES[@]}"
+  fix_exit=$?
+
+  if [ "$fix_exit" -eq 0 ]; then
+    echo "Prettier formatting applied." >&2
+  else
+    echo "Prettier exited with status ${fix_exit}." >&2
+  fi
+
+  echo "Running Prettier check to verify..." >&2
+  ./.ddev/commands/web/prettier "${clean_args[@]}"
+  check_exit=$?
+  exit "$check_exit"
 fi
 
-cd "$PROJECT_ROOT/web"
-if [ "$explicit_paths" = false ]; then
-  "${CMD_BASE[@]}" --write "${DEFAULT_FILES[@]}"
-else
-  "${CMD_BASE[@]}" --write "${FINAL_ARGS[@]}"
-fi
-fix_exit=$?
-
+# ============================================================================
+# DEFAULT MODE: Apply formatting directly (standard prettier --write behavior)
+# ============================================================================
 cd "$PROJECT_ROOT"
-if [ "$fix_exit" -eq 0 ]; then
-  fix_summary="fixes applied"
-  echo "Prettier fixes applied." >&2
-else
-  fix_summary="fix step failed (exit ${fix_exit})"
-  echo "Prettier fix run exited with status ${fix_exit}." >&2
-fi
-echo "Running Prettier to report any remaining issues..." >&2
-./.ddev/commands/web/prettier "${clean_args[@]}"
-check_exit=$?
 
-if [ "$check_exit" -ne 0 ]; then
-  lint_summary="remaining issues (exit ${check_exit})"
-else
-  lint_summary="no remaining issues"
+fix_cmd=(env "NODE_PATH=$NODE_PATH" node "$TOOLCHAIN_BIN")
+if [ -n "$DEFAULT_CONFIG" ] && [ "$has_config" = false ]; then
+  fix_cmd+=(--config "$DEFAULT_CONFIG")
 fi
-echo "Prettier-fix summary: ${fix_summary}; lint ${lint_summary}." >&2
+fix_cmd+=(--write)
 
-if [ "$fix_exit" -ne 0 ]; then
-  exit "$fix_exit"
-fi
-exit "$check_exit"
+"${fix_cmd[@]}" "${FILES[@]}"
+exit $?

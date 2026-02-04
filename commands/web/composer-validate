@@ -22,5 +22,6 @@ for arg in "$@"; do
 done
 
 # Run in-container to match CI behavior.
-composer validate "$@"
+# Use --no-interaction to prevent hanging when output is redirected.
+composer validate --no-interaction "$@"
 exit $?

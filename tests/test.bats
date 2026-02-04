@@ -156,9 +156,6 @@ setup() {
 
   export DIR="$(cd "$(dirname "${BATS_TEST_FILENAME}")/.." >/dev/null 2>&1 && pwd)"
 
-  # Show test progress indicator
-  printf '[%2d/%d] Running: %s\n' "${BATS_TEST_NUMBER}" "${BATS_SUITE_TEST_NUMBER}" "${BATS_TEST_NAME}" >&3
-
   # Stagger parallel test starts to reduce shared resource contention
   # Only delay if running in parallel mode (bats --jobs N)
   if [ -n "${BATS_SEMAPHORE_NUMBER:-}" ]; then

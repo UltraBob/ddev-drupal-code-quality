@@ -1532,14 +1532,16 @@ if [ "$non_interactive" -eq 0 ] && [ "${PROMPT_AVAILABLE:-0}" -eq 1 ]; then
   fi
 fi
 
-# Always set recommended defaults for unset environment variables.
-# This ensures sensible defaults in non-interactive mode and when using recommended_mode.
-set_default_env "DCQ_INSTALL_MODE" "replace"
-set_default_env "DCQ_INSTALL_DEPS" "install"
-set_default_env "DCQ_INSTALL_NODE_DEPS" "root"
-set_default_env "DCQ_PHPSTAN_LEVEL" "3"
-set_default_env "DCQ_INSTALL_IDE_SETTINGS" "merge"
-set_default_env "DCQ_INSTALL_GITIGNORE" "add"
+# Set recommended defaults when in non-interactive mode or when user accepts recommended settings.
+# In interactive mode with user declining, each setting will be prompted individually.
+if [ "$non_interactive" -eq 1 ] || [ "$recommended_mode" -eq 1 ]; then
+  set_default_env "DCQ_INSTALL_MODE" "replace"
+  set_default_env "DCQ_INSTALL_DEPS" "install"
+  set_default_env "DCQ_INSTALL_NODE_DEPS" "root"
+  set_default_env "DCQ_PHPSTAN_LEVEL" "3"
+  set_default_env "DCQ_INSTALL_IDE_SETTINGS" "merge"
+  set_default_env "DCQ_INSTALL_GITIGNORE" "add"
+fi
 
 # Fail loudly if ddev exec cannot resolve a project. Silent skips later are
 # usually caused by running in a context where DDEV can't find .ddev/config.yaml.

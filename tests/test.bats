@@ -157,7 +157,7 @@ setup() {
   export DIR="$(cd "$(dirname "${BATS_TEST_FILENAME}")/.." >/dev/null 2>&1 && pwd)"
 
   # Show which test is running (without counts which are inaccurate with --filter/--jobs)
-  printf 'Running: %s\n' "${BATS_TEST_NAME}" >&3
+  echo "# Running: ${BATS_TEST_NAME}" >&3
 
   # Stagger parallel test starts to reduce shared resource contention
   # Only delay if running in parallel mode (bats --jobs N)

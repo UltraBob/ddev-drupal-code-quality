@@ -687,6 +687,83 @@ PY
   assert_success
 }
 
+@test "installer prompt declines recommended settings and prompts individually" {
+  set -u -o pipefail
+  unset DCQ_NONINTERACTIVE
+  unset DDEV_NONINTERACTIVE
+  unset DCQ_INSTALL_MODE
+  unset DCQ_INSTALL_DEPS
+  unset DCQ_INSTALL_NODE_DEPS
+  unset DCQ_PHPSTAN_LEVEL
+  unset DCQ_INSTALL_IDE_SETTINGS
+  unset DCQ_INSTALL_GITIGNORE
+
+  python_bin=""
+  if command -v python3 >/dev/null 2>&1; then
+    python_bin="python3"
+  elif command -v python >/dev/null 2>&1; then
+    python_bin="python"
+  else
+    skip "python not available for prompt automation"
+  fi
+
+  run "$python_bin" - <<'PY'
+import os
+import pty
+import select
+import sys
+
+cmd = ["ddev", "add-on", "get", "${DIR}"]
+# Answer 'n' to recommended settings, then respond to individual prompts
+responses = {
+    b"Accept recommended settings? (y/N)": b"n\n",
+    b"back up and replace, skip, or abort? [replace/skip/abort]": b"skip\n",
+    b"Install Drupal PHP dev tools": b"n\n",
+    b"Install Node toolchain": b"n\n",
+    b"PHPStan level": b"0\n",
+    b"Install IDE settings": b"skip\n",
+    b"Add dcq-reports/ to .gitignore": b"n\n",
+}
+sent_responses = set()
+buf = b""
+
+pid, fd = pty.fork()
+if pid == 0:
+    os.execvp(cmd[0], cmd)
+
+try:
+    while True:
+        r, _, _ = select.select([fd], [], [], 2)
+        if fd in r:
+            data = os.read(fd, 1024)
+            if not data:
+                break
+            sys.stdout.buffer.write(data)
+            sys.stdout.buffer.flush()
+            buf = (buf + data)[-8192:]
+
+            # Check each prompt and respond
+            for prompt, response in responses.items():
+                prompt_key = prompt.decode('utf-8', errors='ignore')
+                if prompt in buf and prompt_key not in sent_responses:
+                    os.write(fd, response)
+                    sent_responses.add(prompt_key)
+                    break
+except OSError:
+    pass
+
+_, status = os.waitpid(pid, 0)
+code = os.waitstatus_to_exitcode(status)
+sys.exit(code)
+PY
+  assert_success
+  assert_output --partial "Accept recommended settings? (y/N)"
+  # Verify individual prompts appeared (user declined recommended settings)
+  assert_output --partial "back up and replace, skip, or abort?"
+  # PHPStan level should be 0 (not the recommended 3) since user chose it
+  assert_phpstan_level "0"
+}
+
 @test "VS Code settings merge handles JSONC" {
   set -u -o pipefail
   export DCQ_INSTALL_DEPS=skip

@@ -759,7 +759,7 @@ PY
   assert_success
   assert_output --partial "Accept recommended settings? (y/N)"
   # Verify individual prompts appeared (user declined recommended settings)
-  assert_output --partial "back up and replace, skip, or abort?"
+  assert_output --partial "Set phpstan.neon level"
   # PHPStan level should be 0 (not the recommended 3) since user chose it
   assert_phpstan_level "0"
 }

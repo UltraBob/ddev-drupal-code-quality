@@ -7,7 +7,6 @@ Stylelint, Prettier, CSpell) for local CLI/IDE usage.
 
 ```bash
 ddev add-on get UltraBob/ddev-drupal-code-quality
-ddev restart
 ```
 
 See `README_ADDON.md` for complete usage documentation.
@@ -18,12 +17,3 @@ See `README_ADDON.md` for complete usage documentation.
 - `drupal-code-quality/`: project-root configs and `.ddev` shims copied by the installer.
 - `dcq-install.sh`: conflict-aware installer invoked by `install.yaml`.
 - `install.yaml`: DDEV add-on install definition.
-
-## Local testing
-
-```bash
-ddev add-on get /path/to/ddev-drupal-code-quality
-ddev restart
-```
-
-See `README_ADDON.md` for end-user usage.

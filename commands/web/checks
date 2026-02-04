@@ -96,10 +96,19 @@ for tool in "${TOOLS[@]}"; do
   printf '%s\n' "- ${tool}: ${status} (log: ${REPORT_DIR}/${tool}.log)"
  done
 
+# Check for failures and exit with clear message
+failed_tools=()
 for tool in "${TOOLS[@]}"; do
   if [ "${STATUS[$tool]:-}" = "FAIL" ]; then
-    exit 1
+    failed_tools+=("$tool")
   fi
- done
+done
 
+if [ "${#failed_tools[@]}" -gt 0 ]; then
+  printf '\n❌ FAILED: %d check(s) found issues: %s\n' "${#failed_tools[@]}" "$(IFS=', '; echo "${failed_tools[*]}")" >&2
+  printf 'Review logs in %s/ for details.\n' "${REPORT_DIR}" >&2
+  exit 1
+fi
+
+printf '\n✅ All checks passed.\n'
 exit 0

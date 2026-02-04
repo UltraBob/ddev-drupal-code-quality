@@ -707,7 +707,7 @@ PY
     skip "python not available for prompt automation"
   fi
 
-  run "$python_bin" - <<'PY'
+  run "$python_bin" - <<PY
 import os
 import pty
 import select

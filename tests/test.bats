@@ -157,7 +157,7 @@ setup() {
   export DIR="$(cd "$(dirname "${BATS_TEST_FILENAME}")/.." >/dev/null 2>&1 && pwd)"
 
   # Show which test is running (without counts which are inaccurate with --filter/--jobs)
-  echo "# Running: ${BATS_TEST_NAME}" >&3
+  printf 'Running: %s\n' "${BATS_TEST_NAME}" >&3
 
   # Stagger parallel test starts to reduce shared resource contention
   # Only delay if running in parallel mode (bats --jobs N)
@@ -1261,10 +1261,10 @@ PY
     return 1
   fi
   assert_output --partial "Apply these changes? [y/N]"
-  assert_output --partial "ESLint-fix summary:"
+  assert_output --partial "Running ESLint to report any remaining issues"
   after_eslint="$(read_container_file /var/www/html/web/themes/custom/dcq_theme/js/fixable.js)"
   assert_not_equal "$before_eslint" "$after_eslint"
-  assert_file_exist "dcq-reports/eslint-fix.patch"
+  assert_file_exist "dcq-reports/_eslint.patch"
 
   # Test prettier-fix --preview shows prompt and patch
   before_prettier="$(read_container_file /var/www/html/web/themes/custom/dcq_theme/js/prettier.js)"
@@ -1273,7 +1273,7 @@ PY
   assert_output --partial "Apply these changes? [y/N]"
   after_prettier="$(read_container_file /var/www/html/web/themes/custom/dcq_theme/js/prettier.js)"
   assert_not_equal "$before_prettier" "$after_prettier"
-  assert_file_exist "dcq-reports/prettier-fix.patch"
+  assert_file_exist "dcq-reports/_prettier.patch"
 
   # Test stylelint-fix --preview shows prompt and patch
   before_stylelint="$(read_container_file /var/www/html/web/themes/custom/dcq_theme/css/fixable.css)"
@@ -1282,5 +1282,5 @@ PY
   assert_output --partial "Apply these changes? [y/N]"
   after_stylelint="$(read_container_file /var/www/html/web/themes/custom/dcq_theme/css/fixable.css)"
   assert_not_equal "$before_stylelint" "$after_stylelint"
-  assert_file_exist "dcq-reports/stylelint-fix.patch"
+  assert_file_exist "dcq-reports/_stylelint.patch"
 }

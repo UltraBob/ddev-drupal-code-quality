@@ -276,6 +276,16 @@ write_stub_package_lock() {
 JSON
 }
 
+write_minimal_composer_json() {
+  local path="$1"
+  cat > "$path" <<'JSON'
+{
+  "name": "dcq/test-project",
+  "type": "project"
+}
+JSON
+}
+
 write_jsonc_settings() {
   local path="$1"
   cat > "$path" <<'JSONC'
@@ -610,6 +620,7 @@ teardown() {
   echo "# ddev add-on get ${DIR} with project ${PROJNAME} in $(pwd)" >&3
   run ddev add-on get "${DIR}"
   assert_success
+  assert_output --partial "Project root tooling configs updated"
   assert_addon_installed
   assert_phpstan_level "3"
   if command -v rg >/dev/null 2>&1; then
@@ -698,6 +709,9 @@ PY
   unset DCQ_INSTALL_IDE_SETTINGS
   unset DCQ_INSTALL_GITIGNORE
 
+  # Ensure PHP dependency prompt path is exercised.
+  write_minimal_composer_json "composer.json"
+
   python_bin=""
   if command -v python3 >/dev/null 2>&1; then
     python_bin="python3"
@@ -717,8 +731,8 @@ cmd = ["ddev", "add-on", "get", "${DIR}"]
 # Answer 'n' to recommended settings, then respond to individual prompts
 responses = {
     b"Accept recommended settings? (y/N)": b"n\n",
+    b"Recommend installing drupal/core-dev as a dev dependency": b"n\n",
     b"back up and replace, skip, or abort? [replace/skip/abort]": b"skip\n",
-    b"Install Drupal PHP dev tools": b"n\n",
     b"Install Node toolchain": b"n\n",
     b"PHPStan level": b"0\n",
     b"Install IDE settings": b"skip\n",
@@ -759,6 +773,7 @@ PY
   assert_success
   assert_output --partial "Accept recommended settings? (y/N)"
   # Verify individual prompts appeared (user declined recommended settings)
+  assert_output --partial "Recommend installing drupal/core-dev as a dev dependency"
   assert_output --partial "Set phpstan.neon level"
   # PHPStan level should be 0 (not the recommended 3) since user chose it
   assert_phpstan_level "0"

@@ -1474,6 +1474,16 @@ run_command() {
   fi
 }
 
+emit_unique_path_list() {
+  # Emit a de-duplicated list of relative paths, one per line.
+  if [ "$#" -eq 0 ]; then
+    return 0
+  fi
+  printf '%s\n' "$@" | sed '/^$/d' | sort -u | while IFS= read -r path; do
+    emit '  - %s\n' "$path"
+  done
+}
+
 prompt_setup
 
 
@@ -1587,8 +1597,14 @@ if [ "${#missing_tools[@]}" -gt 0 ]; then
     deps_mode="install"
   elif [ "$deps_mode_raw" = "0" ] || [ "$deps_mode_raw" = "false" ] || [ "$deps_mode_raw" = "no" ] || [ "$deps_mode_raw" = "off" ] || [ "$deps_mode_raw" = "skip" ]; then
     deps_mode="skip"
+  elif [ -z "$deps_mode_raw" ]; then
+    if [ "$non_interactive" -eq 1 ]; then
+      deps_mode="install"
+    else
+      deps_mode="prompt"
+    fi
   else
-    # Default is now set via set_default_env, so this should be install unless overridden
+    # Unrecognized values fall back to install for backwards compatibility.
     deps_mode="install"
   fi
 
@@ -1652,6 +1668,15 @@ phpstan_updated=0
 copy_changed=0
 copy_skipped=0
 copy_unchanged=0
+phase2_changed_root_configs=()
+phase2_skipped_root_configs=()
+phase2_unchanged_root_configs=()
+phase2_changed_ddev_files=0
+phase2_skipped_ddev_files=0
+phase2_unchanged_ddev_files=0
+phase2_changed_shims=0
+phase2_skipped_shims=0
+phase2_unchanged_shims=0
 
 
 # Copy add-on assets/shims into project, respecting conflict handling mode.
@@ -1682,9 +1707,25 @@ while IFS= read -r -d '' source; do
     strip_generated_header "$source" "$tmp"
     rewrite_docroot_config "$source" "$tmp"
   fi
+  target_rel="${target#${app_root%/}/}"
+  is_root_config=0
+  if [ "$is_shim" -eq 0 ] && [ "$(dirname "$target")" = "${app_root%/}" ]; then
+    is_root_config=1
+  fi
+  is_ddev_file=0
+  if [ "$is_shim" -eq 0 ] && [[ "$target_rel" == .ddev/* ]]; then
+    is_ddev_file=1
+  fi
 
   if [ -e "$target" ]; then
     if cmp -s "$target" "$tmp"; then
+      if [ "$is_shim" -eq 1 ]; then
+        phase2_unchanged_shims=$((phase2_unchanged_shims + 1))
+      elif [ "$is_root_config" -eq 1 ]; then
+        phase2_unchanged_root_configs+=("$target_rel")
+      elif [ "$is_ddev_file" -eq 1 ]; then
+        phase2_unchanged_ddev_files=$((phase2_unchanged_ddev_files + 1))
+      fi
       emit_copy 'OK: %s already matches.\n' "$target"
       copy_unchanged=$((copy_unchanged + 1))
       rm -f "$tmp"
@@ -1692,6 +1733,13 @@ while IFS= read -r -d '' source; do
     fi
 
     if [ "$skip_all" -eq 1 ]; then
+      if [ "$is_shim" -eq 1 ]; then
+        phase2_skipped_shims=$((phase2_skipped_shims + 1))
+      elif [ "$is_root_config" -eq 1 ]; then
+        phase2_skipped_root_configs+=("$target_rel")
+      elif [ "$is_ddev_file" -eq 1 ]; then
+        phase2_skipped_ddev_files=$((phase2_skipped_ddev_files + 1))
+      fi
       emit_copy 'SKIP: %s (existing file).\n' "$target"
       copy_skipped=$((copy_skipped + 1))
       rm -f "$tmp"
@@ -1716,6 +1764,13 @@ while IFS= read -r -d '' source; do
           emit_copy 'BACKUP: %s\n' "$backup"
           ;;
         s|skip)
+          if [ "$is_shim" -eq 1 ]; then
+            phase2_skipped_shims=$((phase2_skipped_shims + 1))
+          elif [ "$is_root_config" -eq 1 ]; then
+            phase2_skipped_root_configs+=("$target_rel")
+          elif [ "$is_ddev_file" -eq 1 ]; then
+            phase2_skipped_ddev_files=$((phase2_skipped_ddev_files + 1))
+          fi
           emit_copy 'SKIP: %s (existing file).\n' "$target"
           copy_skipped=$((copy_skipped + 1))
           rm -f "$tmp"
@@ -1733,12 +1788,26 @@ while IFS= read -r -d '' source; do
           ;;
         sa|sall|"skip all")
           skip_all=1
+          if [ "$is_shim" -eq 1 ]; then
+            phase2_skipped_shims=$((phase2_skipped_shims + 1))
+          elif [ "$is_root_config" -eq 1 ]; then
+            phase2_skipped_root_configs+=("$target_rel")
+          elif [ "$is_ddev_file" -eq 1 ]; then
+            phase2_skipped_ddev_files=$((phase2_skipped_ddev_files + 1))
+          fi
           emit_copy 'SKIP: %s (existing file).\n' "$target"
           copy_skipped=$((copy_skipped + 1))
           rm -f "$tmp"
           continue
           ;;
         *)
+          if [ "$is_shim" -eq 1 ]; then
+            phase2_skipped_shims=$((phase2_skipped_shims + 1))
+          elif [ "$is_root_config" -eq 1 ]; then
+            phase2_skipped_root_configs+=("$target_rel")
+          elif [ "$is_ddev_file" -eq 1 ]; then
+            phase2_skipped_ddev_files=$((phase2_skipped_ddev_files + 1))
+          fi
           emit_copy 'Unknown choice. Skipping %s.\n' "$target"
           copy_skipped=$((copy_skipped + 1))
           rm -f "$tmp"
@@ -1769,6 +1838,13 @@ while IFS= read -r -d '' source; do
   if [ -x "$source" ] || [[ "$target" == "$shim_dir"* ]]; then
     chmod 0755 "$target" || true
   fi
+  if [ "$is_shim" -eq 1 ]; then
+    phase2_changed_shims=$((phase2_changed_shims + 1))
+  elif [ "$is_root_config" -eq 1 ]; then
+    phase2_changed_root_configs+=("$target_rel")
+  elif [ "$is_ddev_file" -eq 1 ]; then
+    phase2_changed_ddev_files=$((phase2_changed_ddev_files + 1))
+  fi
   emit_copy 'WRITE: %s\n' "$target"
   copy_changed=$((copy_changed + 1))
 done < <(find "$addon_root" -type f -print0)
@@ -1777,6 +1853,24 @@ if [ "$copy_changed" -eq 0 ] && [ "$copy_skipped" -eq 0 ]; then
   emit 'All files already match; no changes.\n'
 else
   emit 'Done. Changed: %s, skipped: %s, unchanged: %s.\n' "$copy_changed" "$copy_skipped" "$copy_unchanged"
+fi
+
+if [ "${#phase2_changed_root_configs[@]}" -gt 0 ]; then
+  emit 'Project root tooling configs updated (%s):\n' "${#phase2_changed_root_configs[@]}"
+  emit_unique_path_list "${phase2_changed_root_configs[@]}"
+elif [ "${#phase2_unchanged_root_configs[@]}" -gt 0 ] || [ "${#phase2_skipped_root_configs[@]}" -gt 0 ]; then
+  emit 'Project root tooling configs updated (0).\n'
+fi
+if [ "${#phase2_skipped_root_configs[@]}" -gt 0 ]; then
+  emit 'Project root tooling configs skipped (%s):\n' "${#phase2_skipped_root_configs[@]}"
+  emit_unique_path_list "${phase2_skipped_root_configs[@]}"
+fi
+
+if [ $((phase2_changed_ddev_files + phase2_skipped_ddev_files + phase2_unchanged_ddev_files)) -gt 0 ]; then
+  emit 'DDEV command/config files: %s updated, %s skipped, %s unchanged.\n' "$phase2_changed_ddev_files" "$phase2_skipped_ddev_files" "$phase2_unchanged_ddev_files"
+fi
+if [ $((phase2_changed_shims + phase2_skipped_shims + phase2_unchanged_shims)) -gt 0 ]; then
+  emit 'Host shim wrappers under %s: %s updated, %s skipped, %s unchanged.\n' "$shim_dir_env" "$phase2_changed_shims" "$phase2_skipped_shims" "$phase2_unchanged_shims"
 fi
 
 if [ "$phpstan_updated" -eq 1 ]; then

@@ -6,7 +6,6 @@ name: drupal-code-quality
 project_files:
   - commands/helpers/path-map.sh
   - commands/web/checks
-  - commands/web/checks-full
   - commands/web/composer-validate
   - commands/web/cspell
   - commands/web/cspell-suggest

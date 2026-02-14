@@ -73,7 +73,6 @@ ddev prettier
 ddev cspell
 ddev composer-validate
 ddev checks
-ddev checks-full
 ```
 
 Host shims are installed under `.ddev/drupal-code-quality/tooling/bin`. These are intended for
@@ -87,7 +86,6 @@ IDE tool paths or tools that require a local binary path:
 ./.ddev/drupal-code-quality/tooling/bin/prettier
 ./.ddev/drupal-code-quality/tooling/bin/cspell
 ./.ddev/drupal-code-quality/tooling/bin/checks
-./.ddev/drupal-code-quality/tooling/bin/checks-full
 ```
 
 ## Fix commands
@@ -116,8 +114,8 @@ The template points PHP tooling at `.ddev/drupal-code-quality/tooling/bin` and J
 ## Configuration notes
 
 - Reports:
-  - `dcq-reports/` is created at the project root when running `checks`,
-    `checks-full`, or the `*-fix` commands (logs + patch previews).
+  - `dcq-reports/` is created at the project root when running `checks`
+    or the `*-fix` commands (logs + patch previews).
   - Add `dcq-reports/` to `.gitignore` if you do not want to track it.
 - ESLint toolchain selection:
   - `ESLINT_TOOLCHAIN=auto` (default) prefers root toolchain when root configs exist.

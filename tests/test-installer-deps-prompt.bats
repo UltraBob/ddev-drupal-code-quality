@@ -55,6 +55,16 @@ teardown() {
   rm -rf "${TEST_ROOT}"
 }
 
+run_search() {
+  local pattern="$1"
+  local file="$2"
+  if command -v rg >/dev/null 2>&1; then
+    run rg -n -- "$pattern" "$file"
+  else
+    run grep -E -n -- "$pattern" "$file"
+  fi
+}
+
 @test "interactive unset DCQ_INSTALL_DEPS prompts before installing core-dev" {
   unset DCQ_INSTALL_DEPS
   unset DCQ_NONINTERACTIVE
@@ -135,9 +145,9 @@ PY
   [[ "$output" == *"Recommend installing drupal/core-dev as a dev dependency"* ]]
   [[ "$output" == *"Project root tooling configs updated"* ]]
 
-  run rg -n "^composer require --dev drupal/core-dev --with-all-dependencies$" "${DDEV_STUB_LOG}"
+  run_search "^composer require --dev drupal/core-dev --with-all-dependencies$" "${DDEV_STUB_LOG}"
   [ "$status" -ne 0 ]
-  run rg -n "^composer config --no-plugins allow-plugins\\.tbachert/spi false$" "${DDEV_STUB_LOG}"
+  run_search "^composer config --no-plugins allow-plugins\\.tbachert/spi false$" "${DDEV_STUB_LOG}"
   [ "$status" -ne 0 ]
 }
 
@@ -218,9 +228,9 @@ PY
   [ "$status" -eq 0 ]
   [[ "$output" == *"Accept recommended settings? (y/N)"* ]]
 
-  run rg -n "^composer config --no-plugins allow-plugins\\.tbachert/spi false$" "${DDEV_STUB_LOG}"
+  run_search "^composer config --no-plugins allow-plugins\\.tbachert/spi false$" "${DDEV_STUB_LOG}"
   [ "$status" -eq 0 ]
-  run rg -n "^composer require --dev drupal/core-dev --with-all-dependencies$" "${DDEV_STUB_LOG}"
+  run_search "^composer require --dev drupal/core-dev --with-all-dependencies$" "${DDEV_STUB_LOG}"
   [ "$status" -eq 0 ]
 }
 
@@ -229,13 +239,20 @@ PY
   export DCQ_NONINTERACTIVE=true
   unset DDEV_NONINTERACTIVE
 
-  run bash -lc 'PATH="${STUB_BIN}:${PATH}" DDEV_APPROOT="${APP_ROOT}" DCQ_INSTALL_NODE_DEPS=skip DCQ_INSTALL_IDE_SETTINGS=skip DCQ_INSTALL_GITIGNORE=skip DCQ_PHPSTAN_LEVEL=0 bash "${ADDON_ROOT}/dcq-install.sh"'
+  run env \
+    "PATH=${STUB_BIN}:${PATH}" \
+    "DDEV_APPROOT=${APP_ROOT}" \
+    "DCQ_INSTALL_NODE_DEPS=skip" \
+    "DCQ_INSTALL_IDE_SETTINGS=skip" \
+    "DCQ_INSTALL_GITIGNORE=skip" \
+    "DCQ_PHPSTAN_LEVEL=0" \
+    bash "${ADDON_ROOT}/dcq-install.sh"
   [ "$status" -eq 0 ]
   [[ "$output" == *"Project root tooling configs updated"* ]]
 
-  run rg -n "^composer require --dev drupal/core-dev --with-all-dependencies --no-interaction$" "${DDEV_STUB_LOG}"
+  run_search "^composer require --dev drupal/core-dev --with-all-dependencies --no-interaction$" "${DDEV_STUB_LOG}"
   [ "$status" -eq 0 ]
-  run rg -n "^composer config --no-plugins allow-plugins\\.tbachert/spi false --no-interaction$" "${DDEV_STUB_LOG}"
+  run_search "^composer config --no-plugins allow-plugins\\.tbachert/spi false --no-interaction$" "${DDEV_STUB_LOG}"
   [ "$status" -ne 0 ]
 }
 
@@ -334,7 +351,15 @@ PY
   export DCQ_NONINTERACTIVE=true
   unset DDEV_NONINTERACTIVE
 
-  run bash -lc 'PATH="${STUB_BIN}:${PATH}" DDEV_APPROOT="${APP_ROOT}" DCQ_INSTALL_DEPS=skip DCQ_INSTALL_NODE_DEPS=skip DCQ_INSTALL_GITIGNORE=skip DCQ_PHPSTAN_LEVEL=0 DCQ_NONINTERACTIVE=true bash "${ADDON_ROOT}/dcq-install.sh"'
+  run env \
+    "PATH=${STUB_BIN}:${PATH}" \
+    "DDEV_APPROOT=${APP_ROOT}" \
+    "DCQ_INSTALL_DEPS=skip" \
+    "DCQ_INSTALL_NODE_DEPS=skip" \
+    "DCQ_INSTALL_GITIGNORE=skip" \
+    "DCQ_PHPSTAN_LEVEL=0" \
+    "DCQ_NONINTERACTIVE=true" \
+    bash "${ADDON_ROOT}/dcq-install.sh"
   [ "$status" -eq 0 ]
   [ -f "${APP_ROOT}/.vscode/settings.json" ]
   [ -f "${APP_ROOT}/.vscode/extensions.json" ]
@@ -455,7 +480,7 @@ PY
   [[ "$output" == *"Add 'dcq-reports/' to .gitignore?"* ]]
   [[ "$output" == *"Skipping IDE settings/extensions install."* ]]
 
-  run rg -n "^composer require --dev drupal/core-dev --with-all-dependencies$" "${DDEV_STUB_LOG}"
+  run_search "^composer require --dev drupal/core-dev --with-all-dependencies$" "${DDEV_STUB_LOG}"
   [ "$status" -ne 0 ]
   [ ! -f "${APP_ROOT}/.vscode/settings.json" ]
   [ ! -f "${APP_ROOT}/.vscode/extensions.json" ]
@@ -493,7 +518,11 @@ JSON
 {"local":"replace-me"}
 JSON
 
-  run bash -lc 'PATH="${STUB_BIN}:${PATH}" DDEV_APPROOT="${APP_ROOT}" DCQ_NONINTERACTIVE=true bash "${ADDON_ROOT}/dcq-install.sh"'
+  run env \
+    "PATH=${STUB_BIN}:${PATH}" \
+    "DDEV_APPROOT=${APP_ROOT}" \
+    "DCQ_NONINTERACTIVE=true" \
+    bash "${ADDON_ROOT}/dcq-install.sh"
   [ "$status" -eq 0 ]
   [[ "$output" == *"Using recommended default: DCQ_INSTALL_MODE=replace"* ]]
   [[ "$output" == *"Using recommended default: DCQ_INSTALL_DEPS=install"* ]]
@@ -501,14 +530,14 @@ JSON
   [[ "$output" == *"Using recommended default: DCQ_INSTALL_IDE_SETTINGS=merge"* ]]
   [[ "$output" == *"Using recommended default: DCQ_INSTALL_GITIGNORE=add"* ]]
 
-  run rg -n "^composer require --dev drupal/core-dev --with-all-dependencies --no-interaction$" "${DDEV_STUB_LOG}"
+  run_search "^composer require --dev drupal/core-dev --with-all-dependencies --no-interaction$" "${DDEV_STUB_LOG}"
   [ "$status" -eq 0 ]
-  run rg -n "npm install|yarn install|yarn add -D|npm install --save-dev" "${DDEV_STUB_LOG}"
+  run_search "npm install|yarn install|yarn add -D|npm install --save-dev" "${DDEV_STUB_LOG}"
   [ "$status" -eq 0 ]
   [ -f "${APP_ROOT}/.vscode/settings.json" ]
   [ -f "${APP_ROOT}/.vscode/extensions.json" ]
   [ -f "${APP_ROOT}/.gitignore" ]
-  run rg -n "^dcq-reports/$" "${APP_ROOT}/.gitignore"
+  run_search "^dcq-reports/$" "${APP_ROOT}/.gitignore"
   [ "$status" -eq 0 ]
   run cat "${APP_ROOT}/.eslintrc.json"
   [[ "$output" != '{"local":"replace-me"}' ]]

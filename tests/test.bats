@@ -735,8 +735,8 @@ responses = {
     b"back up and replace, skip, or abort? [replace/skip/abort]": b"skip\n",
     b"Install Node toolchain": b"n\n",
     b"PHPStan level": b"0\n",
-    b"Install IDE settings": b"skip\n",
-    b"Add dcq-reports/ to .gitignore": b"n\n",
+    b"VS Code/Codium settings/extensions: choose merge, overwrite (with backup), or skip.": b"\n",
+    b"Add 'dcq-reports/' to .gitignore?": b"n\n",
 }
 sent_responses = set()
 buf = b""
@@ -774,9 +774,13 @@ PY
   assert_output --partial "Accept recommended settings? (y/N)"
   # Verify individual prompts appeared (user declined recommended settings)
   assert_output --partial "Recommend installing drupal/core-dev as a dev dependency"
+  assert_output --partial "VS Code/Codium settings/extensions: choose merge, overwrite (with backup), or skip."
+  assert_output --partial "Skipping IDE settings/extensions install."
   assert_output --partial "Set phpstan.neon level"
   # PHPStan level should be 0 (not the recommended 3) since user chose it
   assert_phpstan_level "0"
+  assert_file_not_exist ".vscode/settings.json"
+  assert_file_not_exist ".vscode/extensions.json"
 }
 
 @test "VS Code settings merge handles JSONC" {

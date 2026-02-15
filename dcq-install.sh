@@ -62,19 +62,22 @@ prompt_setup() {
   PROMPT_IN_FD=
   PROMPT_OUT_FD=
 
+  # Prefer /dev/tty so prompts remain interactive even inside loops that
+  # temporarily redirect stdin.
+  if [ -e /dev/tty ]; then
+    if exec 3</dev/tty 2>/dev/null && exec 4>/dev/tty 2>/dev/null; then
+      PROMPT_IN_FD=3
+      PROMPT_OUT_FD=4
+      PROMPT_AVAILABLE=1
+      return
+    fi
+  fi
+
   if [ -t 0 ] && [ -t 1 ]; then
     PROMPT_IN_FD=0
     PROMPT_OUT_FD=1
     PROMPT_AVAILABLE=1
     return
-  fi
-
-  if [ -e /dev/tty ]; then
-    if exec 3</dev/tty 4>/dev/tty 2>/dev/null; then
-      PROMPT_IN_FD=3
-      PROMPT_OUT_FD=4
-      PROMPT_AVAILABLE=1
-    fi
   fi
 }
 
@@ -97,13 +100,15 @@ emit_copy() {
 }
 
 prompt_choice() {
-  # Conflict prompt for file installs; returns short choice code for callers.
+  # Conflict prompt for file installs; sets PROMPT_CHOICE_RESULT for callers.
   local path="$1"
   local warn_parity="$2"
+  local answer=""
+
+  PROMPT_CHOICE_RESULT="s"
 
   if [ "${PROMPT_AVAILABLE:-0}" -ne 1 ]; then
     printf 'No interactive terminal detected; skipping conflict prompt for %s (default: skip). Set DCQ_INSTALL_MODE=replace|skip|abort to control behavior.\n' "$path" >&2
-    printf 's'
     return
   fi
 
@@ -112,16 +117,14 @@ prompt_choice() {
   fi
   printf '\n' >&"$PROMPT_OUT_FD"
   printf 'Conflict at %s. Choose: [r]eplace (backup), [s]kip, [a]bort, [ra] replace all, [sa] skip all (default: skip): ' "$path" >&"$PROMPT_OUT_FD"
-  local answer=""
   if ! IFS= read -r -u "$PROMPT_IN_FD" answer; then
     answer=""
   fi
   answer="$(printf '%s' "$answer" | tr -d '\r\n')"
   if [ -z "$answer" ]; then
-    printf 's'
     return
   fi
-  printf '%s' "$answer"
+  PROMPT_CHOICE_RESULT="$answer"
 }
 
 create_root_package_json() {
@@ -484,9 +487,11 @@ prompt_node_install_action() {
   local has_root="$1"
   local missing_deps="$2"
   local choice
+  local first_char
+
+  NODE_INSTALL_ACTION="install"
 
   if [ "${PROMPT_AVAILABLE:-0}" -ne 1 ]; then
-    printf 'install'
     return
   fi
 
@@ -514,14 +519,14 @@ prompt_node_install_action() {
   choice="$(printf '%s' "$choice" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
   choice="$(string_lower "$choice")"
   if [ -z "$choice" ]; then
-    printf 'install'
     return
   fi
 
-  case "$choice" in
-    i|install) printf 'install' ;;
-    s|skip) printf 'skip' ;;
-    *) printf 'install' ;;
+  first_char="${choice:0:1}"
+  case "$first_char" in
+    i) NODE_INSTALL_ACTION="install" ;;
+    s) NODE_INSTALL_ACTION="skip" ;;
+    *) NODE_INSTALL_ACTION="install" ;;
   esac
 }
 
@@ -631,11 +636,12 @@ set_default_env() {
 }
 
 prompt_ide_settings_mode() {
-  # Prompt for IDE settings merge/overwrite/skip mode.
+  # Prompt for IDE settings merge/overwrite/skip mode; sets PROMPT_IDE_MODE_RESULT.
   local choice
 
+  PROMPT_IDE_MODE_RESULT="skip"
+
   if [ "${PROMPT_AVAILABLE:-0}" -ne 1 ]; then
-    printf 'skip'
     return
   fi
 
@@ -645,15 +651,14 @@ prompt_ide_settings_mode() {
   fi
   choice="$(string_lower "$choice")"
   if [ -z "$choice" ]; then
-    printf 'skip'
     return
   fi
 
   case "$choice" in
-    m|merge) printf 'merge' ;;
-    o|overwrite|replace) printf 'overwrite' ;;
-    s|skip|manual) printf 'skip' ;;
-    *) printf 'skip' ;;
+    m|merge) PROMPT_IDE_MODE_RESULT="merge" ;;
+    o|overwrite|replace) PROMPT_IDE_MODE_RESULT="overwrite" ;;
+    s|skip|manual) PROMPT_IDE_MODE_RESULT="skip" ;;
+    *) PROMPT_IDE_MODE_RESULT="skip" ;;
   esac
 }
 
@@ -768,11 +773,19 @@ maybe_add_gitignore_reports() {
   local entry="dcq-reports/"
 
   mode_raw="$(string_lower "${2:-}")"
-  case "$mode_raw" in
-    1|true|yes|on|add|install|auto) mode="add" ;;
-    0|false|no|off|skip) mode="skip" ;;
-    *) mode="add" ;;  # Default is now set via set_default_env
-  esac
+  if [ -z "$mode_raw" ]; then
+    if [ "$non_interactive" -eq 1 ]; then
+      mode="add"
+    else
+      mode="prompt"
+    fi
+  else
+    case "$mode_raw" in
+      1|true|yes|on|add|install|auto) mode="add" ;;
+      0|false|no|off|skip) mode="skip" ;;
+      *) mode="add" ;;
+    esac
+  fi
 
   if [ -f "$gitignore" ] && grep -q "^${entry}$" "$gitignore"; then
     printf 'OK: %s already lists %s\n' "$gitignore" "$entry"
@@ -794,16 +807,17 @@ maybe_add_gitignore_reports() {
     return 0
   fi
 
-  # mode should now be "add" due to set_default_env, unless explicitly overridden
   emit 'Add %s to .gitignore to avoid committing report logs.\n' "$entry"
   printf '\n'
-  if [ "$mode" = "add" ] || prompt_yes_no "Add '${entry}' to .gitignore?" 1; then
+  if prompt_yes_no "Add '${entry}' to .gitignore?" 1; then
     if [ -f "$gitignore" ]; then
       printf '\n%s\n' "$entry" >>"$gitignore"
     else
       printf '%s\n' "$entry" >"$gitignore"
     fi
     emit 'WRITE: %s\n' "$gitignore"
+  else
+    emit 'Skipping .gitignore update for %s.\n' "$entry"
   fi
   return 0
 }
@@ -1474,6 +1488,41 @@ run_command() {
   fi
 }
 
+ensure_composer_plugin_blocked() {
+  # Preseed Composer plugin policy to avoid interactive trust prompts when
+  # users accept recommended installer settings.
+  local ddev_cmd="$1"
+  local app_root="$2"
+  local composer_json="${app_root%/}/composer.json"
+  local plugin_name="tbachert/spi"
+  local plugin_key="allow-plugins.${plugin_name}"
+  local cmd
+
+  if [ ! -f "$composer_json" ]; then
+    return 0
+  fi
+  if ! command_available "$ddev_cmd"; then
+    return 0
+  fi
+
+  if grep -Eq "\"${plugin_name}\"[[:space:]]*:[[:space:]]*false" "$composer_json"; then
+    return 0
+  fi
+
+  if grep -Eq "\"${plugin_name}\"[[:space:]]*:[[:space:]]*true" "$composer_json"; then
+    emit 'Composer plugin trust for %s already configured; leaving existing setting.\n' "$plugin_name"
+    return 0
+  fi
+
+  cmd=( "$ddev_cmd" "composer" "config" "--no-plugins" "$plugin_key" "false" )
+
+  if run_command "${cmd[@]}"; then
+    emit 'Set Composer %s=false to avoid plugin trust prompts.\n' "$plugin_key"
+  else
+    emit 'WARNING: Failed to set Composer %s=false; dependency install may prompt.\n' "$plugin_key"
+  fi
+}
+
 emit_unique_path_list() {
   # Emit a de-duplicated list of relative paths, one per line.
   if [ "$#" -eq 0 ]; then
@@ -1650,7 +1699,13 @@ if [ "${#missing_tools[@]}" -gt 0 ]; then
     if [ "$should_install" -ne 1 ]; then
       emit "Skipping dependency install. Run '%s' later to enable PHPStan/PHPCS/PHPCBF.\n" "${cmd[*]}"
     else
-      (cd "$app_root" && run_command "${cmd[@]}")
+      (
+        cd "$app_root"
+        if [ "$recommended_mode" -eq 1 ]; then
+          ensure_composer_plugin_blocked "$ddev_cmd" "$app_root"
+        fi
+        run_command "${cmd[@]}"
+      )
       emit 'Dependencies installed.\n'
     fi
   fi
@@ -1755,7 +1810,8 @@ while IFS= read -r -d '' source; do
       exit 1
     else
       show_diff "$target" "$tmp"
-      choice="$(prompt_choice "$target" "true")"
+      prompt_choice "$target" "true"
+      choice="${PROMPT_CHOICE_RESULT:-s}"
       choice="$(string_lower "$choice")"
       choice="$(printf '%s' "$choice" | tr -s ' ')"
       case "$choice" in
@@ -1866,10 +1922,10 @@ if [ "${#phase2_skipped_root_configs[@]}" -gt 0 ]; then
   emit_unique_path_list "${phase2_skipped_root_configs[@]}"
 fi
 
-if [ $((phase2_changed_ddev_files + phase2_skipped_ddev_files + phase2_unchanged_ddev_files)) -gt 0 ]; then
+if [ $((phase2_changed_ddev_files + phase2_skipped_ddev_files)) -gt 0 ]; then
   emit 'DDEV command/config files: %s updated, %s skipped, %s unchanged.\n' "$phase2_changed_ddev_files" "$phase2_skipped_ddev_files" "$phase2_unchanged_ddev_files"
 fi
-if [ $((phase2_changed_shims + phase2_skipped_shims + phase2_unchanged_shims)) -gt 0 ]; then
+if [ $((phase2_changed_shims + phase2_skipped_shims)) -gt 0 ]; then
   emit 'Host shim wrappers under %s: %s updated, %s skipped, %s unchanged.\n' "$shim_dir_env" "$phase2_changed_shims" "$phase2_skipped_shims" "$phase2_unchanged_shims"
 fi
 
@@ -1987,7 +2043,8 @@ if [ "$core_package_json_present" -eq 1 ]; then
         target="$node_mode"
       elif [ "$node_mode" = "prompt" ]; then
         root_pm="$(detect_package_manager "$app_root")"
-        node_action="$(prompt_node_install_action "$has_root_package_json" "$missing_node_deps")"
+        prompt_node_install_action "$has_root_package_json" "$missing_node_deps"
+        node_action="${NODE_INSTALL_ACTION:-install}"
         # Defensively normalize the prompt result to avoid silent fall-through.
         node_action="${node_action//$'\r'/}"
         node_action="${node_action//$'\n'/}"
@@ -2060,17 +2117,28 @@ ide_settings_doc="${ide_settings_root}/README.md"
 if [ -f "$ide_settings_template" ] || [ -f "$ide_extensions_template" ]; then
   emit '\n==> Phase 4: IDE settings\n'
   ide_mode_raw="$(string_lower "${DCQ_INSTALL_IDE_SETTINGS:-}")"
-  case "$ide_mode_raw" in
-    merge|m) ide_mode="merge" ;;
-    overwrite|replace|o) ide_mode="overwrite" ;;
-    manual|skip|s) ide_mode="skip" ;;
-    *) ide_mode="merge" ;;  # Default is now set via set_default_env
-  esac
+  if [ "$ide_mode_raw" = "merge" ] || [ "$ide_mode_raw" = "m" ]; then
+    ide_mode="merge"
+  elif [ "$ide_mode_raw" = "overwrite" ] || [ "$ide_mode_raw" = "replace" ] || [ "$ide_mode_raw" = "o" ]; then
+    ide_mode="overwrite"
+  elif [ "$ide_mode_raw" = "manual" ] || [ "$ide_mode_raw" = "skip" ] || [ "$ide_mode_raw" = "s" ]; then
+    ide_mode="skip"
+  elif [ -z "$ide_mode_raw" ]; then
+    if [ "$non_interactive" -eq 1 ]; then
+      ide_mode="merge"
+    else
+      ide_mode="prompt"
+    fi
+  else
+    # Unrecognized values fall back to merge for backwards compatibility.
+    ide_mode="merge"
+  fi
 
   if [ "$ide_mode" = "prompt" ]; then
     emit 'VS Code/Codium settings/extensions: choose merge, overwrite (with backup), or skip.\n'
     printf '\n'
-    ide_mode="$(prompt_ide_settings_mode)"
+    prompt_ide_settings_mode
+    ide_mode="${PROMPT_IDE_MODE_RESULT:-skip}"
   fi
 
   if [ "$ide_mode" = "skip" ]; then

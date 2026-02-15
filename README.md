@@ -1,6 +1,9 @@
 # ddev-drupal-code-quality
 
-[![tests](https://github.com/UltraBob/ddev-drupal-code-quality/actions/workflows/tests.yml/badge.svg)](https://github.com/UltraBob/ddev-drupal-code-quality/actions/workflows/tests.yml)
+[![tests](https://github.com/UltraBob/ddev-drupal-code-quality/actions/workflows/tests.yml/badge.svg)](https://github.com/UltraBob/ddev-drupal-code-quality/actions/workflows/tests.yml) [![add-on registry](https://img.shields.io/badge/DDEV-Add--on_Registry-blue)](https://addons.ddev.com)
+[![last commit](https://img.shields.io/github/last-commit/UltraBob/ddev-drupal-code-quality)](https://github.com/UltraBob/ddev-drupal-code-quality/commits)
+![GitHub Release](https://img.shields.io/github/v/release/UltraBob/ddev-drupal-code-quality?include_prereleases)
+
 
 DDEV add-on that installs local code quality tooling based on Drupal.org GitLab CI template defaults (PHPStan, PHPCS, ESLint,
 Stylelint, Prettier, CSpell) for local CLI/IDE usage.

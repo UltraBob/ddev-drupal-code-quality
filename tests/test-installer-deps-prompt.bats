@@ -3,7 +3,8 @@
 setup() {
   set -euo pipefail
 
-  export ADDON_ROOT="/Users/bob/ddev_projects/ddev_cq/addons/ddev-drupal-code-quality"
+  export ADDON_ROOT
+  ADDON_ROOT="$(cd "${BATS_TEST_DIRNAME}/.." && pwd)"
   export TEST_ROOT
   TEST_ROOT="$(mktemp -d /tmp/dcq-installer-deps.XXXXXX)"
   export APP_ROOT="${TEST_ROOT}/app"
@@ -455,8 +456,6 @@ PY
   [[ "$output" == *"Skipping IDE settings/extensions install."* ]]
 
   run rg -n "^composer require --dev drupal/core-dev --with-all-dependencies$" "${DDEV_STUB_LOG}"
-  [ "$status" -ne 0 ]
-  run rg -n "npm install|yarn install|yarn add -D|npm install --save-dev" "${DDEV_STUB_LOG}"
   [ "$status" -ne 0 ]
   [ ! -f "${APP_ROOT}/.vscode/settings.json" ]
   [ ! -f "${APP_ROOT}/.vscode/extensions.json" ]

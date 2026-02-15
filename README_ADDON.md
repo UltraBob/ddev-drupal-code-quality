@@ -172,4 +172,4 @@ intentionally. Remove them manually if desired.
 
 ## Credits
 
-**Contributed and maintained by @CONTRIBUTOR**
+**Contributed and maintained by [@UltraBob](https://github.com/UltraBob)**

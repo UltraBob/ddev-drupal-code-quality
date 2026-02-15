@@ -32,7 +32,15 @@ permissions:
   contents: read
 
 jobs:
+  maintenance-checker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run DDEV Add-on Update Checker
+        run: curl -fsSL https://ddev.com/s/addon-update-checker.sh | bash
+
   tests:
+    needs: maintenance-checker
     strategy:
       matrix:
         ddev_version: [stable, HEAD]

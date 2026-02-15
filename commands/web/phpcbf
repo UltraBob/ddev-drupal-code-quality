@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 #ddev-generated
+## MutagenSync: true
 set -u
 
 PHPCBF_BIN="vendor/bin/phpcbf"

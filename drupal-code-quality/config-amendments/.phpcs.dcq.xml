@@ -4,5 +4,10 @@
 
   <rule ref="DrupalPractice"/>
 
+  <!-- Default to scanning the Drupal docroot when no path is provided. -->
+  <file>__DOCROOT__</file>
+
+  <exclude-pattern>__DOCROOT__/core/**</exclude-pattern>
+  <exclude-pattern>**/contrib/**</exclude-pattern>
   <exclude-pattern>**/node_modules/**</exclude-pattern>
   <exclude-pattern>__DOCROOT__/sites/*/files/**</exclude-pattern>

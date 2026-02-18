@@ -934,8 +934,16 @@ PY
   assert_success
   run grep -n "web/core" ".cspell.json"
   assert_failure
+  run grep -n '<rule ref="DrupalPractice"/>' ".phpcs.xml"
+  assert_success
+  run grep -n "<file>docroot</file>" ".phpcs.xml"
+  assert_success
+  run grep -n "docroot/core/\\*\\*" ".phpcs.xml"
+  assert_success
   run grep -n "docroot/sites" ".phpcs.xml"
   assert_success
+  run grep -n "__DOCROOT__" ".phpcs.xml"
+  assert_failure
 
   # Verify PHPStan config uses custom docroot
   run grep -q "docroot/modules/custom" phpstan.neon

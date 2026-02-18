@@ -1074,6 +1074,40 @@ escape_sed_replacement() {
   printf '%s' "${1:-}" | sed 's/[&|]/\\&/g'
 }
 
+eslint_quiet_disabled() {
+  case "${1:-}" in
+    0|false|FALSE|False|no|NO|off|OFF)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+resolve_eslint_quiet_setting() {
+  local app_root="$1"
+  local raw="${DCQ_ESLINT_QUIET:-}"
+  local config_file=""
+  local matched_line=""
+
+  if [ -z "$raw" ]; then
+    for config_file in "${app_root%/}/.ddev/config.yaml" "${app_root%/}/.ddev/config.yml"; do
+      [ -f "$config_file" ] || continue
+      matched_line="$(grep -E '^[[:space:]-]*["'"'"']?DCQ_ESLINT_QUIET=' "$config_file" | tail -n 1 || true)"
+      [ -n "$matched_line" ] || continue
+      raw="${matched_line#*=}"
+      raw="${raw%%#*}"
+      raw="$(printf '%s' "$raw" | tr -d "\"'" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+      [ -n "$raw" ] && break
+    done
+  fi
+
+  if eslint_quiet_disabled "$raw"; then
+    printf 'false'
+    return
+  fi
+  printf 'true'
+}
+
 render_ide_template() {
   # Render IDE settings template with resolved shim and tool paths.
   local template="$1"
@@ -1083,17 +1117,20 @@ render_ide_template() {
   local prettier_path="$5"
   local eslint_node_path="$6"
   local eslint_resolve_plugins="$7"
+  local eslint_quiet="$8"
   local escaped_shim
   local escaped_stylelint
   local escaped_prettier
   local escaped_node_path
   local escaped_resolve_plugins
+  local escaped_eslint_quiet
 
   escaped_shim="$(escape_sed_replacement "$shim_setting")"
   escaped_stylelint="$(escape_sed_replacement "$stylelint_path")"
   escaped_prettier="$(escape_sed_replacement "$prettier_path")"
   escaped_node_path="$(escape_sed_replacement "$eslint_node_path")"
   escaped_resolve_plugins="$(escape_sed_replacement "$eslint_resolve_plugins")"
+  escaped_eslint_quiet="$(escape_sed_replacement "$eslint_quiet")"
 
   sed \
     -e '1{/^#ddev-generated$/d;}' \
@@ -1102,6 +1139,7 @@ render_ide_template() {
     -e "s|__DCQ_PRETTIER_PATH__|${escaped_prettier}|g" \
     -e "s|__DCQ_ESLINT_NODE_PATH__|${escaped_node_path}|g" \
     -e "s|__DCQ_ESLINT_RESOLVE_PLUGINS__|${escaped_resolve_plugins}|g" \
+    -e "s|__DCQ_ESLINT_QUIET__|${escaped_eslint_quiet}|g" \
     "$template" >"$output"
 }
 
@@ -2190,6 +2228,7 @@ if [ -f "$ide_settings_template" ] || [ -f "$ide_extensions_template" ]; then
       js_modules=""
       eslint_node_path=""
       eslint_resolve_plugins=""
+      eslint_quiet="$(resolve_eslint_quiet_setting "$app_root")"
       if [ "$ide_node_mode" = "root" ] && [ "$has_root_node_modules" -eq 1 ]; then
         js_modules="./node_modules"
         eslint_node_path="node_modules"
@@ -2205,7 +2244,7 @@ if [ -f "$ide_settings_template" ] || [ -f "$ide_extensions_template" ]; then
       fi
 
       render_ide_template "$ide_settings_template" "$ide_tmp" "$shim_setting" \
-        "$stylelint_path" "$prettier_path" "$eslint_node_path" "$eslint_resolve_plugins"
+        "$stylelint_path" "$prettier_path" "$eslint_node_path" "$eslint_resolve_plugins" "$eslint_quiet"
       if [ "$ide_js_paths_set" -eq 0 ]; then
         strip_ide_js_settings "$ide_tmp" || true
         emit 'JS tool paths not configured (node_modules missing). Install JS deps and re-run the installer or update settings manually.\n'

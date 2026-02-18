@@ -9,6 +9,9 @@ print_help() {
 Usage: ddev eslint [args]
 
 Runs ESLint inside the DDEV web container with Drupal.org GitLab CI template defaults.
+
+Defaults:
+  - Uses --quiet (GitLab CI parity). Set DCQ_ESLINT_QUIET=0 to include warnings.
 USAGE
 }
 
@@ -28,6 +31,11 @@ NODE_PATH=""
 RESOLVE_PLUGINS_DIR=""
 ESLINT_TOOLCHAIN="${ESLINT_TOOLCHAIN:-auto}"
 ESLINT_CONFIG_MODE="${ESLINT_CONFIG_MODE:-nearest}"
+DCQ_ESLINT_QUIET="${DCQ_ESLINT_QUIET:-1}"
+QUIET_ENABLED=1
+case "$DCQ_ESLINT_QUIET" in
+  0|false|FALSE|False|no|NO|off|OFF) QUIET_ENABLED=0 ;;
+esac
 
 for arg in "$@"; do
   if [ "$seen_double_dash" = true ]; then
@@ -111,6 +119,10 @@ if [ "$has_version" = true ]; then
 fi
 
 CMD=(env "NODE_PATH=$NODE_PATH" node "$TOOLCHAIN_BIN")
+DEFAULT_ARGS=()
+if [ "$QUIET_ENABLED" -eq 1 ]; then
+  DEFAULT_ARGS+=(--quiet)
+fi
 if [ -n "$RESOLVE_PLUGINS_DIR" ]; then
   # Ensure ESLint resolves plugins from the selected toolchain.
   CMD+=(--resolve-plugins-relative-to "$RESOLVE_PLUGINS_DIR")
@@ -125,6 +137,7 @@ if [ "$has_config" = false ] && [ "$ESLINT_CONFIG_MODE" != "nearest" ]; then
   fi
 fi
 CMD+=(--ext .js,.yml --ignore-pattern "**/node_modules/**")
+CMD+=("${DEFAULT_ARGS[@]}")
 
 find_nearest_config() {
   local file_path="$1"
@@ -317,6 +330,7 @@ if [ "$ESLINT_CONFIG_MODE" = "nearest" ]; then
       group_cmd+=(--resolve-plugins-relative-to "$plugins_dir")
     fi
     group_cmd+=(--ext .js,.yml --ignore-pattern "**/node_modules/**")
+    group_cmd+=("${DEFAULT_ARGS[@]}")
     "${group_cmd[@]}" "${FLAGS_ARGS[@]}" "${filtered_files[@]}"
     status=$?
     if [ $status -ne 0 ]; then

@@ -19,4 +19,7 @@ Stylelint, Prettier, CSpell) use local `node_modules` paths. The installer uses
 the Node toolchain choice (prompt or `DCQ_INSTALL_NODE_DEPS`) to configure those
 paths when dependencies are available. Override the paths if you prefer a
 different location. Run `ddev <tool>` in the terminal to use the containerized
-CLI wrappers.
+CLI wrappers. The generated settings also set `eslint.quiet` by default to
+match GitLab CI behavior; set `DCQ_ESLINT_QUIET=0` before install to disable.
+To persist this in DDEV commands, add `DCQ_ESLINT_QUIET=0` under
+`web_environment` in `.ddev/config.yaml`.

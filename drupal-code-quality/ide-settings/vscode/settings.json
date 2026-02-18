@@ -14,6 +14,7 @@
   "phpstan.configFile": "./phpstan.neon",
   "intelephense.environment.phpVersion": "8.3",
   "eslint.enable": true,
+  "eslint.quiet": __DCQ_ESLINT_QUIET__,
   "eslint.workingDirectories": [
     {
       "directory": ".",

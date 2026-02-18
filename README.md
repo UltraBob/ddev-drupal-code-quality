@@ -144,6 +144,12 @@ The template points PHP tooling at `.ddev/drupal-code-quality/tooling/bin` and J
     by `.cspell.json` `ignorePaths`. Narrow the scan by passing explicit paths.
   - `.cspell-project-words.txt` is created by the installer (empty) and updated
     by `ddev cspell-suggest` when you accept suggested words.
+- PHPCS / PHPCBF default scope:
+  - When a project `.phpcs.xml` is installed by the add-on, `ddev phpcs` and
+    `ddev phpcbf` with no path default to scanning the configured docroot.
+  - The generated ruleset excludes `__DOCROOT__/core/**`, `**/contrib/**`,
+    `**/node_modules/**`, and `__DOCROOT__/sites/*/files/**`.
+  - You can still pass explicit paths to narrow runs.
 - PHPStan baseline:
   - Generate a baseline with `ddev phpstan --generate-baseline`.
   - This writes `phpstan-baseline.neon` at the project root; the wrapper will

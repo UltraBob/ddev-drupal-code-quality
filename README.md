@@ -140,13 +140,18 @@ The template points PHP tooling at `.ddev/drupal-code-quality/tooling/bin` and J
 - ESLint warning visibility (GitLab CI parity):
   - `DCQ_ESLINT_QUIET=1` (default) adds `--quiet` to `ddev eslint` and
     `ddev eslint-fix`, so warnings are suppressed.
-  - Set `DCQ_ESLINT_QUIET=0` to include warnings in CLI output.
-  - Generated VS Code settings set `eslint.quiet` to the same default.
-  - To persist this in DDEV, add to `.ddev/config.yaml` (or `.ddev/config.yml`):
+  - Set `DCQ_ESLINT_QUIET=0` to include warnings in CLI output. Persist this in
+    `.ddev/config.yaml` (or `.ddev/config.yml`):
     ```yaml
     web_environment:
       - DCQ_ESLINT_QUIET=0
     ```
+  - VS Code uses its own setting for extension diagnostics. Set
+    `"eslint.quiet": false` in `.vscode/settings.json` to include warnings in
+    the IDE.
+  - Installer behavior: `overwrite` regenerates IDE settings from template;
+    `merge` only adds missing keys and will not change an existing
+    `eslint.quiet` value.
 - CSpell parity:
   - Run `ddev exec php /mnt/ddev_config/drupal-code-quality/tooling/scripts/prepare-cspell.php -s .prepared` once and
     replace `.cspell.json` after reviewing the diff.

@@ -23,3 +23,10 @@ CLI wrappers. The generated settings also set `eslint.quiet` by default to
 match GitLab CI behavior; set `DCQ_ESLINT_QUIET=0` before install to disable.
 To persist this in DDEV commands, add `DCQ_ESLINT_QUIET=0` under
 `web_environment` in `.ddev/config.yaml`.
+
+For existing projects, update `.vscode/settings.json` as well:
+- Set `"eslint.quiet": false` to show warnings in the IDE.
+- Set `"eslint.quiet": true` to hide warnings in the IDE.
+
+Note: installer `merge` mode only adds missing settings. It does not overwrite
+an existing `eslint.quiet` value.

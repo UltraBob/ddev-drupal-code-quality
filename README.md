@@ -3,7 +3,7 @@
 [![last commit](https://img.shields.io/github/last-commit/UltraBob/ddev-drupal-code-quality)](https://github.com/UltraBob/ddev-drupal-code-quality/commits)
 ![GitHub Release](https://img.shields.io/github/v/release/UltraBob/ddev-drupal-code-quality?include_prereleases)
 
-# ddev-drupal-code-quality
+# DDEV Drupal Code Quality
 
 ## Overview
 

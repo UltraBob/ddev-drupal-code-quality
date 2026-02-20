@@ -948,30 +948,22 @@ expand_cspell_config() {
     emit 'Expanding .cspell.json with project-specific settings...\n'
     local ddev_cmd="${DDEV_EXECUTABLE:-ddev}"
 
-    # Copy prepare-cspell.php to project root for execution
-    local project_script="${app_root%/}/.prepare-cspell-tmp.php"
-    cp "$prepare_script" "$project_script" || {
-      emit 'Failed to copy prepare-cspell.php; skipping expansion.\n'
-      return 0
-    }
-
     # Run the script in container from project root
     # Capture both stdout and stderr, but don't fail the installer if it errors
     # Pass the docroot via _WEB_ROOT environment variable
     local output
-    if output=$("$ddev_cmd" exec bash -c "export _WEB_ROOT='${DCQ_DOCROOT:-web}' && php .prepare-cspell-tmp.php" 2>&1); then
+    if output=$("$ddev_cmd" exec bash -c "cd /var/www/html && export _WEB_ROOT='${DCQ_DOCROOT:-web}' && php .ddev/drupal-code-quality/tooling/scripts/prepare-cspell.php" 2>&1); then
       if echo "$output" | grep -q "Writing json"; then
         emit 'Successfully expanded .cspell.json\n'
       else
         emit 'CSpell expansion completed (no changes needed)\n'
       fi
     else
-      # Script failed - likely no Drupal core installed yet
-      emit 'Skipping CSpell expansion (Drupal core may not be installed yet)\n'
+      emit 'Skipping CSpell expansion: prepare-cspell.php failed.\n'
+      if [ -n "$output" ]; then
+        emit '%s\n' "$output"
+      fi
     fi
-
-    # Clean up temp script
-    rm -f "$project_script"
   else
     emit 'DDEV not available; skipping CSpell expansion.\n'
   fi

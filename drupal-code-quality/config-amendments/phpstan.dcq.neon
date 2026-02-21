@@ -9,7 +9,7 @@ parameters:
         - __DOCROOT__/sites
     excludePaths:
         analyseAndScan:
-            - __DOCROOT__/sites/*/files
+            - __DOCROOT__/sites/*/files/*
 
 # Baseline guidance:
 # - Generate a baseline with: ddev phpstan --generate-baseline

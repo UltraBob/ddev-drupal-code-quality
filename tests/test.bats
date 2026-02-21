@@ -968,7 +968,7 @@ PY
   assert_success
   run grep -q "docroot/sites" phpstan.neon
   assert_success
-  run grep -q "docroot/sites/\*/files" phpstan.neon
+  run grep -q "docroot/sites/\*/files/\*" phpstan.neon
   assert_success
 }
 
@@ -1010,8 +1010,31 @@ PY
   # Check for excludePaths
   run grep -q "excludePaths:" phpstan.neon
   assert_success
-  run grep -q "web/sites/\*/files" phpstan.neon
+  run grep -q "web/sites/\*/files/\*" phpstan.neon
   assert_success
+}
+
+@test "phpstan excludes nested files directory descendants" {
+  set -u -o pipefail
+  run ddev add-on get "${DIR}"
+  assert_success
+
+  mkdir -p web/sites/default/files/php/twig/test-subdir
+  cat > web/sites/default/files/php/twig/test-subdir/should-not-scan.php <<'PHP'
+<?php
+
+final class DcqPhpstanExcludeProbe {}
+PHP
+
+  run ddev phpstan analyse --debug -c phpstan.neon web/sites
+  assert_failure
+
+  case "$output" in
+    *"test-subdir/should-not-scan.php"*)
+      echo "Expected phpstan excludePaths to skip files descendants under web/sites/*/files."
+      return 1
+      ;;
+  esac
 }
 
 @test "cspell config is expanded during installation" {

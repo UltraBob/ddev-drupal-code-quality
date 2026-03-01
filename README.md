@@ -35,8 +35,6 @@ ddev add-on get UltraBob/ddev-drupal-code-quality
 
 # Or, for local development
 ddev add-on get /path/to/ddev-drupal-code-quality
-
-ddev restart
 ```
 
 ## Repository structure

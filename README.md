@@ -50,9 +50,9 @@ the project type each one is designed for.
 
 ### Practical guidance
 
-- Use one primary Drupal workflow add-on per project.
-- Installing multiple add-ons that define similar commands/configs can cause
-  collisions and confusing behavior.
+- Use the add-on that matches your project type (full-site, contrib, or core).
+- These add-ons overlap in commands/configs and are generally not intended to
+  be combined in one project.
 - If you are developing contrib modules/themes, prefer
   `ddev/ddev-drupal-contrib`.
 - If you are developing Drupal core, prefer `ddev-drupal-core-dev` (see above

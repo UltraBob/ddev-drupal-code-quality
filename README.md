@@ -37,10 +37,6 @@ ddev add-on get UltraBob/ddev-drupal-code-quality
 ddev add-on get /path/to/ddev-drupal-code-quality
 ```
 
-This add-on does not require `ddev restart` by itself. If DDEV asks you to
-restart for separate service/config changes in your project, follow that
-guidance.
-
 ## Repository structure
 
 - `commands/`: DDEV web commands copied into project `.ddev/commands`.

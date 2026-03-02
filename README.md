@@ -58,7 +58,7 @@ Drupal.org GitLab CI template defaults. The installer will prompt for:
 - PHPStan default level (keep GitLab CI template level 0 or choose a local level 0-10; recommend 3).
 - Node toolchain install in the project root and package manager selection.
 - Missing Drupal JS dependencies when a root `package.json` exists.
-- Optional `.gitignore` update for `dcq-reports/`.
+- Optional `.gitignore` update for `dcq-reports/` (default: yes).
 - IDE settings (merge/overwrite/skip when templates are available).
 The installer runs in bash so it does not require host PHP.
 
@@ -173,7 +173,8 @@ The template points PHP tooling at `.ddev/drupal-code-quality/tooling/bin` and J
   to skip, or unset to prompt (default: install in the project root). The
   installer selects npm/yarn based on existing lockfiles.
 - `DCQ_INSTALL_GITIGNORE`: `add`/`true` to add `dcq-reports/` to `.gitignore`
-  without prompting, `skip`/`false` to skip, or unset to prompt when interactive.
+  without prompting, `skip`/`false` to skip, or unset to prompt when interactive
+  (default: yes).
 - `DCQ_INSTALL_IDE_SETTINGS`: `merge` to add missing VS Code settings and
   extension recommendations, `overwrite` to back up and replace, `skip` to
   handle manually, or unset to prompt.

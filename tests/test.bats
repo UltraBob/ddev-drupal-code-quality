@@ -778,6 +778,7 @@ PY
   assert_output --partial "Install drupal/core-dev now to provide PHP code quality tools"
   assert_output --partial "VS Code/Codium settings/extensions: choose merge, overwrite (with backup), or skip."
   assert_output --partial "Skipping IDE settings/extensions install."
+  assert_output --partial "Add 'dcq-reports/' to .gitignore? [Y/n]"
   assert_output --partial "Set phpstan.neon level"
   # PHPStan level should be 0 (not the recommended 3) since user chose it
   assert_phpstan_level "0"

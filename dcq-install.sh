@@ -815,7 +815,7 @@ maybe_add_gitignore_reports() {
 
   emit 'Add %s to .gitignore to avoid committing report logs.\n' "$entry"
   printf '\n'
-  if prompt_yes_no "Add '${entry}' to .gitignore?" 1; then
+  if prompt_yes_no "Add '${entry}' to .gitignore?" 0; then
     if [ -f "$gitignore" ]; then
       printf '\n%s\n' "$entry" >>"$gitignore"
     else

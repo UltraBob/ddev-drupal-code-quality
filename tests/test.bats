@@ -1000,8 +1000,15 @@ PY
 
 @test "cspell config is expanded during installation" {
   set -u -o pipefail
-  run ddev add-on get "${DIR}"
+
+  # Provide minimal Drupal core dictionary files so expansion can run.
+  run ddev exec bash -lc 'mkdir -p /var/www/html/web/core/misc/cspell && printf "drupal\n" > /var/www/html/web/core/misc/cspell/drupal-dictionary.txt && printf "dictionary\n" > /var/www/html/web/core/misc/cspell/dictionary.txt'
   assert_success
+
+  run bash -lc "ddev add-on get \"${DIR}\" 2>&1"
+  assert_success
+  assert_output --partial "Expanding .cspell.json with project-specific settings..."
+  assert_output --partial "Successfully expanded .cspell.json"
 
   # Verify expanded dictionaries array includes Drupal and project-words
   run grep -q '"drupal"' .cspell.json
@@ -1029,6 +1036,15 @@ PY
 
   # Verify .cspell-project-words.txt was created
   assert_file_exist ".cspell-project-words.txt"
+}
+
+@test "cspell expansion explains skip when Drupal core dictionaries are missing" {
+  set -u -o pipefail
+
+  run bash -lc "ddev add-on get \"${DIR}\" 2>&1"
+  assert_success
+  assert_output --partial "Expanding .cspell.json with project-specific settings..."
+  assert_output --partial "Skipping CSpell expansion (Drupal core dictionary files are not available at web/core/misc/cspell)."
 }
 
 @test "remove cleans ddev assets and shims" {

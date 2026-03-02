@@ -1040,6 +1040,33 @@ PHP
   esac
 }
 
+@test "phpstan fails with helpful message when project config is missing" {
+  set -u -o pipefail
+  export DCQ_INSTALL_DEPS=skip
+  export DCQ_INSTALL_NODE_DEPS=skip
+  run ddev add-on get "${DIR}"
+  assert_success
+
+  run rm -f phpstan.neon phpstan.neon.dist phpstan.dist.neon
+  assert_success
+
+  mkdir -p vendor/bin
+  cat > vendor/bin/phpstan <<'SH'
+#!/bin/sh
+echo "stub phpstan"
+exit 0
+SH
+  chmod +x vendor/bin/phpstan
+
+  run wait_for_container_path "/var/www/html/vendor/bin/phpstan"
+  assert_success
+
+  run ddev phpstan
+  assert_failure
+  assert_output --partial "PHPStan config file is missing."
+  assert_output --partial "Create phpstan.neon in the project root"
+}
+
 @test "cspell config is expanded during installation" {
   set -u -o pipefail
 

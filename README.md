@@ -189,14 +189,14 @@ The template points PHP tooling at `.ddev/drupal-code-quality/tooling/bin` and J
   - You can still pass explicit paths to narrow runs.
 - PHPStan baseline:
   - Generate a baseline with `ddev phpstan --generate-baseline`.
-  - This writes `phpstan-baseline.neon` at the project root; the wrapper will
-    include it automatically when present.
+  - This writes `phpstan-baseline.neon` at the project root and updates
+    `phpstan.neon` to include it.
   - Use a baseline to suppress known issues in legacy code or core defaults
     (for example, the shipped `settings.php` files), then work it down over
     time. Avoid using it to hide new regressions.
-- PHPStan config fallback:
-  - If no project `phpstan.neon*` exists, the wrapper uses the GitLab template
-    config shipped with the add-on.
+- PHPStan config requirement:
+  - `ddev phpstan` requires project config (`phpstan.neon*`) unless you pass
+    `--configuration <path>`.
 - PHPStan level:
   - GitLab CI template defaults use level 0. The installer can set a local default level (0-10).
 

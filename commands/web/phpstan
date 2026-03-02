@@ -3,17 +3,15 @@
 set -u
 
 PHPSTAN_BIN="vendor/bin/phpstan"
-CI_CONFIG="/mnt/ddev_config/drupal-code-quality/assets/phpstan.neon"
 TMP_FILES=()
 source /mnt/ddev_config/commands/helpers/path-map.sh
-DOCROOT="${DCQ_DOCROOT:-web}"
 
 print_help() {
   cat <<'USAGE'
 Usage: ddev phpstan [args]
 
 Runs PHPStan inside the DDEV web container. This wrapper forwards all arguments
-and applies Drupal CI config discovery when no explicit configuration is given.
+and requires a project PHPStan config unless --configuration is provided.
 USAGE
 }
 
@@ -29,18 +27,6 @@ cleanup() {
       rm -f "$tmp_file"
     fi
   done
-}
-
-config_has_paths() {
-  local config_file="$1"
-  if [ -z "$config_file" ] || [ ! -f "$config_file" ]; then
-    return 1
-  fi
-  # Check if config defines parameters.paths
-  if grep -q '^[[:space:]]*paths:' "$config_file"; then
-    return 0
-  fi
-  return 1
 }
 
 ensure_baseline_include() {
@@ -81,9 +67,7 @@ ensure_baseline_include() {
 has_help=false
 has_version=false
 has_config=false
-has_level=false
 has_json_format=false
-explicit_paths=false
 has_generate_baseline=false
 config_value=""
 
@@ -94,7 +78,6 @@ seen_double_dash=false
 while [ "$index" -lt "$arg_count" ]; do
   arg="${args[$index]}"
   if [ "$seen_double_dash" = true ]; then
-    explicit_paths=true
     break
   fi
   case "$arg" in
@@ -144,19 +127,11 @@ while [ "$index" -lt "$arg_count" ]; do
       ;;
     --error-format=*)
       ;;
-    -l|--level)
-      has_level=true
-      index=$((index + 1))
-      ;;
-    --level=*)
-      has_level=true
-      ;;
     analyze|analyse)
       ;;
     -*)
       ;;
     *)
-      explicit_paths=true
       ;;
   esac
   if [ "$has_help" = true ] || [ "$has_version" = true ]; then
@@ -177,14 +152,7 @@ if [ "$has_version" = true ]; then
 fi
 
 CONFIG_FILE=""
-DEFAULT_PATHS=()
-EXCLUDE_PATHS=(
-  "${DOCROOT}/modules/contrib"
-  "${DOCROOT}/themes/contrib"
-  "${DOCROOT}/sites/*/files/*"
-  "sites/*/files/*"
-)
-# Prefer explicit project configs before falling back to CI template config.
+# Prefer explicit project configs.
 for config_file in phpstan.neon phpstan.neon.dist phpstan.dist.neon; do
   if [ -f "$config_file" ]; then
     CONFIG_FILE="$config_file"
@@ -192,32 +160,17 @@ for config_file in phpstan.neon phpstan.neon.dist phpstan.dist.neon; do
   fi
 done
 
-if [ "$explicit_paths" = false ]; then
-  # Default to custom code only unless the user passes explicit paths.
-  for candidate in "${DOCROOT}/modules/custom" "${DOCROOT}/themes/custom" "${DOCROOT}/profiles/custom"; do
-    if [ -d "$candidate" ]; then
-      DEFAULT_PATHS+=("$candidate")
-    fi
-  done
-  if [ -d "${DOCROOT}/sites" ]; then
-    while IFS= read -r site_file; do
-      DEFAULT_PATHS+=("$site_file")
-    done < <(find "${DOCROOT}/sites" -type f \( -name '*.php' -o -name '*.inc' -o -name '*.module' -o -name '*.install' -o -name '*.theme' -o -name '*.profile' \) ! -path '*/files/*')
-  fi
-fi
-
 BASE_CONFIG=""
 CONFIG_TO_USE=""
 BASE_CONFIG_ABS=""
-BASE_CONFIG_FOR_USE=""
-BASELINE_PATH="/var/www/html/phpstan-baseline.neon"
 
 if [ "$has_config" = true ]; then
   BASE_CONFIG="$config_value"
 elif [ -n "$CONFIG_FILE" ]; then
   BASE_CONFIG="$CONFIG_FILE"
-elif [ -f "$CI_CONFIG" ]; then
-  BASE_CONFIG="$CI_CONFIG"
+else
+  echo "PHPStan config file is missing. Create phpstan.neon in the project root (for example by reinstalling the add-on) or pass --configuration <path>." >&2
+  exit 2
 fi
 
 if [ -n "$BASE_CONFIG" ]; then
@@ -226,24 +179,6 @@ if [ -n "$BASE_CONFIG" ]; then
     BASE_CONFIG_ABS="$(pwd)/$BASE_CONFIG"
   else
     BASE_CONFIG_ABS="$BASE_CONFIG"
-  fi
-fi
-
-if [ -f "$BASELINE_PATH" ]; then
-  BASELINE_INCLUDE="$BASELINE_PATH"
-elif [ -f phpstan-baseline.neon ]; then
-  BASELINE_INCLUDE="/var/www/html/phpstan-baseline.neon"
-else
-  BASELINE_INCLUDE=""
-fi
-
-BASE_CONFIG_FOR_USE="$BASE_CONFIG_ABS"
-if [ -n "$BASE_CONFIG_ABS" ] && [ -n "$BASELINE_INCLUDE" ]; then
-  if ! grep -q 'phpstan-baseline\.neon' "$BASE_CONFIG_ABS"; then
-    BASE_CONFIG_FOR_USE="$(mktemp /tmp/phpstan-config.XXXXXX.neon)"
-    TMP_FILES+=("$BASE_CONFIG_FOR_USE")
-    printf "includes:\n  - %s\n  - %s\n" "$BASE_CONFIG_ABS" "$BASELINE_INCLUDE" > "$BASE_CONFIG_FOR_USE"
-    trap cleanup EXIT
   fi
 fi
 
@@ -265,19 +200,11 @@ while [ "$index" -lt "$arg_count" ]; do
     analyze|analyse)
       ;;
     -c|--configuration)
-      if [ "$has_config" = true ] && [ -n "$BASE_CONFIG_FOR_USE" ]; then
-        FINAL_ARGS+=("$arg" "$BASE_CONFIG_FOR_USE")
-      else
-        FINAL_ARGS+=("$arg" "${args[$((index + 1))]:-}")
-      fi
+      FINAL_ARGS+=("$arg" "${args[$((index + 1))]:-}")
       index=$((index + 1))
       ;;
     --configuration=*)
-      if [ "$has_config" = true ] && [ -n "$BASE_CONFIG_FOR_USE" ]; then
-        FINAL_ARGS+=("--configuration=$BASE_CONFIG_FOR_USE")
-      else
-        FINAL_ARGS+=("$arg")
-      fi
+      FINAL_ARGS+=("$arg")
       ;;
     *)
       FINAL_ARGS+=("$(map_path "$arg")")
@@ -287,52 +214,12 @@ while [ "$index" -lt "$arg_count" ]; do
 done
 
 if [ "$has_config" = false ]; then
-  if [ "$explicit_paths" = false ]; then
-    # Only inject scope/excludes if the config doesn't already define paths
-    if config_has_paths "$BASE_CONFIG_FOR_USE"; then
-      # Config already has paths defined; use it as-is
-      CONFIG_TO_USE="$BASE_CONFIG_FOR_USE"
-    else
-      # Build a minimal config that scopes analysis and excludes contrib/files.
-      CONFIG_TO_USE="$(mktemp /tmp/phpstan-scope.XXXXXX.neon)"
-      TMP_FILES+=("$CONFIG_TO_USE")
-      if [ -n "$BASE_CONFIG_FOR_USE" ]; then
-        printf "includes:\n  - %s\n" "$BASE_CONFIG_FOR_USE" > "$CONFIG_TO_USE"
-      fi
-      project_root="$(pwd)"
-      cat <<'EOF' >> "$CONFIG_TO_USE"
-parameters:
-  excludePaths:
-    analyseAndScan:
-EOF
-      for exclude_path in "${EXCLUDE_PATHS[@]}"; do
-        if [ "${exclude_path#/}" = "$exclude_path" ]; then
-          exclude_path="${project_root}/${exclude_path}"
-        fi
-        printf "      - %s (?)\n" "$exclude_path" >> "$CONFIG_TO_USE"
-      done
-      trap cleanup EXIT
-    fi
-  else
-    CONFIG_TO_USE="$BASE_CONFIG_FOR_USE"
-  fi
+  CONFIG_TO_USE="$BASE_CONFIG_ABS"
 fi
 
 CMD=("$PHPSTAN_BIN" analyze)
 if [ -n "$CONFIG_TO_USE" ]; then
   CMD+=(--configuration "$CONFIG_TO_USE")
-fi
-
-if [ "$has_level" = false ] && [ -z "$CONFIG_FILE" ] && [ "$has_config" = false ] && [ ! -f "$CI_CONFIG" ]; then
-  # Match PHPStan's default when no config is present at all.
-  CMD+=(--level=0)
-fi
-
-# Only add DEFAULT_PATHS if config doesn't define paths
-if [ "$explicit_paths" = false ] && [ "${#DEFAULT_PATHS[@]}" -gt 0 ]; then
-  if ! config_has_paths "$CONFIG_TO_USE" && ! config_has_paths "$BASE_CONFIG_FOR_USE"; then
-    FINAL_ARGS+=("${DEFAULT_PATHS[@]}")
-  fi
 fi
 
 if [ "$has_json_format" = true ]; then

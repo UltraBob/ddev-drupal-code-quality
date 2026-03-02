@@ -821,6 +821,7 @@ with open(path, encoding="utf-8") as fh:
 
 assert data.get("dcq.customSetting") == "keep"
 assert data.get("eslint.nodePath") == "custom"
+assert data.get("eslint.quiet") is True
 PY
   assert_success
 
@@ -902,10 +903,27 @@ PY
   assert_failure
   run grep -q '"eslint.options"' ".vscode/settings.json"
   assert_failure
+  run grep -q '"eslint.quiet": true' ".vscode/settings.json"
+  assert_success
   run grep -q '"stylelint.stylelintPath"' ".vscode/settings.json"
   assert_failure
   run grep -q '"prettier.prettierPath"' ".vscode/settings.json"
   assert_failure
+}
+
+@test "VS Code settings respect DCQ_ESLINT_QUIET override" {
+  set -u -o pipefail
+  export DCQ_INSTALL_DEPS=skip
+  export DCQ_INSTALL_NODE_DEPS=skip
+  export DCQ_INSTALL_IDE_SETTINGS=overwrite
+  export DCQ_ESLINT_QUIET=0
+
+  run ddev add-on get "${DIR}"
+  assert_success
+
+  assert_file_exist ".vscode/settings.json"
+  run grep -q '"eslint.quiet": false' ".vscode/settings.json"
+  assert_success
 }
 
 @test "path map prefers DDEV_HOST_PROJECT_ROOT" {
@@ -953,7 +971,7 @@ PY
   assert_success
   run grep -q "docroot/sites" phpstan.neon
   assert_success
-  run grep -q "docroot/sites/\*/files" phpstan.neon
+  run grep -q "docroot/sites/\*/files/\*" phpstan.neon
   assert_success
 }
 
@@ -995,8 +1013,31 @@ PY
   # Check for excludePaths
   run grep -q "excludePaths:" phpstan.neon
   assert_success
-  run grep -q "web/sites/\*/files" phpstan.neon
+  run grep -q "web/sites/\*/files/\*" phpstan.neon
   assert_success
+}
+
+@test "phpstan excludes nested files directory descendants" {
+  set -u -o pipefail
+  run ddev add-on get "${DIR}"
+  assert_success
+
+  mkdir -p web/sites/default/files/php/twig/test-subdir
+  cat > web/sites/default/files/php/twig/test-subdir/should-not-scan.php <<'PHP'
+<?php
+
+final class DcqPhpstanExcludeProbe {}
+PHP
+
+  run ddev phpstan analyse --debug -c phpstan.neon web/sites
+  assert_failure
+
+  case "$output" in
+    *"test-subdir/should-not-scan.php"*)
+      echo "Expected phpstan excludePaths to skip files descendants under web/sites/*/files."
+      return 1
+      ;;
+  esac
 }
 
 @test "cspell config is expanded during installation" {
@@ -1180,6 +1221,7 @@ PY
   assert_log_contains '"stylelint.stylelintPath": "./node_modules/stylelint"' ".vscode/settings.json"
   assert_log_contains '"prettier.prettierPath": "./node_modules/prettier"' ".vscode/settings.json"
   assert_log_contains '"eslint.nodePath": "node_modules"' ".vscode/settings.json"
+  assert_log_contains '"eslint.quiet": true' ".vscode/settings.json"
   assert_log_contains '"resolvePluginsRelativeTo": "."' ".vscode/settings.json"
 
   run ./.ddev/drupal-code-quality/tooling/bin/phpstan --version

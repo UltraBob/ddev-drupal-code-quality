@@ -3,7 +3,7 @@
 [![last commit](https://img.shields.io/github/last-commit/UltraBob/ddev-drupal-code-quality)](https://github.com/UltraBob/ddev-drupal-code-quality/commits)
 ![GitHub Release](https://img.shields.io/github/v/release/UltraBob/ddev-drupal-code-quality?include_prereleases)
 
-# ddev-drupal-code-quality
+# DDEV Drupal Code Quality
 
 ## Overview
 
@@ -35,9 +35,30 @@ ddev add-on get UltraBob/ddev-drupal-code-quality
 
 # Or, for local development
 ddev add-on get /path/to/ddev-drupal-code-quality
-
-ddev restart
 ```
+
+## Related add-ons and overlap
+
+There is overlap with other Drupal-focused DDEV add-ons. The key difference is
+the project type each one is designed for.
+
+| Add-on | Best for | Typical project layout |
+| --- | --- | --- |
+| `UltraBob/ddev-drupal-code-quality` | Full Drupal website projects where your site repo already contains Drupal code and custom code. | Existing site/project repo; installs code-quality configs and IDE shims in-place. |
+| `ddev/ddev-drupal-contrib` | Drupal contrib module/theme development where the contrib project is the center of the repo. | Contrib project repo with Drupal scaffolded around it (symlink workflow). |
+| `justafish/ddev-drupal-core-dev` / `joachim-n/ddev-drupal-core-dev` | Drupal core development. | Drupal core checkout or core-dev project template. |
+
+### Practical guidance
+
+- Use the add-on that matches your project type (full-site, contrib, or core).
+- These add-ons overlap in commands/configs and are generally not intended to
+  be combined in one project.
+- If you are developing contrib modules/themes, prefer
+  `ddev/ddev-drupal-contrib`.
+- If you are developing Drupal core, prefer `ddev-drupal-core-dev` (see above
+  forks).
+- If you are working on a full website project and want local checks aligned
+  with Drupal.org GitLab template defaults, use this add-on.
 
 ## Repository structure
 
@@ -138,6 +159,21 @@ The template points PHP tooling at `.ddev/drupal-code-quality/tooling/bin` and J
 - ESLint config mode:
   - `ESLINT_CONFIG_MODE=nearest` (default) groups by nearest config file.
   - `ESLINT_CONFIG_MODE=fixed` forces `.eslintrc.passing.json`.
+- ESLint warning visibility (GitLab CI parity):
+  - `DCQ_ESLINT_QUIET=1` (default) adds `--quiet` to `ddev eslint` and
+    `ddev eslint-fix`, so warnings are suppressed.
+  - Set `DCQ_ESLINT_QUIET=0` to include warnings in CLI output. Persist this in
+    `.ddev/config.yaml` (or `.ddev/config.yml`):
+    ```yaml
+    web_environment:
+      - DCQ_ESLINT_QUIET=0
+    ```
+  - VS Code uses its own setting for extension diagnostics. Set
+    `"eslint.quiet": false` in `.vscode/settings.json` to include warnings in
+    the IDE.
+  - Installer behavior: `overwrite` regenerates IDE settings from template;
+    `merge` only adds missing keys and will not change an existing
+    `eslint.quiet` value.
 - CSpell parity:
   - Run `ddev exec php /mnt/ddev_config/drupal-code-quality/tooling/scripts/prepare-cspell.php -s .prepared` once and
     replace `.cspell.json` after reviewing the diff.
@@ -145,6 +181,12 @@ The template points PHP tooling at `.ddev/drupal-code-quality/tooling/bin` and J
     by `.cspell.json` `ignorePaths`. Narrow the scan by passing explicit paths.
   - `.cspell-project-words.txt` is created by the installer (empty) and updated
     by `ddev cspell-suggest` when you accept suggested words.
+- PHPCS / PHPCBF default scope:
+  - When a project `.phpcs.xml` is installed by the add-on, `ddev phpcs` and
+    `ddev phpcbf` with no path default to scanning the configured docroot.
+  - The generated ruleset excludes `__DOCROOT__/core/**`, `**/contrib/**`,
+    `**/node_modules/**`, and `__DOCROOT__/sites/*/files/**`.
+  - You can still pass explicit paths to narrow runs.
 - PHPStan baseline:
   - Generate a baseline with `ddev phpstan --generate-baseline`.
   - This writes `phpstan-baseline.neon` at the project root; the wrapper will
@@ -156,7 +198,7 @@ The template points PHP tooling at `.ddev/drupal-code-quality/tooling/bin` and J
   - If no project `phpstan.neon*` exists, the wrapper uses the GitLab template
     config shipped with the add-on.
 - PHPStan level:
-- GitLab CI template defaults use level 0. The installer can set a local default level (0-10).
+  - GitLab CI template defaults use level 0. The installer can set a local default level (0-10).
 
 ## Installer environment variables
 
@@ -164,6 +206,9 @@ The template points PHP tooling at `.ddev/drupal-code-quality/tooling/bin` and J
 - `DCQ_NONINTERACTIVE=true`: disable prompts; if no overrides are set, applies
   the recommended settings automatically.
 - `DCQ_PHPSTAN_LEVEL`: set `phpstan.neon` level (0-10) without prompting.
+- `DCQ_ESLINT_QUIET`: `1`/unset to suppress ESLint warnings by default
+  (GitLab CI parity), `0` to include warnings. This can be set in
+  `.ddev/config.yaml` under `web_environment`.
 - `DCQ_INSTALL_DEPS`: `install`/`true` to auto-install missing `drupal/core-dev`,
   `skip`/`false` to skip, or unset to prompt when interactive.
 - `DCQ_INSTALL_NODE_DEPS`: `root` to install JS deps in the project root (creates

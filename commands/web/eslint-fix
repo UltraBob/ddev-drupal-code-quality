@@ -11,6 +11,9 @@ Usage: ddev eslint-fix [args]
 
 Applies ESLint fixes directly to files (matches standard eslint --fix behavior).
 
+Defaults:
+  - Uses --quiet (GitLab CI parity). Set DCQ_ESLINT_QUIET=0 to include warnings.
+
 Use --preview to see a patch preview and confirm before applying fixes.
 This generates a patch in dcq-reports/ and prompts for confirmation.
 
@@ -31,6 +34,11 @@ preview_mode=false
 clean_args=()
 ESLINT_TOOLCHAIN="${ESLINT_TOOLCHAIN:-auto}"
 ESLINT_CONFIG_MODE="${ESLINT_CONFIG_MODE:-nearest}"
+DCQ_ESLINT_QUIET="${DCQ_ESLINT_QUIET:-1}"
+QUIET_ENABLED=1
+case "$DCQ_ESLINT_QUIET" in
+  0|false|FALSE|False|no|NO|off|OFF) QUIET_ENABLED=0 ;;
+esac
 
 for arg in "$@"; do
   if [ "$arg" = "--preview" ]; then
@@ -191,7 +199,11 @@ else
   done
 fi
 
-CMD_BASE=(env "NODE_PATH=$NODE_PATH" node "$TOOLCHAIN_BIN" --quiet)
+CMD_BASE=(env "NODE_PATH=$NODE_PATH" node "$TOOLCHAIN_BIN")
+DEFAULT_ARGS=()
+if [ "$QUIET_ENABLED" -eq 1 ]; then
+  DEFAULT_ARGS+=(--quiet)
+fi
 if [ -n "$RESOLVE_PLUGINS_DIR" ]; then
   CMD_BASE+=(--resolve-plugins-relative-to "$RESOLVE_PLUGINS_DIR")
 fi
@@ -204,6 +216,7 @@ if [ "$has_config" = false ] && [ "$ESLINT_CONFIG_MODE" != "nearest" ]; then
   fi
 fi
 CMD_BASE+=(--ext .js,.yml --ignore-pattern "**/node_modules/**")
+CMD_BASE+=("${DEFAULT_ARGS[@]}")
 
 find_nearest_config() {
   local file_path="$1"
@@ -410,11 +423,12 @@ if [ "$preview_mode" = true ]; then
       config_dir="$(dirname "$config_path_abs")"
       plugins_dir="$(resolve_plugins_dir "$config_dir")"
       echo "ESLint-fix preview: config ${config_path_abs} (${#filtered_files[@]} file(s))." >&2
-      group_cmd=(env "NODE_PATH=$NODE_PATH" node "$TOOLCHAIN_BIN" --quiet --config="$config_path_run")
+      group_cmd=(env "NODE_PATH=$NODE_PATH" node "$TOOLCHAIN_BIN" --config="$config_path_run")
       if [ -n "$plugins_dir" ]; then
         group_cmd+=(--resolve-plugins-relative-to "$plugins_dir")
       fi
       group_cmd+=(--ext .js,.yml --ignore-pattern "**/node_modules/**" --fix)
+      group_cmd+=("${DEFAULT_ARGS[@]}")
       (cd "$tmp_root" && "${group_cmd[@]}" "${filtered_files[@]}")
       status=$?
       if [ $status -ne 0 ]; then
@@ -496,11 +510,12 @@ if [ "$preview_mode" = true ]; then
       config_dir="$(dirname "$config_path_abs")"
       plugins_dir="$(resolve_plugins_dir "$config_dir")"
       echo "Applying ESLint fixes: config ${config_path_abs} (${#filtered_files[@]} file(s))." >&2
-      group_cmd=(env "NODE_PATH=$NODE_PATH" node "$TOOLCHAIN_BIN" --quiet --config="$config_path_run")
+      group_cmd=(env "NODE_PATH=$NODE_PATH" node "$TOOLCHAIN_BIN" --config="$config_path_run")
       if [ -n "$plugins_dir" ]; then
         group_cmd+=(--resolve-plugins-relative-to "$plugins_dir")
       fi
       group_cmd+=(--ext .js,.yml --ignore-pattern "**/node_modules/**" --fix)
+      group_cmd+=("${DEFAULT_ARGS[@]}")
       "${group_cmd[@]}" "${filtered_files[@]}"
       status=$?
       if [ $status -ne 0 ]; then
@@ -567,11 +582,12 @@ if [ "$ESLINT_CONFIG_MODE" = "nearest" ]; then
     fi
     config_dir="$(dirname "$config_path_abs")"
     plugins_dir="$(resolve_plugins_dir "$config_dir")"
-    group_cmd=(env "NODE_PATH=$NODE_PATH" node "$TOOLCHAIN_BIN" --quiet --config="$config_path_run")
+    group_cmd=(env "NODE_PATH=$NODE_PATH" node "$TOOLCHAIN_BIN" --config="$config_path_run")
     if [ -n "$plugins_dir" ]; then
       group_cmd+=(--resolve-plugins-relative-to "$plugins_dir")
     fi
     group_cmd+=(--ext .js,.yml --ignore-pattern "**/node_modules/**" --fix)
+    group_cmd+=("${DEFAULT_ARGS[@]}")
     "${group_cmd[@]}" "${filtered_files[@]}"
     status=$?
     if [ $status -ne 0 ]; then

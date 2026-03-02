@@ -181,8 +181,8 @@ DEFAULT_PATHS=()
 EXCLUDE_PATHS=(
   "${DOCROOT}/modules/contrib"
   "${DOCROOT}/themes/contrib"
-  "${DOCROOT}/sites/*/files"
-  "sites/*/files"
+  "${DOCROOT}/sites/*/files/*"
+  "sites/*/files/*"
 )
 # Prefer explicit project configs before falling back to CI template config.
 for config_file in phpstan.neon phpstan.neon.dist phpstan.dist.neon; do

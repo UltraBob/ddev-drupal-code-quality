@@ -962,8 +962,8 @@ expand_cspell_config() {
 
   emit 'Expanding .cspell.json with project-specific settings...\n'
 
-  if ! "$ddev_cmd" exec test -f "$container_cspell" >/dev/null 2>&1; then
-    emit 'Skipping CSpell expansion (.cspell.json is not visible in the container yet).\n'
+  if ! wait_for_container_file "$ddev_cmd" "$container_cspell" 20 1; then
+    emit 'Skipping CSpell expansion (.cspell.json did not become visible in the container after waiting).\n'
     return 0
   fi
 
@@ -1042,6 +1042,23 @@ backup_file() {
 
 command_available() {
   command -v "$1" >/dev/null 2>&1
+}
+
+wait_for_container_file() {
+  local ddev_cmd="$1"
+  local path="$2"
+  local max_attempts="${3:-20}"
+  local delay_seconds="${4:-1}"
+  local attempts=0
+
+  while [ "$attempts" -lt "$max_attempts" ]; do
+    if "$ddev_cmd" exec test -f "$path" >/dev/null 2>&1; then
+      return 0
+    fi
+    attempts=$((attempts + 1))
+    sleep "$delay_seconds"
+  done
+  return 1
 }
 
 detect_package_manager() {

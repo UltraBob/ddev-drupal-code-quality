@@ -12,14 +12,6 @@ if [ -z "$DOCROOT" ]; then
   DOCROOT="web"
 fi
 
-# Collect custom code paths once so tools can reuse them.
-CUSTOM_PATHS=()
-for candidate in "${DOCROOT}/modules/custom" "${DOCROOT}/themes/custom" "${DOCROOT}/profiles/custom"; do
-  if [ -d "$candidate" ]; then
-    CUSTOM_PATHS+=("$candidate")
-  fi
-done
-
 # Ordered list of baseline Drupal.org GitLab CI template default tools.
 TOOLS=(
   "composer-validate"
@@ -82,18 +74,7 @@ for tool in "${ALL_TOOLS[@]}"; do
     continue
   fi
 
-  if [ "$tool" = "phpcs" ] && [ "${#CUSTOM_PATHS[@]}" -eq 0 ]; then
-    # Avoid failing when there is no custom code to lint.
-    echo "SKIP: no custom code directories found for phpcs." | tee -a "$log_file"
-    STATUS["$tool"]=SKIP
-    continue
-  fi
-
-  if [ "$tool" = "phpcs" ]; then
-    "$tool_path" "${CUSTOM_PATHS[@]}" >"$log_file" 2>&1
-  else
-    "$tool_path" >"$log_file" 2>&1
-  fi
+  "$tool_path" >"$log_file" 2>&1
   exit_code=$?
   if [ "$exit_code" -eq 0 ]; then
     STATUS["$tool"]=PASS

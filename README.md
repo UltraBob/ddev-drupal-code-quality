@@ -158,7 +158,8 @@ The template points PHP tooling at `.ddev/drupal-code-quality/tooling/bin` and J
   - `ESLINT_TOOLCHAIN=root` forces project root toolchain.
 - ESLint config mode:
   - `ESLINT_CONFIG_MODE=nearest` (default) groups by nearest config file.
-  - `ESLINT_CONFIG_MODE=fixed` forces `.eslintrc.passing.json`.
+  - `ESLINT_CONFIG_MODE=fixed` prefers `.eslintrc.passing.json`, then
+    `.eslintrc.json` in the project root.
 - ESLint warning visibility (GitLab CI parity):
   - `DCQ_ESLINT_QUIET=1` (default) adds `--quiet` to `ddev eslint` and
     `ddev eslint-fix`, so warnings are suppressed.
@@ -177,8 +178,8 @@ The template points PHP tooling at `.ddev/drupal-code-quality/tooling/bin` and J
 - CSpell parity:
   - Run `ddev exec php /mnt/ddev_config/drupal-code-quality/tooling/scripts/prepare-cspell.php -s .prepared` once and
     replace `.cspell.json` after reviewing the diff.
-  - `ddev cspell` runs from the repo root (`.`) by default; scope is controlled
-    by `.cspell.json` `ignorePaths`. Narrow the scan by passing explicit paths.
+  - `ddev cspell` defaults to custom code plus `sites` under the configured
+    docroot, excluding `sites/*/files/**`, when no paths are passed.
   - `.cspell-project-words.txt` is created by the installer (empty) and updated
     by `ddev cspell-suggest` when you accept suggested words.
 - PHPCS / PHPCBF default scope:

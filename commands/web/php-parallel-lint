@@ -46,17 +46,17 @@ if [ -z "$DOCROOT" ]; then
 fi
 
 DEFAULT_FILES=()
-for candidate in "${DOCROOT}/modules/custom" "${DOCROOT}/themes/custom" "${DOCROOT}/profiles/custom"; do
+for candidate in "${DOCROOT}/modules/custom" "${DOCROOT}/themes/custom" "${DOCROOT}/profiles/custom" "${DOCROOT}/sites"; do
   if [ -d "$candidate" ]; then
     while IFS= read -r file_path; do
       DEFAULT_FILES+=("$file_path")
-    done < <(find "$candidate" -type f \( -name '*.php' -o -name '*.inc' -o -name '*.module' -o -name '*.install' -o -name '*.theme' -o -name '*.profile' \))
+    done < <(find "$candidate" \( -path '*/sites/*/files/*' -o -path '*/node_modules/*' \) -prune -o -type f \( -name '*.php' -o -name '*.inc' -o -name '*.module' -o -name '*.install' -o -name '*.theme' -o -name '*.profile' \) -print)
   fi
  done
 
 if [ "${#DEFAULT_FILES[@]}" -eq 0 ] && [ "$#" -eq 0 ]; then
   # Skip quietly if no custom PHP files are present.
-  echo "No custom PHP files found under ${DOCROOT}/modules/custom, ${DOCROOT}/themes/custom, or ${DOCROOT}/profiles/custom. Nothing to check." >&2
+  echo "No default PHP files found under ${DOCROOT}/modules/custom, ${DOCROOT}/themes/custom, ${DOCROOT}/profiles/custom, or ${DOCROOT}/sites (excluding sites/*/files). Nothing to check." >&2
   exit 0
 fi
 

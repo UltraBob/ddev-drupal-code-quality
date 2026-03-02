@@ -192,7 +192,7 @@ normalize_docroot_arg() {
     arg="${arg#/var/www/html/}"
   fi
   if [ "$DOCROOT" != "web" ] && [[ "$arg" == web/* ]]; then
-    arg="${DOCROOT}/${path#web/}"
+    arg="${DOCROOT}/${arg#web/}"
   fi
   if [[ "$arg" == "${DOCROOT}/"* ]]; then
     arg="${arg#${DOCROOT}/}"

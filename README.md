@@ -50,7 +50,8 @@ During installation, the add-on copies Drupal.org GitLab CI template default
 config files into the project root. If conflicts are detected, you can choose to
 back up and replace, skip, or abort. Skipping a config may diverge from the
 Drupal.org GitLab CI template defaults. The installer will prompt for:
-- Accept recommended settings (default: no). Choosing yes applies the
+- A pre-prompt summary of recommended defaults.
+- Accept recommended settings (default: yes). Press Enter to apply the
   recommended defaults without further prompts.
 - Conflict handling (default: skip unless you choose replace/abort).
 - PHP tooling dependencies (install `drupal/core-dev` or run `ddev composer install`).

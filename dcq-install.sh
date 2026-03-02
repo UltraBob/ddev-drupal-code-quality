@@ -509,7 +509,7 @@ prompt_node_install_action() {
 
   emit 'ESLint, Prettier, and Stylelint require several packages to function properly.\n'
   emit '\n'
-  emit '[i]nstall these in the project root, [s]kip node module installation (default: install): '
+  emit '[i]nstall in the project root, [s]kip for now (default: install): '
   if ! IFS= read -r -u "$PROMPT_IN_FD" choice; then
     choice=""
   fi
@@ -602,24 +602,31 @@ prompt_yes_no() {
 }
 
 prompt_recommended_settings() {
-  # Prompt for accepting recommended settings (default: no).
+  # Prompt for accepting recommended settings (default: yes).
   if [ "${PROMPT_AVAILABLE:-0}" -ne 1 ]; then
     return 1
   fi
 
-  printf 'Accept recommended settings? (y/N) ' >&"$PROMPT_OUT_FD"
-  local answer=""
-  if ! IFS= read -r -u "$PROMPT_IN_FD" answer; then
-    answer=""
+  if prompt_yes_no "Accept recommended settings for this install?" 0; then
+    return 0
   fi
-  answer="$(string_lower "$answer")"
-  if [ -z "$answer" ]; then
-    return 1
-  fi
-  case "$answer" in
-    y|yes) return 0 ;;
-  esac
   return 1
+}
+
+print_recommended_settings_summary() {
+  # Show what the one-step recommended install will do before prompting.
+  if [ "${PROMPT_AVAILABLE:-0}" -ne 1 ]; then
+    return
+  fi
+
+  emit '\nRecommended defaults for this install:\n'
+  emit '  - Conflict handling: replace existing files and create backups.\n'
+  emit '  - PHP tooling: install missing drupal/core-dev dependencies.\n'
+  emit '  - Node tooling: install in the project root.\n'
+  emit '  - PHPStan: set phpstan.neon level to 3.\n'
+  emit '  - IDE settings: merge VS Code/Codium settings and extensions.\n'
+  emit "  - Reports: add 'dcq-reports/' to .gitignore.\n"
+  emit 'Override any of these with DCQ_INSTALL_* env vars.\n'
 }
 
 set_default_env() {
@@ -1586,8 +1593,11 @@ fi
 # In non-interactive mode, or if user accepts, set recommended defaults for any unset vars.
 recommended_mode=0
 if [ "$non_interactive" -eq 0 ] && [ "${PROMPT_AVAILABLE:-0}" -eq 1 ]; then
+  print_recommended_settings_summary
   if prompt_recommended_settings; then
     recommended_mode=1
+  else
+    emit 'Using manual mode. You will be prompted for each setting.\n'
   fi
 fi
 
@@ -1681,9 +1691,9 @@ if [ "${#missing_tools[@]}" -gt 0 ]; then
     fi
 
     if [ "$action" = "install" ]; then
-      question="Recommend installing PHP dev tools from composer.lock. Proceed?"
+      question="Install PHP dev tools from composer.lock now?"
     else
-      question="Recommend installing drupal/core-dev as a dev dependency to install PHP code quality tools and Drupal coding standards. Proceed?"
+      question="Install drupal/core-dev now to provide PHP code quality tools and Drupal coding standards?"
     fi
 
     should_install=0

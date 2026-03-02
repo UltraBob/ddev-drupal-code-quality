@@ -975,6 +975,40 @@ PY
   assert_success
 }
 
+@test "stylelint-fix rewrites explicit web paths with non-web docroot" {
+  set -u -o pipefail
+  mkdir -p docroot
+  run ddev config --docroot=docroot
+  assert_success
+  retry_ddev_command ddev restart -y
+  assert_success
+
+  run ddev add-on get "${DIR}"
+  assert_success
+
+  mkdir -p node_modules/stylelint/bin
+  cat > node_modules/stylelint/bin/stylelint.mjs <<'JS'
+#!/usr/bin/env node
+process.exit(0);
+JS
+  chmod +x node_modules/stylelint/bin/stylelint.mjs
+
+  mkdir -p docroot/themes/custom/dcq_theme/css
+  cat > docroot/themes/custom/dcq_theme/css/fixable.css <<'CSS'
+.dcq-test {
+  color: red;
+}
+CSS
+
+  run wait_for_container_path "/var/www/html/node_modules/stylelint/bin/stylelint.mjs"
+  assert_success
+  run wait_for_container_path "/var/www/html/docroot/themes/custom/dcq_theme/css/fixable.css"
+  assert_success
+
+  run ddev stylelint-fix web/themes/custom/dcq_theme/css/fixable.css
+  assert_success
+}
+
 @test "install from directory with phpstan level override" {
   set -u -o pipefail
   export DCQ_PHPSTAN_LEVEL=3

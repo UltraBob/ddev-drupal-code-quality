@@ -632,7 +632,7 @@ teardown() {
   health_checks
 }
 
-@test "installer prompt accepts recommended settings" {
+@test "installer prompt defaults to recommended settings" {
   set -u -o pipefail
   unset DCQ_NONINTERACTIVE
   unset DDEV_NONINTERACTIVE
@@ -659,7 +659,7 @@ import select
 import sys
 
 cmd = ["ddev", "add-on", "get", "${DIR}"]
-prompt = b"Accept recommended settings? (y/N)"
+prompt = b"Accept recommended settings for this install? [Y/n]"
 sent = False
 buf = b""
 
@@ -678,7 +678,7 @@ try:
             sys.stdout.buffer.flush()
             buf += data
             if (not sent) and (prompt in buf):
-                os.write(fd, b"y\\n")
+                os.write(fd, b"\\n")
                 sent = True
 except OSError:
     pass
@@ -688,7 +688,8 @@ code = os.waitstatus_to_exitcode(status)
 sys.exit(code)
 PY
   assert_success
-  assert_output --partial "Accept recommended settings? (y/N)"
+  assert_output --partial "Recommended defaults for this install:"
+  assert_output --partial "Accept recommended settings for this install? [Y/n]"
   assert_phpstan_level "3"
   if command -v rg >/dev/null 2>&1; then
     run rg -n "^dcq-reports/$" ".gitignore"
@@ -730,8 +731,8 @@ import sys
 cmd = ["ddev", "add-on", "get", "${DIR}"]
 # Answer 'n' to recommended settings, then respond to individual prompts
 responses = {
-    b"Accept recommended settings? (y/N)": b"n\n",
-    b"Recommend installing drupal/core-dev as a dev dependency": b"n\n",
+    b"Accept recommended settings for this install? [Y/n]": b"n\n",
+    b"Install drupal/core-dev now to provide PHP code quality tools": b"n\n",
     b"back up and replace, skip, or abort? [replace/skip/abort]": b"skip\n",
     b"Install Node toolchain": b"n\n",
     b"PHPStan level": b"0\n",
@@ -771,11 +772,13 @@ code = os.waitstatus_to_exitcode(status)
 sys.exit(code)
 PY
   assert_success
-  assert_output --partial "Accept recommended settings? (y/N)"
+  assert_output --partial "Recommended defaults for this install:"
+  assert_output --partial "Accept recommended settings for this install? [Y/n]"
   # Verify individual prompts appeared (user declined recommended settings)
-  assert_output --partial "Recommend installing drupal/core-dev as a dev dependency"
+  assert_output --partial "Install drupal/core-dev now to provide PHP code quality tools"
   assert_output --partial "VS Code/Codium settings/extensions: choose merge, overwrite (with backup), or skip."
   assert_output --partial "Skipping IDE settings/extensions install."
+  assert_output --partial "Add 'dcq-reports/' to .gitignore? [Y/n]"
   assert_output --partial "Set phpstan.neon level"
   # PHPStan level should be 0 (not the recommended 3) since user chose it
   assert_phpstan_level "0"
@@ -1039,8 +1042,15 @@ PHP
 
 @test "cspell config is expanded during installation" {
   set -u -o pipefail
-  run ddev add-on get "${DIR}"
+
+  # Provide minimal Drupal core dictionary files so expansion can run.
+  run ddev exec bash -lc 'mkdir -p /var/www/html/web/core/misc/cspell && printf "drupal\n" > /var/www/html/web/core/misc/cspell/drupal-dictionary.txt && printf "dictionary\n" > /var/www/html/web/core/misc/cspell/dictionary.txt'
   assert_success
+
+  run bash -lc "ddev add-on get \"${DIR}\" 2>&1"
+  assert_success
+  assert_output --partial "Expanding .cspell.json with project-specific settings..."
+  assert_output --partial "Successfully expanded .cspell.json"
 
   # Verify expanded dictionaries array includes Drupal and project-words
   run grep -q '"drupal"' .cspell.json
@@ -1068,6 +1078,15 @@ PHP
 
   # Verify .cspell-project-words.txt was created
   assert_file_exist ".cspell-project-words.txt"
+}
+
+@test "cspell expansion explains skip when Drupal core dictionaries are missing" {
+  set -u -o pipefail
+
+  run bash -lc "ddev add-on get \"${DIR}\" 2>&1"
+  assert_success
+  assert_output --partial "Expanding .cspell.json with project-specific settings..."
+  assert_output --partial "Skipping CSpell expansion (Drupal core dictionary files are not available at web/core/misc/cspell)."
 }
 
 @test "remove cleans ddev assets and shims" {

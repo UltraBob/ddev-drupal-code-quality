@@ -509,7 +509,7 @@ prompt_node_install_action() {
 
   emit 'ESLint, Prettier, and Stylelint require several packages to function properly.\n'
   emit '\n'
-  emit '[i]nstall these in the project root, [s]kip node module installation (default: install): '
+  emit '[i]nstall in the project root, [s]kip (default: install): '
   if ! IFS= read -r -u "$PROMPT_IN_FD" choice; then
     choice=""
   fi
@@ -602,24 +602,30 @@ prompt_yes_no() {
 }
 
 prompt_recommended_settings() {
-  # Prompt for accepting recommended settings (default: no).
+  # Prompt for accepting recommended settings (default: yes).
   if [ "${PROMPT_AVAILABLE:-0}" -ne 1 ]; then
     return 1
   fi
 
-  printf 'Accept recommended settings? (y/N) ' >&"$PROMPT_OUT_FD"
-  local answer=""
-  if ! IFS= read -r -u "$PROMPT_IN_FD" answer; then
-    answer=""
+  if prompt_yes_no "Accept recommended settings for this install?" 0; then
+    return 0
   fi
-  answer="$(string_lower "$answer")"
-  if [ -z "$answer" ]; then
-    return 1
-  fi
-  case "$answer" in
-    y|yes) return 0 ;;
-  esac
   return 1
+}
+
+print_recommended_settings_summary() {
+  # Show what the one-step recommended install will do before prompting.
+  if [ "${PROMPT_AVAILABLE:-0}" -ne 1 ]; then
+    return
+  fi
+
+  emit '\nRecommended defaults for this install:\n'
+  emit '  - If a copied config file already exists, the installer will create a backup and then replace the file.\n'
+  emit '  - Install missing PHP tooling via drupal/core-dev, including PHPStan, PHPCS, PHPCBF, and Drupal coding standards.\n'
+  emit '  - Install Node tooling in the project root, including ESLint, Stylelint, Prettier, and CSpell dependencies.\n'
+  emit '  - Set phpstan.neon level to 3 as a practical local default.\n'
+  emit '  - Merge DCQ VS Code/Codium settings into .vscode/settings.json and extension recommendations into .vscode/extensions.json.\n'
+  emit "  - Add 'dcq-reports/' to .gitignore so generated check logs and patch previews are not committed.\n"
 }
 
 set_default_env() {
@@ -809,7 +815,7 @@ maybe_add_gitignore_reports() {
 
   emit 'Add %s to .gitignore to avoid committing report logs.\n' "$entry"
   printf '\n'
-  if prompt_yes_no "Add '${entry}' to .gitignore?" 1; then
+  if prompt_yes_no "Add '${entry}' to .gitignore?" 0; then
     if [ -f "$gitignore" ]; then
       printf '\n%s\n' "$entry" >>"$gitignore"
     else
@@ -929,6 +935,11 @@ expand_cspell_config() {
   local ddev_approot="${DDEV_APPROOT:-$app_root}"
   local prepare_script="${ddev_approot}/.ddev/drupal-code-quality/tooling/scripts/prepare-cspell.php"
   local cspell_config="${app_root%/}/.cspell.json"
+  local docroot="${DCQ_DOCROOT:-web}"
+  local ddev_cmd="${DDEV_EXECUTABLE:-ddev}"
+  local container_cspell="/var/www/html/.cspell.json"
+  local container_core_cspell_dir="/var/www/html/${docroot}/core/misc/cspell"
+  local container_prepare_script="/mnt/ddev_config/drupal-code-quality/tooling/scripts/prepare-cspell.php"
 
 
   # Check if CSpell config exists
@@ -944,28 +955,36 @@ expand_cspell_config() {
   fi
 
   # Run prepare-cspell.php in the container to expand .cspell.json
-  if command_available "${DDEV_EXECUTABLE:-ddev}"; then
-    emit 'Expanding .cspell.json with project-specific settings...\n'
-    local ddev_cmd="${DDEV_EXECUTABLE:-ddev}"
+  if ! command_available "$ddev_cmd"; then
+    emit 'DDEV not available; skipping CSpell expansion.\n'
+    return 0
+  fi
 
-    # Run the script in container from project root
-    # Capture both stdout and stderr, but don't fail the installer if it errors
-    # Pass the docroot via _WEB_ROOT environment variable
-    local output
-    if output=$("$ddev_cmd" exec bash -c "cd /var/www/html && export _WEB_ROOT='${DCQ_DOCROOT:-web}' && php .ddev/drupal-code-quality/tooling/scripts/prepare-cspell.php" 2>&1); then
-      if echo "$output" | grep -q "Writing json"; then
-        emit 'Successfully expanded .cspell.json\n'
-      else
-        emit 'CSpell expansion completed (no changes needed)\n'
-      fi
+  emit 'Expanding .cspell.json with project-specific settings...\n'
+
+  if ! wait_for_container_file "$ddev_cmd" "$container_cspell" 20 1; then
+    emit 'Skipping CSpell expansion (.cspell.json did not become visible in the container after waiting).\n'
+    return 0
+  fi
+
+  if ! "$ddev_cmd" exec test -f "${container_core_cspell_dir}/dictionary.txt" >/dev/null 2>&1 \
+    || ! "$ddev_cmd" exec test -f "${container_core_cspell_dir}/drupal-dictionary.txt" >/dev/null 2>&1; then
+    emit 'Skipping CSpell expansion (Drupal core dictionary files are not available at %s).\n' "${docroot}/core/misc/cspell"
+    return 0
+  fi
+
+  local output
+  if output=$("$ddev_cmd" exec bash -lc "cd /var/www/html && export _WEB_ROOT='${docroot}' _CSPELL_DICTIONARY='.cspell-project-words.txt' && php '${container_prepare_script}'" 2>&1); then
+    if echo "$output" | grep -q "Writing json"; then
+      emit 'Successfully expanded .cspell.json\n'
     else
-      emit 'Skipping CSpell expansion: prepare-cspell.php failed.\n'
-      if [ -n "$output" ]; then
-        emit '%s\n' "$output"
-      fi
+      emit 'CSpell expansion completed (no changes needed)\n'
     fi
   else
-    emit 'DDEV not available; skipping CSpell expansion.\n'
+    emit 'Skipping CSpell expansion (prepare-cspell.php failed).\n'
+    if truthy "${DCQ_VERBOSE:-0}" && [ -n "$output" ]; then
+      emit 'CSpell expansion error output:\n%s\n' "$output"
+    fi
   fi
 
   # Always return success - CSpell expansion is optional
@@ -1023,6 +1042,23 @@ backup_file() {
 
 command_available() {
   command -v "$1" >/dev/null 2>&1
+}
+
+wait_for_container_file() {
+  local ddev_cmd="$1"
+  local path="$2"
+  local max_attempts="${3:-20}"
+  local delay_seconds="${4:-1}"
+  local attempts=0
+
+  while [ "$attempts" -lt "$max_attempts" ]; do
+    if "$ddev_cmd" exec test -f "$path" >/dev/null 2>&1; then
+      return 0
+    fi
+    attempts=$((attempts + 1))
+    sleep "$delay_seconds"
+  done
+  return 1
 }
 
 detect_package_manager() {
@@ -1616,8 +1652,11 @@ fi
 # In non-interactive mode, or if user accepts, set recommended defaults for any unset vars.
 recommended_mode=0
 if [ "$non_interactive" -eq 0 ] && [ "${PROMPT_AVAILABLE:-0}" -eq 1 ]; then
+  print_recommended_settings_summary
   if prompt_recommended_settings; then
     recommended_mode=1
+  else
+    emit 'Using manual mode. You will be prompted for each setting.\n'
   fi
 fi
 
@@ -1711,9 +1750,9 @@ if [ "${#missing_tools[@]}" -gt 0 ]; then
     fi
 
     if [ "$action" = "install" ]; then
-      question="Recommend installing PHP dev tools from composer.lock. Proceed?"
+      question="Install PHP dev tools from composer.lock now?"
     else
-      question="Recommend installing drupal/core-dev as a dev dependency to install PHP code quality tools and Drupal coding standards. Proceed?"
+      question="Install drupal/core-dev now to provide PHP code quality tools and Drupal coding standards?"
     fi
 
     should_install=0

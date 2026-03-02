@@ -1463,7 +1463,12 @@ SH
   run ./.ddev/drupal-code-quality/tooling/bin/cspell
   assert_failure
   assert_output --partial "modlue"
-  assert_output --partial "roottypo"
+  case "$output" in
+    *"roottypo"*)
+      echo "Expected default cspell scope to exclude project-root files like cspell-test.md."
+      return 1
+      ;;
+  esac
 
   before_phpcbf="$(read_container_file /var/www/html/web/modules/custom/dcq_test/dcq_fixable.php)"
   run ./.ddev/drupal-code-quality/tooling/bin/phpcbf web/modules/custom/dcq_test/dcq_fixable.php

@@ -111,10 +111,7 @@ fi
 
 normalize_path() {
   local path="$1"
-  path="$(map_path "$path")"
-  if [[ "$path" == /var/www/html/* ]]; then
-    path="${path#/var/www/html/}"
-  fi
+  path="$(map_to_project_relative "$path")"
   if [ "$DOCROOT" != "web" ] && [[ "$path" == web/* ]]; then
     path="${DOCROOT}/${path#web/}"
   fi
@@ -175,10 +172,7 @@ fi
 FINAL_ARGS=()
 normalize_config_path() {
   local path="$1"
-  path="$(map_path "$path")"
-  if [[ "$path" == /var/www/html/* ]]; then
-    path="${path#/var/www/html/}"
-  fi
+  path="$(map_to_project_relative "$path")"
   if [ "$DOCROOT" != "web" ] && [[ "$path" == web/* ]]; then
     path="${DOCROOT}/${path#web/}"
   fi
@@ -187,10 +181,7 @@ normalize_config_path() {
 
 normalize_docroot_arg() {
   local arg="$1"
-  arg="$(map_path "$arg")"
-  if [[ "$arg" == /var/www/html/* ]]; then
-    arg="${arg#/var/www/html/}"
-  fi
+  arg="$(map_to_project_relative "$arg")"
   if [ "$DOCROOT" != "web" ] && [[ "$arg" == web/* ]]; then
     arg="${DOCROOT}/${arg#web/}"
   fi

@@ -223,9 +223,6 @@ if [ -n "$CONFIG_TO_USE" ]; then
 fi
 
 if [ "$has_json_format" = true ]; then
-  if [ -n "${DDEV_HOST_PROJECT_ROOT:-}" ]; then
-    HOST_ROOT="$DDEV_HOST_PROJECT_ROOT"
-  fi
   JSON_OUTPUT="$(mktemp /tmp/phpstan-json.XXXXXX)"
   TMP_FILES+=("$JSON_OUTPUT")
   "${CMD[@]}" "${FINAL_ARGS[@]}" > "$JSON_OUTPUT"

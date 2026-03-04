@@ -109,10 +109,7 @@ fi
 
 normalize_prettier_path() {
   local path="$1"
-  path="$(map_path "$path")"
-  if [[ "$path" == /var/www/html/* ]]; then
-    path="${path#/var/www/html/}"
-  fi
+  path="$(map_to_project_relative "$path")"
   if [ "$DOCROOT" != "web" ] && [[ "$path" == web/* ]]; then
     path="${DOCROOT}/${path#web/}"
   fi

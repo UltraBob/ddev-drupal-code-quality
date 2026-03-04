@@ -196,10 +196,7 @@ resolve_plugins_dir() {
 normalize_path() {
   local path="$1"
   # Convert container/short paths into repo-relative paths for consistent matching.
-  path="$(map_path "$path")"
-  if [[ "$path" == /var/www/html/* ]]; then
-    path="${path#/var/www/html/}"
-  fi
+  path="$(map_to_project_relative "$path")"
   if [ "$DOCROOT" != "web" ] && [[ "$path" == web/* ]]; then
     path="${DOCROOT}/${path#web/}"
   fi
@@ -220,10 +217,7 @@ normalize_path() {
 normalize_config_path() {
   local path="$1"
   # ESLint --config paths need to be relative to the repo root in the container.
-  path="$(map_path "$path")"
-  if [[ "$path" == /var/www/html/* ]]; then
-    path="${path#/var/www/html/}"
-  fi
+  path="$(map_to_project_relative "$path")"
   if [ "$DOCROOT" != "web" ] && [[ "$path" == web/* ]]; then
     path="${DOCROOT}/${path#web/}"
   fi

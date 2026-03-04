@@ -155,10 +155,7 @@ config_supports_scss() {
 
 normalize_docroot_arg() {
   local arg="$1"
-  arg="$(map_path "$arg")"
-  if [[ "$arg" == /var/www/html/* ]]; then
-    arg="${arg#/var/www/html/}"
-  fi
+  arg="$(map_to_project_relative "$arg")"
   if [ "$DOCROOT" != "web" ] && [[ "$arg" == web/* ]]; then
     arg="${DOCROOT}/${arg#web/}"
   fi

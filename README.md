@@ -27,14 +27,13 @@ Tools covered:
 ## Installation
 
 ```bash
-# Install from GitHub (current)
+# Install from GitHub
 ddev add-on get UltraBob/ddev-drupal-code-quality
-
-# If/when published to the add-on registry:
-# ddev add-on get ddev-drupal-code-quality
+ddev restart
 
 # Or, for local development
 ddev add-on get /path/to/ddev-drupal-code-quality
+ddev restart
 ```
 
 ## Related add-ons and overlap
@@ -44,9 +43,9 @@ the project type each one is designed for.
 
 | Add-on | Best for | Typical project layout |
 | --- | --- | --- |
-| `UltraBob/ddev-drupal-code-quality` | Full Drupal website projects where your site repo already contains Drupal code and custom code. | Existing site/project repo; installs code-quality configs and IDE shims in-place. |
-| `ddev/ddev-drupal-contrib` | Drupal contrib module/theme development where the contrib project is the center of the repo. | Contrib project repo with Drupal scaffolded around it (symlink workflow). |
-| `justafish/ddev-drupal-core-dev` / `joachim-n/ddev-drupal-core-dev` | Drupal core development. | Drupal core checkout or core-dev project template. |
+| [`UltraBob/ddev-drupal-code-quality`](https://github.com/UltraBob/ddev-drupal-code-quality) | Full Drupal website projects where your site repo already contains Drupal code and custom code. | Existing site/project repo; installs code-quality configs and IDE shims in-place. |
+| [`ddev/ddev-drupal-contrib`](https://github.com/ddev/ddev-drupal-contrib) | Drupal contrib module/theme development where the contrib project is the center of the repo. | Contrib project repo with Drupal scaffolded around it (symlink workflow). |
+| [`justafish/ddev-drupal-core-dev`](https://github.com/justafish/ddev-drupal-core-dev) / [`joachim-n/ddev-drupal-core-dev`](https://github.com/joachim-n/ddev-drupal-core-dev) | Drupal core development. | Drupal core checkout or core-dev project template. |
 
 ### Practical guidance
 

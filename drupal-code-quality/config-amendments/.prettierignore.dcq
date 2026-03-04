@@ -1,0 +1,9 @@
+#ddev-generated
+# DCQ default exclusions for local formatting scope.
+# Keep custom code and site config in scope by excluding dependency/generated trees.
+**/core/**
+**/contrib/**
+**/libraries/**
+**/node_modules/**
+vendor/**
+**/sites/*/files/**

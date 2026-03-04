@@ -182,18 +182,7 @@ while [ "$index" -lt "$arg_count" ]; do
 done
 
 if [ "$explicit_paths" = false ]; then
-  DEFAULT_PATHS=()
-  for candidate in "${DOCROOT}/modules/custom" "${DOCROOT}/themes/custom" "${DOCROOT}/profiles/custom" "${DOCROOT}/sites"; do
-    if [ -d "${PROJECT_ROOT}/${candidate}" ]; then
-      DEFAULT_PATHS+=("$candidate")
-    fi
-  done
-  if [ "${#DEFAULT_PATHS[@]}" -eq 0 ]; then
-    echo "No custom code or sites directories found under ${DOCROOT}. Nothing to check." >&2
-    exit 0
-  fi
-  POSITIONAL_ARGS=("${DEFAULT_PATHS[@]}")
-  FLAG_ARGS+=(--exclude "${DOCROOT}/sites/*/files/**")
+  POSITIONAL_ARGS=(".")
 fi
 
 if [ "$explicit_paths" = false ]; then

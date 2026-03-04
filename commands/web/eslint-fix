@@ -191,12 +191,7 @@ if [ "${#RAW_PATHS[@]}" -gt 0 ]; then
     TARGET_PREFIXES+=("$(normalize_path "$raw")")
   done
 else
-  # Default to custom code when no explicit paths are passed.
-  for candidate in "${DOCROOT}/modules/custom" "${DOCROOT}/themes/custom" "${DOCROOT}/profiles/custom" "${DOCROOT}/sites"; do
-    if [ -d "$candidate" ]; then
-      TARGET_PREFIXES+=("$candidate")
-    fi
-  done
+  TARGET_PREFIXES+=("$DOCROOT")
 fi
 
 CMD_BASE=(env "NODE_PATH=$NODE_PATH" node "$TOOLCHAIN_BIN")
@@ -220,7 +215,7 @@ if [ "$has_config" = false ] && [ "$ESLINT_CONFIG_MODE" != "nearest" ]; then
   fi
   CMD_BASE+=(--config="$FIXED_CONFIG")
 fi
-CMD_BASE+=(--ext .js,.yml --ignore-pattern "**/node_modules/**")
+CMD_BASE+=(--ext .js,.yml)
 CMD_BASE+=("${DEFAULT_ARGS[@]}")
 
 find_nearest_config() {
@@ -343,17 +338,11 @@ fi
 
 DEFAULT_FILES=()
 if [ "$explicit_paths" = false ]; then
-  for candidate in "${DOCROOT}/modules/custom" "${DOCROOT}/themes/custom" "${DOCROOT}/profiles/custom" "${DOCROOT}/sites"; do
-    if [ -d "$candidate" ]; then
-      while IFS= read -r file_path; do
-        DEFAULT_FILES+=("$file_path")
-      done < <(find "$candidate" \( -path '*/node_modules/*' -o -path '*/sites/*/files/*' \) -prune -o -type f \( -name '*.js' -o -name '*.yml' \) -print)
-    fi
-  done
-  if [ "${#DEFAULT_FILES[@]}" -eq 0 ]; then
-    echo "No default JS/YML files found under modules/custom, themes/custom, profiles/custom, or sites (excluding sites/*/files). Nothing to fix." >&2
+  if [ ! -d "$DOCROOT" ]; then
+    echo "Configured docroot '$DOCROOT' does not exist. Nothing to fix." >&2
     exit 2
   fi
+  DEFAULT_FILES=("$DOCROOT")
 fi
 
 FILES=()
@@ -390,7 +379,7 @@ if [ "$preview_mode" = true ]; then
     --exclude='*/.git/*' \
     . | (cd "$tmp_root" && tar -xf -)
 
-  if [ "$ESLINT_CONFIG_MODE" = "nearest" ]; then
+  if [ "$ESLINT_CONFIG_MODE" = "nearest" ] && [ "$explicit_paths" = true ]; then
     # Group files by nearest config to avoid plugin conflicts across modules/themes.
     declare -A ESLINT_GROUPS
     for file_path in "${FILES[@]}"; do
@@ -431,7 +420,7 @@ if [ "$preview_mode" = true ]; then
       if [ -n "$plugins_dir" ]; then
         group_cmd+=(--resolve-plugins-relative-to "$plugins_dir")
       fi
-      group_cmd+=(--ext .js,.yml --ignore-pattern "**/node_modules/**" --fix)
+      group_cmd+=(--ext .js,.yml --fix)
       group_cmd+=("${DEFAULT_ARGS[@]}")
       (cd "$tmp_root" && "${group_cmd[@]}" "${filtered_files[@]}")
       status=$?
@@ -491,7 +480,7 @@ if [ "$preview_mode" = true ]; then
 
   # Apply fixes
   cd "$PROJECT_ROOT"
-  if [ "$ESLINT_CONFIG_MODE" = "nearest" ]; then
+  if [ "$ESLINT_CONFIG_MODE" = "nearest" ] && [ "$explicit_paths" = true ]; then
     fix_exit=0
     for config_path in "${!ESLINT_GROUPS[@]}"; do
       mapfile -t group_files <<< "${ESLINT_GROUPS[$config_path]}"
@@ -518,7 +507,7 @@ if [ "$preview_mode" = true ]; then
       if [ -n "$plugins_dir" ]; then
         group_cmd+=(--resolve-plugins-relative-to "$plugins_dir")
       fi
-      group_cmd+=(--ext .js,.yml --ignore-pattern "**/node_modules/**" --fix)
+      group_cmd+=(--ext .js,.yml --fix)
       group_cmd+=("${DEFAULT_ARGS[@]}")
       "${group_cmd[@]}" "${filtered_files[@]}"
       status=$?
@@ -550,7 +539,7 @@ fi
 # ============================================================================
 cd "$PROJECT_ROOT"
 
-if [ "$ESLINT_CONFIG_MODE" = "nearest" ]; then
+if [ "$ESLINT_CONFIG_MODE" = "nearest" ] && [ "$explicit_paths" = true ]; then
   # Group files by nearest config to avoid plugin conflicts across modules/themes.
   declare -A ESLINT_GROUPS
   for file_path in "${FILES[@]}"; do
@@ -590,7 +579,7 @@ if [ "$ESLINT_CONFIG_MODE" = "nearest" ]; then
     if [ -n "$plugins_dir" ]; then
       group_cmd+=(--resolve-plugins-relative-to "$plugins_dir")
     fi
-    group_cmd+=(--ext .js,.yml --ignore-pattern "**/node_modules/**" --fix)
+    group_cmd+=(--ext .js,.yml --fix)
     group_cmd+=("${DEFAULT_ARGS[@]}")
     "${group_cmd[@]}" "${filtered_files[@]}"
     status=$?

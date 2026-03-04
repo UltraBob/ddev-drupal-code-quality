@@ -1039,6 +1039,34 @@ JS
   assert_output --partial "--config=/var/www/html/.eslintrc.json"
 }
 
+@test "eslint default run targets configured docroot when no paths are provided" {
+  set -u -o pipefail
+  export DCQ_INSTALL_DEPS=skip
+  export DCQ_INSTALL_NODE_DEPS=skip
+  run ddev add-on get "${DIR}"
+  assert_success
+
+  mkdir -p node_modules/eslint/bin
+  cat > node_modules/eslint/bin/eslint.js <<'JS'
+#!/usr/bin/env node
+process.stdout.write(process.argv.slice(2).join("\n"));
+JS
+  chmod +x node_modules/eslint/bin/eslint.js
+
+  run wait_for_container_path "/var/www/html/node_modules/eslint/bin/eslint.js"
+  assert_success
+
+  run ddev exec bash -lc 'cd /var/www/html && ESLINT_CONFIG_MODE=nearest ./.ddev/commands/web/eslint'
+  assert_success
+  assert_output --partial "web"
+  case "$output" in
+    *"modules/custom"*)
+      echo "Expected no hardcoded custom-directory target list in eslint wrapper default run."
+      return 1
+      ;;
+  esac
+}
+
 @test "stylelint-fix fails with helpful message when project config is missing" {
   set -u -o pipefail
   export DCQ_INSTALL_DEPS=skip
@@ -1232,6 +1260,55 @@ SH
   assert_failure
   assert_output --partial "PHPStan config file is missing."
   assert_output --partial "Create phpstan.neon in the project root"
+}
+
+@test "default ignore configs include DCQ scope exclusions after install" {
+  set -u -o pipefail
+  run ddev add-on get "${DIR}"
+  assert_success
+
+  assert_file_exist ".eslintignore"
+  assert_file_exist ".stylelintignore"
+  assert_file_exist ".prettierignore"
+
+  run grep -q '\*\*/core/\*\*' .eslintignore
+  assert_success
+  run grep -q '\*\*/sites/\*/files/\*\*' .eslintignore
+  assert_success
+
+  run grep -q '\*\*/core/\*\*' .stylelintignore
+  assert_success
+  run grep -q '\*\*/sites/\*/files/\*\*' .stylelintignore
+  assert_success
+
+  run grep -q '^\*\.yml$' .prettierignore
+  assert_success
+  run grep -q '\*\*/core/\*\*' .prettierignore
+  assert_success
+  run grep -q '\*\*/sites/\*/files/\*\*' .prettierignore
+  assert_success
+}
+
+@test "cspell default run targets current directory when no paths are provided" {
+  set -u -o pipefail
+  export DCQ_INSTALL_DEPS=skip
+  export DCQ_INSTALL_NODE_DEPS=skip
+  run ddev add-on get "${DIR}"
+  assert_success
+
+  mkdir -p node_modules/.bin
+  cat > node_modules/.bin/cspell <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$@"
+SH
+  chmod +x node_modules/.bin/cspell
+
+  run wait_for_container_path "/var/www/html/node_modules/.bin/cspell"
+  assert_success
+
+  run ddev exec bash -lc 'cd /var/www/html && ./.ddev/commands/web/cspell'
+  assert_success
+  assert_output --partial "."
 }
 
 @test "cspell config is expanded during installation" {
@@ -1463,12 +1540,7 @@ SH
   run ./.ddev/drupal-code-quality/tooling/bin/cspell
   assert_failure
   assert_output --partial "modlue"
-  case "$output" in
-    *"roottypo"*)
-      echo "Expected default cspell scope to exclude project-root files like cspell-test.md."
-      return 1
-      ;;
-  esac
+  assert_output --partial "roottypo"
 
   before_phpcbf="$(read_container_file /var/www/html/web/modules/custom/dcq_test/dcq_fixable.php)"
   run ./.ddev/drupal-code-quality/tooling/bin/phpcbf web/modules/custom/dcq_test/dcq_fixable.php

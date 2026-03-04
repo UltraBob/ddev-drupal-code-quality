@@ -33,6 +33,7 @@ has_help=false
 has_version=false
 has_positional=false
 has_config=false
+has_ignore_path=false
 seen_double_dash=false
 explicit_paths=false
 preview_mode=false
@@ -64,6 +65,9 @@ for arg in "${clean_args[@]}"; do
       ;;
     -c|--config|--config=*)
       has_config=true
+      ;;
+    --ignore-path|--ignore-path=*)
+      has_ignore_path=true
       ;;
     -* )
       ;;
@@ -172,6 +176,11 @@ while [ "$index" -lt "$arg_count" ]; do
       ;;
     --config=*)
       ;;
+    --ignore-path)
+      index=$((index + 1))
+      ;;
+    --ignore-path=*)
+      ;;
     -*)
       ;;
     *)
@@ -186,11 +195,7 @@ if [ "${#RAW_PATHS[@]}" -gt 0 ]; then
     TARGET_PREFIXES+=("$(normalize_path "$raw")")
   done
 else
-  for candidate in "${DOCROOT}/modules/custom" "${DOCROOT}/themes/custom" "${DOCROOT}/profiles/custom" "${DOCROOT}/sites"; do
-    if [ -d "$candidate" ]; then
-      TARGET_PREFIXES+=("$candidate")
-    fi
-  done
+  TARGET_PREFIXES+=("$DOCROOT")
 fi
 
 FINAL_ARGS=()
@@ -246,9 +251,18 @@ if [ "$explicit_paths" = true ]; then
         FINAL_ARGS+=("$arg" "$(normalize_config_path "$next_arg")")
         index=$((index + 1))
         ;;
+      --ignore-path)
+        next_arg="${args[$((index + 1))]:-}"
+        FINAL_ARGS+=("$arg" "$(map_path "$next_arg")")
+        index=$((index + 1))
+        ;;
       --config=*)
         config_value="${arg#*=}"
         FINAL_ARGS+=("--config=$(normalize_config_path "$config_value")")
+        ;;
+      --ignore-path=*)
+        ignore_value="${arg#*=}"
+        FINAL_ARGS+=("--ignore-path=$(map_path "$ignore_value")")
         ;;
       -*)
         FINAL_ARGS+=("$arg")
@@ -263,15 +277,15 @@ fi
 
 DEFAULT_FILES=()
 if [ "$explicit_paths" = false ]; then
-  for candidate in "${DOCROOT}/modules/custom" "${DOCROOT}/themes/custom" "${DOCROOT}/profiles/custom" "${DOCROOT}/sites"; do
-    if [ -d "$candidate" ]; then
-      while IFS= read -r file_path; do
-        DEFAULT_FILES+=("$file_path")
-      done < <(find "$candidate" \( -path '*/node_modules/*' -o -path '*/sites/*/files/*' \) -prune -o -type f \( -name '*.css' -o -name '*.scss' -o -name '*.sass' \) -print)
-    fi
-  done
+  if [ ! -d "$DOCROOT" ]; then
+    echo "Configured docroot '$DOCROOT' does not exist. Nothing to fix." >&2
+    exit 2
+  fi
+  while IFS= read -r file_path; do
+    DEFAULT_FILES+=("$file_path")
+  done < <(find "$DOCROOT" -path '*/node_modules/*' -prune -o -type f \( -name '*.css' -o -name '*.scss' -o -name '*.sass' \) -print)
   if [ "${#DEFAULT_FILES[@]}" -eq 0 ]; then
-    echo "No default CSS/SCSS/Sass files found under modules/custom, themes/custom, profiles/custom, or sites (excluding sites/*/files). Nothing to fix." >&2
+    echo "No CSS/SCSS/Sass files found under ${DOCROOT}. Nothing to fix." >&2
     exit 2
   fi
 fi
@@ -307,6 +321,10 @@ if [ "$has_config" = false ]; then
     NODE_PATH="${NODE_PATH}:${config_dir}/node_modules"
   fi
 fi
+IGNORE_PATH_ARGS=()
+if [ "$has_ignore_path" = false ] && [ -f "${PROJECT_ROOT}/.stylelintignore" ]; then
+  IGNORE_PATH_ARGS=(--ignore-path "${PROJECT_ROOT}/.stylelintignore")
+fi
 
 # ============================================================================
 # PREVIEW MODE: Generate patch, show preview, prompt to apply
@@ -335,6 +353,7 @@ if [ "$preview_mode" = true ]; then
   if [ "$has_config" = false ]; then
     preview_cmd+=(--config "$CONFIG_PATH" --config-basedir "$(dirname "$CONFIG_PATH")")
   fi
+  preview_cmd+=("${IGNORE_PATH_ARGS[@]}")
   preview_cmd+=(--fix)
   
   (cd "$tmp_root" && "${preview_cmd[@]}" "${FILES[@]}")
@@ -391,6 +410,7 @@ if [ "$preview_mode" = true ]; then
   if [ "$has_config" = false ]; then
     fix_cmd+=(--config "$CONFIG_PATH" --config-basedir "$(dirname "$CONFIG_PATH")")
   fi
+  fix_cmd+=("${IGNORE_PATH_ARGS[@]}")
   fix_cmd+=(--fix)
   
   "${fix_cmd[@]}" "${FILES[@]}"
@@ -417,6 +437,7 @@ fix_cmd=(env "NODE_PATH=$NODE_PATH" node "$TOOLCHAIN_BIN")
 if [ "$has_config" = false ]; then
   fix_cmd+=(--config "$CONFIG_PATH" --config-basedir "$(dirname "$CONFIG_PATH")")
 fi
+fix_cmd+=("${IGNORE_PATH_ARGS[@]}")
 fix_cmd+=(--fix)
 
 "${fix_cmd[@]}" "${FILES[@]}"

@@ -930,6 +930,40 @@ merge_phpcs_config() {
   rm -f "$tmp" "$merged"
 }
 
+append_unique_lines_from_file() {
+  local target="$1"
+  local source="$2"
+  local tmp
+  local line
+
+  if [ ! -f "$source" ]; then
+    return 0
+  fi
+
+  tmp="$(mktemp "${TMPDIR:-/tmp}/dcq-lines-XXXXXX")"
+  if [ -f "$target" ]; then
+    cat "$target" >"$tmp"
+  else
+    : >"$tmp"
+  fi
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    if [ "$line" = "#ddev-generated" ]; then
+      continue
+    fi
+    if grep -Fxq "$line" "$tmp"; then
+      continue
+    fi
+    printf '%s\n' "$line" >>"$tmp"
+  done <"$source"
+
+  if [ ! -f "$target" ] || ! cmp -s "$target" "$tmp"; then
+    cat "$tmp" >"$target"
+    emit_copy 'WRITE: %s\n' "$target"
+  fi
+  rm -f "$tmp"
+}
+
 expand_cspell_config() {
   local app_root="$1"
   local ddev_approot="${DDEV_APPROOT:-$app_root}"
@@ -1541,7 +1575,10 @@ node_toolchain_present() {
 
 run_command() {
   # Echo and execute a command (simple transparency for users).
+  # In interactive installs we route output through a small sanitizer to drop
+  # terminal query/response noise (OSC/DSR bytes) that can appear as garbage.
   local arg
+  local status
   emit 'Running:'
   for arg in "$@"; do
     emit ' %q' "$arg"
@@ -1550,6 +1587,11 @@ run_command() {
   if [ "${non_interactive:-0}" -eq 1 ] || [ "${PROMPT_AVAILABLE:-0}" -ne 1 ]; then
     "$@"
   else
+    if command_available perl; then
+      "$@" 2>&1 | perl -pe 's/\e\][^\a\x1b]*(?:\a|\e\\)//g; s/\e\[[0-9;?]*R//g;' >&"$PROMPT_OUT_FD"
+      status=${PIPESTATUS[0]}
+      return "$status"
+    fi
     "$@" >&"$PROMPT_OUT_FD"
   fi
 }
@@ -1973,6 +2015,11 @@ while IFS= read -r -d '' source; do
   emit_copy 'WRITE: %s\n' "$target"
   copy_changed=$((copy_changed + 1))
 done < <(find "$addon_root" -type f -print0)
+
+# Append DCQ scope defaults to the project prettier ignore file.
+append_unique_lines_from_file \
+  "${app_root%/}/.prettierignore" \
+  "${addon_root}/config-amendments/.prettierignore.dcq"
 
 if [ "$copy_changed" -eq 0 ] && [ "$copy_skipped" -eq 0 ]; then
   emit 'All files already match; no changes.\n'

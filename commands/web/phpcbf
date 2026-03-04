@@ -60,8 +60,5 @@ if [ "$has_config" = true ]; then
   exit $?
 fi
 
-"$PHPCBF_BIN" \
-  --standard=Drupal \
-  --extensions=php,module,inc,install,profile,theme,engine,yml \
-  "${rewrite_args[@]}"
-exit $?
+echo "PHPCS config file is missing. Create .phpcs.xml in the project root (for example by reinstalling the add-on)." >&2
+exit 2

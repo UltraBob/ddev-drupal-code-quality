@@ -158,7 +158,8 @@ The template points PHP tooling at `.ddev/drupal-code-quality/tooling/bin` and J
   - `ESLINT_TOOLCHAIN=root` forces project root toolchain.
 - ESLint config mode:
   - `ESLINT_CONFIG_MODE=nearest` (default) groups by nearest config file.
-  - `ESLINT_CONFIG_MODE=fixed` forces `.eslintrc.passing.json`.
+  - `ESLINT_CONFIG_MODE=fixed` prefers `.eslintrc.passing.json`, then
+    `.eslintrc.json` in the project root.
 - ESLint warning visibility (GitLab CI parity):
   - `DCQ_ESLINT_QUIET=1` (default) adds `--quiet` to `ddev eslint` and
     `ddev eslint-fix`, so warnings are suppressed.
@@ -177,26 +178,36 @@ The template points PHP tooling at `.ddev/drupal-code-quality/tooling/bin` and J
 - CSpell parity:
   - Run `ddev exec php /mnt/ddev_config/drupal-code-quality/tooling/scripts/prepare-cspell.php -s .prepared` once and
     replace `.cspell.json` after reviewing the diff.
-  - `ddev cspell` runs from the repo root (`.`) by default; scope is controlled
-    by `.cspell.json` `ignorePaths`. Narrow the scan by passing explicit paths.
+  - `ddev cspell` defaults to scanning `.` when no paths are passed; scope is
+    controlled by `.cspell.json` (especially `ignorePaths`).
   - `.cspell-project-words.txt` is created by the installer (empty) and updated
     by `ddev cspell-suggest` when you accept suggested words.
+- ESLint / Stylelint / Prettier default scope:
+  - These wrappers default to scanning the configured docroot when no paths are
+    passed.
+  - Scope/exclusions are controlled by visible config files:
+    `.eslintignore`, `.stylelintignore`, and `.prettierignore`.
+  - Installer appends DCQ defaults to `.prettierignore` so the file remains the
+    single source of truth for Prettier scope.
 - PHPCS / PHPCBF default scope:
   - When a project `.phpcs.xml` is installed by the add-on, `ddev phpcs` and
     `ddev phpcbf` with no path default to scanning the configured docroot.
   - The generated ruleset excludes `__DOCROOT__/core/**`, `**/contrib/**`,
     `**/node_modules/**`, and `__DOCROOT__/sites/*/files/**`.
   - You can still pass explicit paths to narrow runs.
+- PHP parallel lint scope:
+  - `ddev php-parallel-lint` remains wrapper-scoped because the tool does not
+    provide an equivalent project config file for default target paths.
 - PHPStan baseline:
   - Generate a baseline with `ddev phpstan --generate-baseline`.
-  - This writes `phpstan-baseline.neon` at the project root; the wrapper will
-    include it automatically when present.
+  - This writes `phpstan-baseline.neon` at the project root and updates
+    `phpstan.neon` to include it.
   - Use a baseline to suppress known issues in legacy code or core defaults
     (for example, the shipped `settings.php` files), then work it down over
     time. Avoid using it to hide new regressions.
-- PHPStan config fallback:
-  - If no project `phpstan.neon*` exists, the wrapper uses the GitLab template
-    config shipped with the add-on.
+- PHPStan config requirement:
+  - `ddev phpstan` requires project config (`phpstan.neon*`) unless you pass
+    `--configuration <path>`.
 - PHPStan level:
   - GitLab CI template defaults use level 0. The installer can set a local default level (0-10).
 

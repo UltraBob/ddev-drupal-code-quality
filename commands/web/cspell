@@ -63,6 +63,12 @@ CORE_CSPELL="${DOCROOT_PATH}/core/node_modules/.bin/cspell"
 ROOT_CSPELL="${PROJECT_ROOT}/node_modules/.bin/cspell"
 CSPELL_BIN=""
 
+if ! command -v node >/dev/null 2>&1; then
+  echo "Node.js is not available in the DDEV web container." >&2
+  echo "Install the Drupal core JS toolchain (${DOCROOT}/core) to run CSpell." >&2
+  exit 127
+fi
+
 if [ -x "$ROOT_CSPELL" ]; then
   CSPELL_BIN="$ROOT_CSPELL"
 elif [ -x "$CORE_CSPELL" ]; then
@@ -85,12 +91,14 @@ fi
 
 CMD=("$CSPELL_BIN")
 if [ "$has_config" = false ]; then
-  # Prefer project config; warn when falling back to core.
-  if [ -f "${PROJECT_ROOT}/.cspell.json" ]; then
-    CMD+=(-c "${PROJECT_ROOT}/.cspell.json")
-  else
-    CMD+=(-c "${DOCROOT_PATH}/core/.cspell.json")
-    echo "Warning: using core CSpell config (${DOCROOT}/core/.cspell.json); project config not found." >&2
+  if [ ! -f "${PROJECT_ROOT}/.cspell.json" ]; then
+    echo "CSpell config file is missing. Create .cspell.json in the project root (for example by reinstalling the add-on)." >&2
+    exit 2
+  fi
+  CMD+=(-c "${PROJECT_ROOT}/.cspell.json")
+  project_words_file="${PROJECT_ROOT}/.cspell-project-words.txt"
+  if [ ! -f "$project_words_file" ]; then
+    : > "$project_words_file"
   fi
 fi
 
@@ -158,8 +166,3 @@ fi
 
 "${CMD[@]}" "${FLAG_ARGS[@]}" "${POSITIONAL_ARGS[@]}"
 exit $?
-if ! command -v node >/dev/null 2>&1; then
-  echo "Node.js is not available in the DDEV web container." >&2
-  echo "Install the Drupal core JS toolchain (${DOCROOT}/core) to run CSpell." >&2
-  exit 127
-fi

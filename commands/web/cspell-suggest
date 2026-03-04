@@ -73,6 +73,13 @@ DOCROOT_PATH="${PROJECT_ROOT}/${DOCROOT}"
 CORE_CSPELL="${DOCROOT_PATH}/core/node_modules/.bin/cspell"
 ROOT_CSPELL="${PROJECT_ROOT}/node_modules/.bin/cspell"
 CSPELL_BIN=""
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "Node.js is not available in the DDEV web container." >&2
+  echo "Install the Drupal core JS toolchain (${DOCROOT}/core) to run CSpell." >&2
+  exit 127
+fi
+
 REPORT_DIR="${PROJECT_ROOT}/dcq-reports"
 if ! mkdir -p "$REPORT_DIR"; then
   echo "Unable to create report directory: $REPORT_DIR" >&2
@@ -104,14 +111,16 @@ if [ "$has_version" = true ]; then
   exit $?
 fi
 
+PROJECT_DICTIONARY="${PROJECT_ROOT}/.cspell-project-words.txt"
 CMD=("$CSPELL_BIN")
 if [ "$has_config" = false ]; then
-  # Prefer project config; warn when falling back to core.
-  if [ -f "${PROJECT_ROOT}/.cspell.json" ]; then
-    CMD+=(-c "${PROJECT_ROOT}/.cspell.json")
-  else
-    CMD+=(-c "${DOCROOT_PATH}/core/.cspell.json")
-    echo "Warning: using core CSpell config (${DOCROOT}/core/.cspell.json); project config not found." >&2
+  if [ ! -f "${PROJECT_ROOT}/.cspell.json" ]; then
+    echo "CSpell config file is missing. Create .cspell.json in the project root (for example by reinstalling the add-on)." >&2
+    exit 2
+  fi
+  CMD+=(-c "${PROJECT_ROOT}/.cspell.json")
+  if [ ! -f "$PROJECT_DICTIONARY" ]; then
+    : > "$PROJECT_DICTIONARY"
   fi
 fi
 
@@ -189,7 +198,6 @@ else
   : > "$UNRECOGNIZED_FILE"
 fi
 
-PROJECT_DICTIONARY="${PROJECT_ROOT}/.cspell-project-words.txt"
 if [ -f "$PROJECT_DICTIONARY" ]; then
   # Merge existing dictionary with new suggestions.
   cat "$PROJECT_DICTIONARY" "$UNRECOGNIZED_FILE" | sort -u > "$UPDATED_WORDS_FILE"
@@ -219,8 +227,3 @@ if [ -s "$UNRECOGNIZED_FILE" ]; then
 fi
 
 exit 0
-if ! command -v node >/dev/null 2>&1; then
-  echo "Node.js is not available in the DDEV web container." >&2
-  echo "Install the Drupal core JS toolchain (${DOCROOT}/core) to run CSpell." >&2
-  exit 127
-fi

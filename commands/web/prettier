@@ -97,18 +97,13 @@ cd "$DOCROOT"
 
 CMD=(env "NODE_PATH=$NODE_PATH" "$PRETTIER_BIN" --check)
 if [ "$has_config" = false ]; then
-  # Prefer project configs; warn when falling back to core.
-  if [ -f "${PROJECT_ROOT}/.prettierrc.json" ]; then
-    CMD+=(--config="${PROJECT_ROOT}/.prettierrc.json")
-  else
-    CMD+=(--config="${DOCROOT_PATH}/core/.prettierrc.json")
-    echo "Warning: using core Prettier config (${DOCROOT}/core/.prettierrc.json); project config not found." >&2
+  if [ ! -f "${PROJECT_ROOT}/.prettierrc.json" ]; then
+    echo "Prettier config file is missing. Create .prettierrc.json in the project root (for example by reinstalling the add-on)." >&2
+    exit 2
   fi
+  CMD+=(--config="${PROJECT_ROOT}/.prettierrc.json")
   if [ -f "${PROJECT_ROOT}/.prettierignore" ]; then
     CMD+=(--ignore-path="${PROJECT_ROOT}/.prettierignore")
-  elif [ -f "${DOCROOT_PATH}/core/.prettierignore" ]; then
-    CMD+=(--ignore-path="${DOCROOT_PATH}/core/.prettierignore")
-    echo "Warning: using core Prettier ignore (${DOCROOT}/core/.prettierignore); project ignore not found." >&2
   fi
 fi
 
@@ -178,15 +173,15 @@ fi
 if [ "$explicit_paths" = false ]; then
   # Default to custom code only when no explicit paths are passed.
   DEFAULT_FILES=()
-  for candidate in modules/custom themes/custom profiles/custom; do
+  for candidate in modules/custom themes/custom profiles/custom sites; do
     if [ -d "$candidate" ]; then
       while IFS= read -r file_path; do
         DEFAULT_FILES+=("$file_path")
-      done < <(find "$candidate" -type f \( -name '*.js' -o -name '*.yml' -o -name '*.yaml' -o -name '*.css' -o -name '*.scss' -o -name '*.sass' \))
+      done < <(find "$candidate" \( -path '*/node_modules/*' -o -path 'sites/*/files/*' \) -prune -o -type f \( -name '*.js' -o -name '*.yml' -o -name '*.yaml' -o -name '*.css' -o -name '*.scss' -o -name '*.sass' \) -print)
     fi
   done
   if [ "${#DEFAULT_FILES[@]}" -eq 0 ]; then
-    echo "No custom files found under modules/custom, themes/custom, or profiles/custom. Nothing to check." >&2
+    echo "No default files found under modules/custom, themes/custom, profiles/custom, or sites (excluding sites/*/files). Nothing to check." >&2
     exit 0
   fi
   "${CMD[@]}" "$@" "${DEFAULT_FILES[@]}"

@@ -165,7 +165,7 @@ if [ "${#RAW_PATHS[@]}" -gt 0 ]; then
     TARGET_PREFIXES+=("$(normalize_path "$raw")")
   done
 else
-  for candidate in "${DOCROOT}/modules/custom" "${DOCROOT}/themes/custom" "${DOCROOT}/profiles/custom"; do
+  for candidate in "${DOCROOT}/modules/custom" "${DOCROOT}/themes/custom" "${DOCROOT}/profiles/custom" "${DOCROOT}/sites"; do
     if [ -d "$candidate" ]; then
       TARGET_PREFIXES+=("$candidate")
     fi
@@ -242,15 +242,15 @@ fi
 
 DEFAULT_FILES=()
 if [ "$explicit_paths" = false ]; then
-  for candidate in "${DOCROOT}/modules/custom" "${DOCROOT}/themes/custom" "${DOCROOT}/profiles/custom"; do
+  for candidate in "${DOCROOT}/modules/custom" "${DOCROOT}/themes/custom" "${DOCROOT}/profiles/custom" "${DOCROOT}/sites"; do
     if [ -d "$candidate" ]; then
       while IFS= read -r file_path; do
         DEFAULT_FILES+=("$file_path")
-      done < <(find "$candidate" -path '*/node_modules/*' -prune -o -type f \( -name '*.js' -o -name '*.yml' -o -name '*.yaml' -o -name '*.css' -o -name '*.scss' -o -name '*.sass' \) -print)
+      done < <(find "$candidate" \( -path '*/node_modules/*' -o -path '*/sites/*/files/*' \) -prune -o -type f \( -name '*.js' -o -name '*.yml' -o -name '*.yaml' -o -name '*.css' -o -name '*.scss' -o -name '*.sass' \) -print)
     fi
   done
   if [ "${#DEFAULT_FILES[@]}" -eq 0 ]; then
-    echo "No custom files found under modules/custom, themes/custom, or profiles/custom. Nothing to format." >&2
+    echo "No default files found under modules/custom, themes/custom, profiles/custom, or sites (excluding sites/*/files). Nothing to format." >&2
     exit 2
   fi
 fi
@@ -265,8 +265,9 @@ fi
 DEFAULT_CONFIG=""
 if [ -f "${PROJECT_ROOT}/.prettierrc.json" ]; then
   DEFAULT_CONFIG="${PROJECT_ROOT}/.prettierrc.json"
-elif [ -f "${DOCROOT_PATH}/core/.prettierrc.json" ]; then
-  DEFAULT_CONFIG="${DOCROOT_PATH}/core/.prettierrc.json"
+elif [ "$has_config" = false ]; then
+  echo "Prettier config file is missing. Create .prettierrc.json in the project root (for example by reinstalling the add-on)." >&2
+  exit 2
 fi
 
 # ============================================================================

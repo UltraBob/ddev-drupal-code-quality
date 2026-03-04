@@ -152,13 +152,22 @@ The template points PHP tooling at `.ddev/drupal-code-quality/tooling/bin` and J
   - `dcq-reports/` is created at the project root when running `checks`
     or the `*-fix` commands (logs + patch previews).
   - Add `dcq-reports/` to `.gitignore` if you do not want to track it.
+- Host-path parity alias:
+  - The add-on installs `.ddev/web-entrypoint.d/90-dcq-host-path-alias.sh`.
+  - On container start, it creates a host-style project-path symlink to
+    `/var/www/html` so absolute host paths can resolve inside the container.
+  - On macOS paths under `/private/...`, it also creates a `/...` companion
+    alias (for example `/tmp/...`) to cover common host-path forms.
+  - To disable, add `DCQ_HOST_PATH_ALIAS=0` under `web_environment` in
+    `.ddev/config.yaml`, then run `ddev restart`.
 - ESLint toolchain selection:
   - `ESLINT_TOOLCHAIN=auto` (default) prefers root toolchain when root configs exist.
   - `ESLINT_TOOLCHAIN=core` forces Drupal core JS toolchain.
   - `ESLINT_TOOLCHAIN=root` forces project root toolchain.
 - ESLint config mode:
   - `ESLINT_CONFIG_MODE=nearest` (default) groups by nearest config file.
-  - `ESLINT_CONFIG_MODE=fixed` forces `.eslintrc.passing.json`.
+  - `ESLINT_CONFIG_MODE=fixed` prefers `.eslintrc.passing.json`, then
+    `.eslintrc.json` in the project root.
 - ESLint warning visibility (GitLab CI parity):
   - `DCQ_ESLINT_QUIET=1` (default) adds `--quiet` to `ddev eslint` and
     `ddev eslint-fix`, so warnings are suppressed.
@@ -177,8 +186,8 @@ The template points PHP tooling at `.ddev/drupal-code-quality/tooling/bin` and J
 - CSpell parity:
   - Run `ddev exec php /mnt/ddev_config/drupal-code-quality/tooling/scripts/prepare-cspell.php -s .prepared` once and
     replace `.cspell.json` after reviewing the diff.
-  - `ddev cspell` runs from the repo root (`.`) by default; scope is controlled
-    by `.cspell.json` `ignorePaths`. Narrow the scan by passing explicit paths.
+  - `ddev cspell` defaults to custom code plus `sites` under the configured
+    docroot, excluding `sites/*/files/**`, when no paths are passed.
   - `.cspell-project-words.txt` is created by the installer (empty) and updated
     by `ddev cspell-suggest` when you accept suggested words.
 - PHPCS / PHPCBF default scope:
@@ -189,14 +198,14 @@ The template points PHP tooling at `.ddev/drupal-code-quality/tooling/bin` and J
   - You can still pass explicit paths to narrow runs.
 - PHPStan baseline:
   - Generate a baseline with `ddev phpstan --generate-baseline`.
-  - This writes `phpstan-baseline.neon` at the project root; the wrapper will
-    include it automatically when present.
+  - This writes `phpstan-baseline.neon` at the project root and updates
+    `phpstan.neon` to include it.
   - Use a baseline to suppress known issues in legacy code or core defaults
     (for example, the shipped `settings.php` files), then work it down over
     time. Avoid using it to hide new regressions.
-- PHPStan config fallback:
-  - If no project `phpstan.neon*` exists, the wrapper uses the GitLab template
-    config shipped with the add-on.
+- PHPStan config requirement:
+  - `ddev phpstan` requires project config (`phpstan.neon*`) unless you pass
+    `--configuration <path>`.
 - PHPStan level:
   - GitLab CI template defaults use level 0. The installer can set a local default level (0-10).
 
@@ -223,6 +232,9 @@ The template points PHP tooling at `.ddev/drupal-code-quality/tooling/bin` and J
 - `DCQ_INSTALL_IDE_SETTINGS`: `merge` to add missing VS Code settings and
   extension recommendations, `overwrite` to back up and replace, `skip` to
   handle manually, or unset to prompt.
+- `DCQ_HOST_PATH_ALIAS`: `1`/unset (default) keeps host-path alias symlinks
+  enabled at web-container startup; set `0`/`false`/`off` to disable and remove
+  add-on-managed aliases on restart.
 
 ## Uninstall
 

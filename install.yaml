@@ -4,6 +4,7 @@ name: drupal-code-quality
 
 # Files copied into the project's .ddev directory.
 project_files:
+  - web-entrypoint.d/90-dcq-host-path-alias.sh
   - commands/helpers/path-map.sh
   - commands/web/checks
   - commands/web/composer-validate
@@ -50,3 +51,5 @@ removal_actions:
       fi
       rm -f .dcq-docroot
       rm -rf drupal-code-quality
+      rm -f web-entrypoint.d/90-dcq-host-path-alias.sh
+      rmdir web-entrypoint.d 2>/dev/null || true

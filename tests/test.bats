@@ -938,6 +938,76 @@ PY
   assert_output "/var/www/html/web/index.php"
 }
 
+@test "host-path alias symlink is created on restart" {
+  set -u -o pipefail
+  local approot="$TESTDIR"
+  run ddev add-on get "${DIR}"
+  assert_success
+
+  retry_ddev_command ddev restart -y
+  assert_success
+
+  run ddev exec bash -lc "set -eu; test -L '${approot}'; [ \"\$(readlink '${approot}')\" = \"/var/www/html\" ]"
+  assert_success
+
+  case "$approot" in
+    /private/*)
+      local alt="${approot#/private}"
+      run ddev exec bash -lc "set -eu; test -L '${alt}'; [ \"\$(readlink '${alt}')\" = \"/var/www/html\" ]"
+      assert_success
+      ;;
+  esac
+}
+
+@test "host-path alias can be disabled via DCQ_HOST_PATH_ALIAS" {
+  set -u -o pipefail
+  local approot="$TESTDIR"
+  run ddev add-on get "${DIR}"
+  assert_success
+
+  python3 - <<'PY'
+from pathlib import Path
+
+path = Path(".ddev/config.yaml")
+lines = path.read_text(encoding="utf-8").splitlines()
+
+for idx, line in enumerate(lines):
+    if line.strip() == "web_environment: []":
+        lines[idx] = "web_environment:"
+        lines.insert(idx + 1, "    - DCQ_HOST_PATH_ALIAS=0")
+        break
+else:
+    inserted = False
+    for idx, line in enumerate(lines):
+        if line.strip() == "web_environment:":
+            if idx + 1 < len(lines) and lines[idx + 1].strip().startswith("- "):
+                lines.insert(idx + 1, "    - DCQ_HOST_PATH_ALIAS=0")
+            else:
+                lines.insert(idx + 1, "    - DCQ_HOST_PATH_ALIAS=0")
+            inserted = True
+            break
+    if not inserted:
+        lines.append("web_environment:")
+        lines.append("    - DCQ_HOST_PATH_ALIAS=0")
+
+path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+PY
+
+  retry_ddev_command ddev restart -y
+  assert_success
+
+  run ddev exec bash -lc "set -eu; if [ -L '${approot}' ]; then exit 1; fi"
+  assert_success
+
+  case "$approot" in
+    /private/*)
+      local alt="${approot#/private}"
+      run ddev exec bash -lc "set -eu; if [ -L '${alt}' ]; then exit 1; fi"
+      assert_success
+      ;;
+  esac
+}
+
 @test "install from directory with non-web docroot" {
   set -u -o pipefail
   mkdir -p docroot

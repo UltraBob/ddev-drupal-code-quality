@@ -152,6 +152,14 @@ The template points PHP tooling at `.ddev/drupal-code-quality/tooling/bin` and J
   - `dcq-reports/` is created at the project root when running `checks`
     or the `*-fix` commands (logs + patch previews).
   - Add `dcq-reports/` to `.gitignore` if you do not want to track it.
+- Host-path parity alias:
+  - The add-on installs `.ddev/web-entrypoint.d/90-dcq-host-path-alias.sh`.
+  - On container start, it creates a host-style project-path symlink to
+    `/var/www/html` so absolute host paths can resolve inside the container.
+  - On macOS paths under `/private/...`, it also creates a `/...` companion
+    alias (for example `/tmp/...`) to cover common host-path forms.
+  - To disable, add `DCQ_HOST_PATH_ALIAS=0` under `web_environment` in
+    `.ddev/config.yaml`, then run `ddev restart`.
 - ESLint toolchain selection:
   - `ESLINT_TOOLCHAIN=auto` (default) prefers root toolchain when root configs exist.
   - `ESLINT_TOOLCHAIN=core` forces Drupal core JS toolchain.
@@ -224,6 +232,9 @@ The template points PHP tooling at `.ddev/drupal-code-quality/tooling/bin` and J
 - `DCQ_INSTALL_IDE_SETTINGS`: `merge` to add missing VS Code settings and
   extension recommendations, `overwrite` to back up and replace, `skip` to
   handle manually, or unset to prompt.
+- `DCQ_HOST_PATH_ALIAS`: `1`/unset (default) keeps host-path alias symlinks
+  enabled at web-container startup; set `0`/`false`/`off` to disable and remove
+  add-on-managed aliases on restart.
 
 ## Uninstall
 

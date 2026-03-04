@@ -139,12 +139,12 @@ while [ "$index" -lt "$arg_count" ]; do
       ;;
     -c|--config)
       next_arg="${args[$((index + 1))]:-}"
-      FLAG_ARGS+=("$arg" "$(map_path "$next_arg")")
+      FLAG_ARGS+=("$arg" "$next_arg")
       index=$((index + 1))
       ;;
     --config=*)
       config_value="${arg#*=}"
-      FLAG_ARGS+=("--config=$(map_path "$config_value")")
+      FLAG_ARGS+=("--config=${config_value}")
       ;;
     -*)
       FLAG_ARGS+=("$arg")

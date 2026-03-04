@@ -145,7 +145,6 @@ if [ "$explicit_paths" = true ]; then
         FINAL_ARGS+=("$arg")
         next_arg="${args[$((index + 1))]:-}"
         if [ -n "$next_arg" ]; then
-          next_arg="$(map_path "$next_arg")"
           FINAL_ARGS+=("$next_arg")
           index=$((index + 1))
         fi
@@ -153,7 +152,6 @@ if [ "$explicit_paths" = true ]; then
       --config=*|--ignore-path=*)
         key="${arg%%=*}"
         value="${arg#*=}"
-        value="$(map_path "$value")"
         FINAL_ARGS+=("${key}=${value}")
         ;;
       -*)

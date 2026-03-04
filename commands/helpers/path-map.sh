@@ -38,17 +38,13 @@ map_path() {
     echo "$path"
     return
   fi
-  # If the path is a host path under the project root, map it into the container.
+  # If the path is a host path under the project root, keep it host-native.
+  # Host-path alias parity is expected to make this resolvable in the container.
   if [ -n "$HOST_ROOT" ] && [ "${path#${HOST_ROOT}/}" != "$path" ]; then
-    # Prefer direct host-path alias usage when it is available in the container.
-    if [ -e "$path" ] || [ -L "$path" ]; then
-      echo "$path"
-      return
-    fi
-    echo "${CONTAINER_ROOT}${path#${HOST_ROOT}}"
+    echo "$path"
     return
   fi
-  # Unknown path; return as-is to avoid breaking user inputs.
+  # Unknown path; return as-is.
   echo "$path"
 }
 

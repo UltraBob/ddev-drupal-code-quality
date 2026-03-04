@@ -94,19 +94,11 @@ while [ "$index" -lt "$arg_count" ]; do
       has_config=true
       next_index=$((index + 1))
       config_value="${args[$next_index]:-}"
-      if [ -n "$config_value" ]; then
-        config_value="$(map_path "$config_value")"
-        args[$next_index]="$config_value"
-      fi
       index=$((index + 1))
       ;;
     --configuration=*)
       has_config=true
       config_value="${arg#*=}"
-      if [ -n "$config_value" ]; then
-        config_value="$(map_path "$config_value")"
-        args[$index]="--configuration=$config_value"
-      fi
       ;;
     --generate-baseline)
       args[$index]="--generate-baseline=phpstan-baseline.neon"
@@ -188,7 +180,7 @@ seen_double_dash=false
 while [ "$index" -lt "$arg_count" ]; do
   arg="${args[$index]}"
   if [ "$seen_double_dash" = true ]; then
-    FINAL_ARGS+=("$(map_path "$arg")")
+    FINAL_ARGS+=("$arg")
     index=$((index + 1))
     continue
   fi
@@ -207,7 +199,7 @@ while [ "$index" -lt "$arg_count" ]; do
       FINAL_ARGS+=("$arg")
       ;;
     *)
-      FINAL_ARGS+=("$(map_path "$arg")")
+      FINAL_ARGS+=("$arg")
       ;;
   esac
   index=$((index + 1))

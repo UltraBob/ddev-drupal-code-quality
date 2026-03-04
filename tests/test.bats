@@ -932,7 +932,7 @@ PY
   assert_success
   run ddev exec bash -lc 'export DDEV_HOST_PROJECT_ROOT="/tmp/dcq-host-root"; source /mnt/ddev_config/commands/helpers/path-map.sh; map_path "/tmp/dcq-host-root/path/to/file.php"'
   assert_success
-  assert_output "/var/www/html/path/to/file.php"
+  assert_output "/tmp/dcq-host-root/path/to/file.php"
   run ddev exec bash -lc 'source /mnt/ddev_config/commands/helpers/path-map.sh; map_path "/var/www/html/web/index.php"'
   assert_success
   assert_output "/var/www/html/web/index.php"
@@ -951,53 +951,6 @@ PY
   run ddev exec bash -lc "set -eu; source /mnt/ddev_config/commands/helpers/path-map.sh; map_path '${approot}/web/index.php'"
   assert_success
   assert_output "${approot}/web/index.php"
-
-  run ddev exec bash -lc "set -eu; source /mnt/ddev_config/commands/helpers/path-map.sh; map_to_project_relative '${approot}/web/index.php'"
-  assert_success
-  assert_output "web/index.php"
-}
-
-@test "path map falls back to container path when alias is disabled" {
-  set -u -o pipefail
-  local approot="$TESTDIR"
-  run ddev add-on get "${DIR}"
-  assert_success
-  touch web/index.php
-
-  python3 - <<'PY'
-from pathlib import Path
-
-path = Path(".ddev/config.yaml")
-lines = path.read_text(encoding="utf-8").splitlines()
-
-for idx, line in enumerate(lines):
-    if line.strip() == "web_environment: []":
-        lines[idx] = "web_environment:"
-        lines.insert(idx + 1, "    - DCQ_HOST_PATH_ALIAS=0")
-        break
-else:
-    inserted = False
-    for idx, line in enumerate(lines):
-        if line.strip() == "web_environment:":
-            if idx + 1 < len(lines) and lines[idx + 1].strip().startswith("- "):
-                lines.insert(idx + 1, "    - DCQ_HOST_PATH_ALIAS=0")
-            else:
-                lines.insert(idx + 1, "    - DCQ_HOST_PATH_ALIAS=0")
-            inserted = True
-            break
-    if not inserted:
-        lines.append("web_environment:")
-        lines.append("    - DCQ_HOST_PATH_ALIAS=0")
-
-path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-PY
-
-  retry_ddev_command ddev restart -y
-  assert_success
-
-  run ddev exec bash -lc "set -eu; source /mnt/ddev_config/commands/helpers/path-map.sh; map_path '${approot}/web/index.php'"
-  assert_success
-  assert_output "/var/www/html/web/index.php"
 
   run ddev exec bash -lc "set -eu; source /mnt/ddev_config/commands/helpers/path-map.sh; map_to_project_relative '${approot}/web/index.php'"
   assert_success
@@ -1025,7 +978,7 @@ PY
   esac
 }
 
-@test "host-path alias can be disabled via DCQ_HOST_PATH_ALIAS" {
+@test "host-path alias remains enforced even when DCQ_HOST_PATH_ALIAS=0 is set" {
   set -u -o pipefail
   local approot="$TESTDIR"
   run ddev add-on get "${DIR}"
@@ -1062,13 +1015,13 @@ PY
   retry_ddev_command ddev restart -y
   assert_success
 
-  run ddev exec bash -lc "set -eu; if [ -L '${approot}' ]; then exit 1; fi"
+  run ddev exec bash -lc "set -eu; test -L '${approot}'; [ \"\$(readlink '${approot}')\" = \"/var/www/html\" ]"
   assert_success
 
   case "$approot" in
     /private/*)
       local alt="${approot#/private}"
-      run ddev exec bash -lc "set -eu; if [ -L '${alt}' ]; then exit 1; fi"
+      run ddev exec bash -lc "set -eu; test -L '${alt}'; [ \"\$(readlink '${alt}')\" = \"/var/www/html\" ]"
       assert_success
       ;;
   esac
@@ -1276,6 +1229,54 @@ JS
   run ddev checks
   assert_success
   assert_output --partial "- phpcs: PASS"
+}
+
+@test "phpcs forwards host absolute stdin and standard paths unchanged" {
+  set -u -o pipefail
+  local approot="$TESTDIR"
+  run ddev add-on get "${DIR}"
+  assert_success
+
+  mkdir -p vendor/bin
+  cat > vendor/bin/phpcs <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$@"
+exit 0
+SH
+  chmod +x vendor/bin/phpcs
+
+  retry_ddev_command ddev restart -y
+  assert_success
+
+  run ddev exec bash -lc ".ddev/commands/web/phpcs --stdin-path '${approot}/web/index.php' --standard='${approot}/.phpcs.xml' '${approot}/web/index.php'"
+  assert_success
+  assert_output --partial "--stdin-path"
+  assert_output --partial "${approot}/web/index.php"
+  assert_output --partial "--standard=${approot}/.phpcs.xml"
+}
+
+@test "phpcbf forwards host absolute stdin and standard paths unchanged" {
+  set -u -o pipefail
+  local approot="$TESTDIR"
+  run ddev add-on get "${DIR}"
+  assert_success
+
+  mkdir -p vendor/bin
+  cat > vendor/bin/phpcbf <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$@"
+exit 0
+SH
+  chmod +x vendor/bin/phpcbf
+
+  retry_ddev_command ddev restart -y
+  assert_success
+
+  run ddev exec bash -lc ".ddev/commands/web/phpcbf --stdin-path '${approot}/web/index.php' --standard='${approot}/.phpcs.xml' '${approot}/web/index.php'"
+  assert_success
+  assert_output --partial "--stdin-path"
+  assert_output --partial "${approot}/web/index.php"
+  assert_output --partial "--standard=${approot}/.phpcs.xml"
 }
 
 @test "install from directory with phpstan level override" {

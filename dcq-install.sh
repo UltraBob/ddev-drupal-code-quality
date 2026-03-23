@@ -1713,14 +1713,14 @@ if [ "$non_interactive" -eq 1 ] || [ "$recommended_mode" -eq 1 ]; then
   set_default_env "DCQ_INSTALL_GITIGNORE" "add"
 fi
 
-# Fail loudly if ddev exec cannot resolve a project. Silent skips later are
+# Fail loudly if ddev describe cannot resolve a project. Silent skips later are
 # usually caused by running in a context where DDEV can't find .ddev/config.yaml.
 ddev_cmd="${DDEV_EXECUTABLE:-ddev}"
 if command_available "$ddev_cmd"; then
-  if ! "$ddev_cmd" exec true >/dev/null 2>&1; then
-    emit 'ERROR: ddev exec could not resolve a project from %s.\n' "${PWD:-.}"
+  if ! "$ddev_cmd" describe >/dev/null 2>&1; then
+    emit 'ERROR: ddev describe could not resolve a project from %s.\n' "${PWD:-.}"
     emit 'Run the installer from the target project (for add-on installs, this should be automatic).\n'
-    emit 'Try: cd %s && ddev exec true\n' "$app_root"
+    emit 'Try: cd %s && ddev describe\n' "$app_root"
     exit 1
   fi
 fi

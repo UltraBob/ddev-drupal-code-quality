@@ -78,7 +78,7 @@ patch_errors=0
 
 # --- File manifest ---
 # Format: local_path|upstream_url|transform|header_extra
-# transform: none, phpstan, prepare-cspell
+# transform: none, phpstan, cspell, prepare-cspell
 # header_extra: additional header line after #ddev-generated (empty for most)
 
 declare -a MANIFEST=(
@@ -91,7 +91,7 @@ declare -a MANIFEST=(
   # GitLab templates files
   "drupal-code-quality/assets/phpstan.neon|${base_url}/project/gitlab_templates/-/raw/${branch_templates}/assets/phpstan.neon|phpstan|# Source: ${base_url}/project/gitlab_templates/-/blob/${branch_templates}/assets/phpstan.neon"
   "drupal-code-quality/assets/.phpcs.xml|${base_url}/project/gitlab_templates/-/raw/${branch_templates}/assets/phpcs.xml.dist|none|"
-  "drupal-code-quality/assets/.cspell.json|${base_url}/project/gitlab_templates/-/raw/${branch_templates}/assets/.cspell.json|none|"
+  "drupal-code-quality/assets/.cspell.json|${base_url}/project/gitlab_templates/-/raw/${branch_templates}/assets/.cspell.json|cspell|"
   # Scripts
   "drupal-code-quality/tooling/scripts/prepare-cspell.php|${base_url}/project/gitlab_templates/-/raw/${branch_templates}/scripts/prepare-cspell.php|prepare-cspell|"
 )
@@ -102,6 +102,21 @@ declare -a MANIFEST=(
 transform_phpstan() {
   local input="$1" output="$2"
   sed -n '/^parameters:/,$p' "$input" > "$output"
+}
+
+# Strip arrays populated by prepare-cspell.php from a .cspell.json file,
+# leaving only structural fields (description, language, flagWords, overrides, etc.)
+# for comparison. Uses python3 for reliable JSON handling.
+strip_cspell_expanded_arrays() {
+  local input="$1" output="$2"
+  python3 -c "
+import json, sys
+data = json.load(open(sys.argv[1]))
+for key in ('ignorePaths', 'dictionaries', 'dictionaryDefinitions', 'words'):
+    data[key] = []
+json.dump(data, sys.stdout, indent=4, ensure_ascii=False)
+print()
+" "$input" > "$output"
 }
 
 # Apply DCQ patch to prepare-cspell.php: replace single-line $non_project_directories
@@ -157,11 +172,17 @@ for entry in "${MANIFEST[@]}"; do
     continue
   fi
 
-  # Apply transform
+  # Apply transform to fetched file
   transformed="${tmp_dir}/${filename}.transformed"
   case "$transform" in
     phpstan)
       transform_phpstan "$fetched" "$transformed"
+      ;;
+    cspell)
+      # Upstream has empty arrays; local has arrays populated by prepare-cspell.php.
+      # Normalize both sides by stripping those arrays so we only compare
+      # structural fields (description, language, flagWords, overrides, etc.).
+      strip_cspell_expanded_arrays "$fetched" "$transformed"
       ;;
     prepare-cspell)
       if ! transform_prepare_cspell "$fetched" "$transformed"; then
@@ -187,6 +208,12 @@ for entry in "${MANIFEST[@]}"; do
 
   local_stripped="${tmp_dir}/${filename}.local-stripped"
   strip_dcq_header "$local_file" > "$local_stripped"
+
+  # For cspell, also strip expanded arrays from the local copy
+  if [[ "$transform" == "cspell" ]]; then
+    strip_cspell_expanded_arrays "$local_stripped" "${local_stripped}.tmp"
+    mv "${local_stripped}.tmp" "$local_stripped"
+  fi
 
   # Compare
   diff_output=$(diff -u --label "local: ${local_path}" --label "upstream" "$local_stripped" "$transformed" 2>/dev/null || true)

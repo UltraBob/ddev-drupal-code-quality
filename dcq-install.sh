@@ -435,7 +435,11 @@ maybe_install_missing_root_deps() {
     return 1
   fi
 
-  mapfile -t missing_node_deps_array <<< "$missing_node_deps"
+  # Avoid mapfile (requires bash 4+; macOS ships bash 3.2).
+  missing_node_deps_array=()
+  while IFS= read -r _line; do
+    [ -n "$_line" ] && missing_node_deps_array+=("$_line")
+  done <<< "$missing_node_deps"
   if [ "$suppress_list" -ne 1 ]; then
     emit 'Detected missing Drupal JS tooling dependencies in package.json (%d):\n' "${#missing_node_deps_array[@]}"
     for dep in "${missing_node_deps_array[@]}"; do
@@ -467,13 +471,22 @@ maybe_install_missing_root_deps() {
     done
     if [ "$package_manager" = "npm" ]; then
       cmd=( "$ddev_cmd" "exec" "bash" "-lc" "cd /var/www/html && npm install --save-dev --package-lock${deps_cmd}" )
-      run_command "${cmd[@]}"
+      if ! run_command "${cmd[@]}"; then
+        emit 'npm install --save-dev failed. You can retry manually.\n'
+        return 1
+      fi
       emit 'Node dependencies added (project root).\n'
       cmd=( "$ddev_cmd" "exec" "bash" "-lc" "cd /var/www/html && npm install --package-lock" )
-      run_command "${cmd[@]}"
+      if ! run_command "${cmd[@]}"; then
+        emit 'npm install failed. You can retry manually.\n'
+        return 1
+      fi
     else
       cmd=( "$ddev_cmd" "exec" "bash" "-lc" "cd /var/www/html && yarn add -D${deps_cmd}" )
-      run_command "${cmd[@]}"
+      if ! run_command "${cmd[@]}"; then
+        emit 'yarn add failed. You can retry manually.\n'
+        return 1
+      fi
       emit 'Node dependencies added (project root).\n'
     fi
     return 0
@@ -996,8 +1009,8 @@ expand_cspell_config() {
 
   emit 'Expanding .cspell.json with project-specific settings...\n'
 
-  if ! wait_for_container_file "$ddev_cmd" "$container_cspell" 20 1; then
-    emit 'Skipping CSpell expansion (.cspell.json did not become visible in the container after waiting).\n'
+  if ! wait_for_container_file "$ddev_cmd" "$container_cspell" 20 1 "readable"; then
+    emit 'Skipping CSpell expansion (.cspell.json not readable in the container after waiting).\n'
     return 0
   fi
 
@@ -1079,14 +1092,23 @@ command_available() {
 }
 
 wait_for_container_file() {
+  # Wait for a file to appear in the container.  When require_readable is set
+  # to a non-empty value the check additionally verifies that the file has
+  # non-zero size (test -s), which guards against filesystem-sync race
+  # conditions where the inode is visible but the content has not landed yet.
   local ddev_cmd="$1"
   local path="$2"
   local max_attempts="${3:-20}"
   local delay_seconds="${4:-1}"
+  local require_readable="${5:-}"
   local attempts=0
+  local test_flag="-f"
+  if [ -n "$require_readable" ]; then
+    test_flag="-s"
+  fi
 
   while [ "$attempts" -lt "$max_attempts" ]; do
-    if "$ddev_cmd" exec test -f "$path" >/dev/null 2>&1; then
+    if "$ddev_cmd" exec test "$test_flag" "$path" >/dev/null 2>&1; then
       return 0
     fi
     attempts=$((attempts + 1))
@@ -2215,9 +2237,16 @@ if [ "$core_package_json_present" -eq 1 ]; then
           else
             cmd=( "$ddev_cmd" "exec" "bash" "-lc" "cd /var/www/html && yarn install" )
           fi
-          run_command "${cmd[@]}"
+          if run_command "${cmd[@]}"; then
+            node_install_done=1
+          else
+            emit 'JS dependency install failed. You can retry manually:\n'
+            emit '  ddev exec bash -lc "cd /var/www/html && %s install"\n' "${root_pm:-npm}"
+          fi
         fi
-        emit 'Node toolchain installed (project root).\n'
+        if [ "$node_install_done" -eq 1 ]; then
+          emit 'Node toolchain installed (project root).\n'
+        fi
       fi
     fi
   fi

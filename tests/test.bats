@@ -1360,6 +1360,20 @@ SH
   assert_output --partial "Skipping CSpell expansion (Drupal core dictionary files are not available at web/core/misc/cspell)."
 }
 
+@test "container test -s rejects empty files and accepts non-empty files" {
+  # Validates the mechanism behind wait_for_container_file's readability check.
+  # An empty file (simulating a partially-synced inode) must fail test -s so
+  # that the installer waits for content to arrive rather than handing a zero-
+  # byte file to prepare-cspell.php.
+  set -u -o pipefail
+
+  run ddev exec bash -lc 'truncate -s 0 /tmp/dcq-empty-test && test -s /tmp/dcq-empty-test'
+  assert_failure
+
+  run ddev exec bash -lc 'printf "{}" > /tmp/dcq-nonempty-test && test -s /tmp/dcq-nonempty-test'
+  assert_success
+}
+
 @test "remove cleans ddev assets and shims" {
   set -u -o pipefail
   run ddev add-on get "${DIR}"
@@ -1401,7 +1415,7 @@ SH
 
   run ddev add-on get "${DIR}"
   assert_success
-  assert_output --partial "Node dependencies added (project root)."
+  assert_output --partial "Node toolchain installed (project root)."
   assert_container_file_exist "/var/www/html/package-lock.json"
   assert_container_file_exist "/var/www/html/node_modules/eslint-plugin-no-jquery/package.json"
   assert_container_file_exist "/var/www/html/node_modules/stylelint-prettier/package.json"
@@ -1424,7 +1438,7 @@ SH
 
   run ddev add-on get "${DIR}"
   assert_success
-  assert_output --partial "Node dependencies added (project root)."
+  assert_output --partial "Node toolchain installed (project root)."
   assert_container_file_exist "/var/www/html/yarn.lock"
   assert_container_file_exist "/var/www/html/node_modules/eslint-plugin-no-jquery/package.json"
   assert_container_file_exist "/var/www/html/node_modules/stylelint-prettier/package.json"
@@ -1441,10 +1455,41 @@ SH
 
   run ddev add-on get "${DIR}"
   assert_success
-  assert_output --partial "Node dependencies added (project root)."
+  assert_output --partial "Node toolchain installed (project root)."
   assert_container_file_exist "/var/www/html/package-lock.json"
   assert_container_file_exist "/var/www/html/node_modules/eslint-plugin-no-jquery/package.json"
   assert_container_file_exist "/var/www/html/node_modules/stylelint-prettier/package.json"
+}
+
+# bats test_tags=node
+@test "node install failure does not crash the installer" {
+  set -u -o pipefail
+  export DCQ_INSTALL_DEPS=skip
+  export DCQ_INSTALL_NODE_DEPS=root
+  mkdir -p web/core
+  write_stub_package_json "web/core/package.json"
+
+  # Pre-create a root package.json that includes the same deps as the core
+  # stub (so find_missing_node_deps returns nothing and we reach the fallback
+  # npm-install path) PLUS an unresolvable dependency so npm install fails.
+  # The installer should handle this gracefully instead of crashing the
+  # entire post-install action via set -e.
+  cat > package.json <<'JSON'
+{
+  "name": "dcq-fail-test",
+  "private": true,
+  "devDependencies": {
+    "eslint-plugin-no-jquery": "^3.1.1",
+    "stylelint-prettier": "^5.0.3",
+    "this-package-should-not-exist-dcq-test": "99999.0.0"
+  }
+}
+JSON
+
+  run bash -lc "ddev add-on get \"${DIR}\" 2>&1"
+  assert_success
+  assert_output --partial "JS dependency install failed."
+  assert_output --partial "You can retry manually"
 }
 
 # bats test_tags=full

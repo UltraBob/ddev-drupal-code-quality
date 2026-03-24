@@ -199,6 +199,12 @@ for entry in "${MANIFEST[@]}"; do
       ;;
   esac
 
+  # Ensure trailing newline on transformed file (DDEV addon checker requires it,
+  # but some upstream files lack one)
+  if [[ -s "$transformed" ]] && [[ "$(tail -c 1 "$transformed" | wc -l)" -eq 0 ]]; then
+    echo "" >> "$transformed"
+  fi
+
   # Strip DCQ header from local for comparison
   if [[ ! -f "$local_file" ]]; then
     printf "${RED}LOCAL FILE MISSING${RESET}\n"

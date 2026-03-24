@@ -1,0 +1,87 @@
+name: upstream-config-check
+
+on:
+  schedule:
+    # Weekly on Mondays at 09:15 UTC
+    - cron: '15 09 * * 1'
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check-upstream:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check upstream configs
+        id: sync
+        run: |
+          output=$(./scripts/sync-upstream-configs.sh 2>&1) || exit_code=$?
+          echo "$output"
+          # Save output for issue body (escape for GH Actions)
+          {
+            echo "SYNC_OUTPUT<<SYNC_EOF"
+            echo "$output"
+            echo "SYNC_EOF"
+          } >> "$GITHUB_ENV"
+          echo "exit_code=${exit_code:-0}" >> "$GITHUB_OUTPUT"
+
+      - name: Create or update issue on changes
+        if: steps.sync.outputs.exit_code == '1'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = 'Upstream config changes detected';
+            const label = 'upstream-sync';
+            const body = `The weekly upstream config check found changes.\n\n\`\`\`\n${process.env.SYNC_OUTPUT}\n\`\`\`\n\nRun \`./scripts/sync-upstream-configs.sh --update\` locally to apply, then \`DCQ_FULL_TESTS=1 bats --jobs 4 ./tests/test.bats\` to validate.`;
+
+            // Find existing open issue
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: label,
+            });
+
+            if (issues.data.length > 0) {
+              // Update existing issue
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issues.data[0].number,
+                body: body,
+              });
+              console.log(`Updated issue #${issues.data[0].number}`);
+            } else {
+              // Ensure label exists
+              try {
+                await github.rest.issues.getLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  name: label,
+                });
+              } catch {
+                await github.rest.issues.createLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  name: label,
+                  color: '0075ca',
+                  description: 'Automated upstream config drift detection',
+                });
+              }
+
+              // Create new issue
+              const issue = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: title,
+                body: body,
+                labels: [label],
+              });
+              console.log(`Created issue #${issue.data.number}`);
+            }

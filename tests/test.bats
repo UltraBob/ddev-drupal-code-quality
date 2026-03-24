@@ -105,6 +105,20 @@ load_bats_helpers() {
       return 1
     fi
   }
+
+  refute_output() {
+    if [ "${1:-}" = "--partial" ]; then
+      local unexpected="${2:-}"
+      case "$output" in
+        *"$unexpected"*) echo "Expected output NOT to contain: $unexpected"; return 1 ;;
+      esac
+      return 0
+    fi
+    if [ "${output:-}" = "${1:-}" ]; then
+      echo "Expected output NOT to equal: ${1:-}"
+      return 1
+    fi
+  }
 }
 
 setup_file() {
@@ -578,6 +592,49 @@ CSS
 a { color: #12; }
 CSS
 
+  # Exclusion path fixture: bad code in contrib that tools should NOT flag.
+  local contrib_dir="web/modules/contrib/dcq_fake"
+  mkdir -p "${contrib_dir}"
+  cat > "${contrib_dir}/dcq_fake.module" <<'PHP'
+<?php
+function dcq_fake_bad($x){
+  // TODO: This should NOT be flagged — it's in contrib.
+  if($undefined_contrib_var){return $undefined_contrib_var;}
+}
+PHP
+  cat > "${contrib_dir}/bad.js" <<'JS'
+const x = "wrong quotes and missing semi"
+JS
+  cat > "${contrib_dir}/bad.css" <<'CSS'
+a { color: RED; }
+CSS
+
+  # Clean fixture: valid custom code that should pass all checks.
+  local clean_dir="web/modules/custom/dcq_clean"
+  mkdir -p "${clean_dir}"
+  cat > "${clean_dir}/dcq_clean.info.yml" <<'YAML'
+name: DCQ Clean
+type: module
+description: 'Clean fixture module that should pass all checks.'
+core_version_requirement: ^11
+package: Testing
+YAML
+  cat > "${clean_dir}/dcq_clean.module" <<'PHP'
+<?php
+
+/**
+ * @file
+ * Clean fixture module that should pass all checks.
+ */
+
+/**
+ * Returns a greeting string.
+ */
+function dcq_clean_greet(string $name): string {
+  return 'Hello, ' . $name;
+}
+PHP
+
   cat > "web/cspell-test.json" <<'JSON'
 {
   "version": "0.2",
@@ -597,6 +654,14 @@ teardown() {
   # Perform cleanup operations
   if [ -n "${PROJNAME:-}" ]; then
     ddev delete -Oy "${PROJNAME}" >/dev/null 2>&1
+    # Remove leftover Docker volumes (mariadb, mutagen, snapshots).
+    # The name filter is a substring match, so PROJNAME catches both
+    # PROJNAME-mariadb and ddev-PROJNAME-snapshots patterns.
+    local vols
+    vols="$(docker volume ls --quiet --filter "name=${PROJNAME}" 2>/dev/null || true)"
+    if [ -n "$vols" ]; then
+      echo "$vols" | xargs docker volume rm 2>/dev/null || true
+    fi
   fi
 
   # Persist TESTDIR if running inside GitHub Actions. Useful for uploading test result artifacts
@@ -1562,6 +1627,10 @@ JSON
   assert_success
   run wait_for_container_path "/var/www/html/web/themes/custom/dcq_theme/css/fixable.css"
   assert_success
+  run wait_for_container_path "/var/www/html/web/modules/contrib/dcq_fake/dcq_fake.module"
+  assert_success
+  run wait_for_container_path "/var/www/html/web/modules/custom/dcq_clean/dcq_clean.module"
+  assert_success
 
   # Batch git setup commands into single exec call
   run ddev exec bash -lc "command -v git >/dev/null && cd /var/www/html && (git rev-parse --is-inside-work-tree >/dev/null 2>&1 || git init >/dev/null) && printf 'unrelated change' > unrelated.txt"
@@ -1578,6 +1647,82 @@ JSON
   assert_output --partial "==> cspell"
   assert_output --partial "Summary:"
 
+  # -------------------------------------------------------
+  # Detection accuracy: true positives (tools catch issues)
+  # -------------------------------------------------------
+
+  # PHPCS detects coding standard violations
+  run ./.ddev/drupal-code-quality/tooling/bin/phpcs web/modules/custom/dcq_test/dcq_test.module
+  assert_failure
+  assert_output --partial "TODO"
+  assert_output --partial "dcq_test.module"
+
+  run ./.ddev/drupal-code-quality/tooling/bin/phpcs web/modules/custom/dcq_test/dcq_fixable.php
+  assert_failure
+  assert_output --partial "dcq_fixable.php"
+
+  # PHPStan detects undefined variables
+  run ./.ddev/drupal-code-quality/tooling/bin/phpstan web/modules/custom/dcq_test/dcq_test.module
+  assert_failure
+  assert_output --partial "undefined"
+
+  # ESLint detects rule violations in check mode
+  run ./.ddev/drupal-code-quality/tooling/bin/eslint web/themes/custom/dcq_theme/js/fixable.js
+  assert_failure
+  assert_output --partial "fixable.js"
+
+  # ESLint passes on file that doesn't violate configured rules
+  run ./.ddev/drupal-code-quality/tooling/bin/eslint web/themes/custom/dcq_theme/js/unfixable.js
+  assert_success
+
+  # Stylelint detects style violations in check mode
+  run ./.ddev/drupal-code-quality/tooling/bin/stylelint web/themes/custom/dcq_theme/css/fixable.css
+  assert_failure
+  assert_output --partial "fixable.css"
+
+  run ./.ddev/drupal-code-quality/tooling/bin/stylelint web/themes/custom/dcq_theme/css/unfixable.css
+  assert_failure
+  assert_output --partial "unfixable.css"
+
+  # Prettier detects formatting issues in check mode
+  run ./.ddev/drupal-code-quality/tooling/bin/prettier web/themes/custom/dcq_theme/js/prettier.js
+  assert_failure
+  assert_output --partial "prettier.js"
+
+  # Composer validate passes on valid composer.json
+  run ./.ddev/drupal-code-quality/tooling/bin/composer-validate
+  assert_success
+
+  # -----------------------------------------------------------
+  # Detection accuracy: true negatives (clean code passes)
+  # -----------------------------------------------------------
+
+  # PHPCS passes on clean code
+  run ./.ddev/drupal-code-quality/tooling/bin/phpcs web/modules/custom/dcq_clean/dcq_clean.module
+  assert_success
+
+  # PHPStan passes on clean code
+  run ./.ddev/drupal-code-quality/tooling/bin/phpstan web/modules/custom/dcq_clean/dcq_clean.module
+  assert_success
+
+  # -----------------------------------------------------------
+  # Detection accuracy: exclusion paths (contrib not flagged)
+  # -----------------------------------------------------------
+
+  # PHPCS default run should NOT include contrib fixtures
+  run ./.ddev/drupal-code-quality/tooling/bin/phpcs
+  assert_failure
+  refute_output --partial "dcq_fake.module"
+
+  # ESLint default run should NOT include contrib fixtures
+  run ./.ddev/drupal-code-quality/tooling/bin/eslint
+  assert_failure
+  refute_output --partial "contrib"
+
+  # -------------------------------------------------------
+  # CSpell detection
+  # -------------------------------------------------------
+
   run ./.ddev/drupal-code-quality/tooling/bin/cspell lint --no-config-search -c web/cspell-test.json modules/custom/dcq_test/README.md
   assert_failure
   assert_output --partial "modlue"
@@ -1586,6 +1731,10 @@ JSON
   assert_failure
   assert_output --partial "modlue"
   assert_output --partial "roottypo"
+
+  # -------------------------------------------------------
+  # Fix commands
+  # -------------------------------------------------------
 
   before_phpcbf="$(read_container_file /var/www/html/web/modules/custom/dcq_test/dcq_fixable.php)"
   run ./.ddev/drupal-code-quality/tooling/bin/phpcbf web/modules/custom/dcq_test/dcq_fixable.php

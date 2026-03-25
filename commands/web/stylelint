@@ -24,6 +24,7 @@ has_help=false
 has_version=false
 has_positional=false
 has_config=false
+has_ignore_path=false
 seen_double_dash=false
 explicit_paths=false
 
@@ -45,6 +46,9 @@ for arg in "$@"; do
       ;;
     -c|--config|--config=*)
       has_config=true
+      ;;
+    --ignore-path|--ignore-path=*)
+      has_ignore_path=true
       ;;
     --)
       ;;
@@ -176,12 +180,13 @@ DEFAULT_CONFIG_PATH=""
 if [ "$has_config" = false ]; then
   if [ -f "${PROJECT_ROOT}/.stylelintrc.json" ]; then
     CONFIG_PATH="${PROJECT_ROOT}/.stylelintrc.json"
-  else
-    CONFIG_PATH="${DOCROOT_PATH}/core/.stylelintrc.json"
-    echo "Warning: using core Stylelint config (${DOCROOT}/core/.stylelintrc.json); project config not found." >&2
+    config_dir="$(dirname "$CONFIG_PATH")"
+    CMD=(env "NODE_PATH=$NODE_PATH" node "$TOOLCHAIN_BIN" --config="$CONFIG_PATH" --config-basedir="$config_dir")
   fi
   DEFAULT_CONFIG_PATH="$CONFIG_PATH"
-  CMD+=(--config="$CONFIG_PATH")
+fi
+if [ "$has_ignore_path" = false ] && [ -f "${PROJECT_ROOT}/.stylelintignore" ]; then
+  CMD+=(--ignore-path="${PROJECT_ROOT}/.stylelintignore")
 fi
 
 uses_scss=false
@@ -213,10 +218,19 @@ if [ "$explicit_paths" = true ]; then
         FINAL_ARGS+=("$arg" "$next_arg")
         index=$((index + 1))
         ;;
+      --ignore-path)
+        next_arg="${args[$((index + 1))]:-}"
+        FINAL_ARGS+=("$arg" "$(map_path "$next_arg")")
+        index=$((index + 1))
+        ;;
       --config=*)
         config_value="${arg#*=}"
         config_value="$(normalize_docroot_arg "$config_value")"
         FINAL_ARGS+=("--config=$config_value")
+        ;;
+      --ignore-path=*)
+        ignore_value="${arg#*=}"
+        FINAL_ARGS+=("--ignore-path=$(map_path "$ignore_value")")
         ;;
       -* )
         FINAL_ARGS+=("$arg")
@@ -262,15 +276,15 @@ fi
 
 if [ "$explicit_paths" = false ]; then
   DEFAULT_FILES=()
-  for candidate in modules/custom themes/custom profiles/custom; do
+  for candidate in .; do
     if [ -d "$candidate" ]; then
       while IFS= read -r file_path; do
         DEFAULT_FILES+=("$file_path")
-      done < <(find "$candidate" -type f \( -name '*.css' -o -name '*.scss' -o -name '*.sass' \))
+      done < <(find "$candidate" -path '*/node_modules/*' -prune -o -type f \( -name '*.css' -o -name '*.scss' -o -name '*.sass' \) -print)
     fi
   done
   if [ "${#DEFAULT_FILES[@]}" -eq 0 ]; then
-    echo "No custom style files found under modules/custom, themes/custom, or profiles/custom. Nothing to lint." >&2
+    echo "No style files found under ${DOCROOT}. Nothing to lint." >&2
     exit 2
   fi
   if [ "$has_config" = false ] && [ "$CONFIG_PATH" = "$DEFAULT_CONFIG_PATH" ]; then
@@ -288,6 +302,10 @@ if [ "$explicit_paths" = false ]; then
         break
       fi
     done
+  fi
+  if [ "$has_config" = false ] && [ -z "$CONFIG_PATH" ]; then
+    echo "Stylelint config file is missing. Create .stylelintrc.json in the project root (or a nearest config in the target paths), or pass --config." >&2
+    exit 2
   fi
   for file_path in "${DEFAULT_FILES[@]}"; do
     if [[ "$file_path" == *.scss || "$file_path" == *.sass ]]; then
@@ -334,6 +352,11 @@ if [ "$explicit_paths" = false ]; then
   fi
   "${CMD[@]}" "$@" "${DEFAULT_FILES[@]}"
   exit $?
+fi
+
+if [ "$has_config" = false ] && [ -z "$CONFIG_PATH" ]; then
+  echo "Stylelint config file is missing. Create .stylelintrc.json in the project root (or a nearest config in the target paths), or pass --config." >&2
+  exit 2
 fi
 
 if [ "$uses_scss" = true ] && config_supports_scss "$CONFIG_PATH"; then

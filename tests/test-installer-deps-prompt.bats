@@ -93,8 +93,8 @@ env.pop("DDEV_NONINTERACTIVE", None)
 
 cmd = ["bash", os.path.join(addon_root, "dcq-install.sh")]
 prompts = {
-    b"Accept recommended settings? (y/N)": b"n\n",
-    b"Recommend installing drupal/core-dev as a dev dependency": b"n\n",
+    b"Accept recommended settings for this install? [Y/n]": b"n\n",
+    b"Install drupal/core-dev now to provide PHP code quality tools": b"n\n",
 }
 
 seen = set()
@@ -141,8 +141,8 @@ code = os.waitstatus_to_exitcode(status)
 sys.exit(code)
 PY
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Accept recommended settings? (y/N)"* ]]
-  [[ "$output" == *"Recommend installing drupal/core-dev as a dev dependency"* ]]
+  [[ "$output" == *"Accept recommended settings for this install? [Y/n]"* ]]
+  [[ "$output" == *"Install drupal/core-dev now to provide PHP code quality tools"* ]]
   [[ "$output" == *"Project root tooling configs updated"* ]]
 
   run_search "^composer require --dev drupal/core-dev --with-all-dependencies$" "${DDEV_STUB_LOG}"
@@ -179,7 +179,7 @@ env.pop("DDEV_NONINTERACTIVE", None)
 
 cmd = ["bash", os.path.join(addon_root, "dcq-install.sh")]
 prompts = {
-    b"Accept recommended settings? (y/N)": b"y\n",
+    b"Accept recommended settings for this install? [Y/n]": b"y\n",
 }
 
 seen = set()
@@ -226,7 +226,7 @@ code = os.waitstatus_to_exitcode(status)
 sys.exit(code)
 PY
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Accept recommended settings? (y/N)"* ]]
+  [[ "$output" == *"Accept recommended settings for this install? [Y/n]"* ]]
 
   run_search "^composer config --no-plugins allow-plugins\\.tbachert/spi false$" "${DDEV_STUB_LOG}"
   [ "$status" -eq 0 ]
@@ -288,7 +288,7 @@ env.pop("DDEV_NONINTERACTIVE", None)
 
 cmd = ["bash", os.path.join(addon_root, "dcq-install.sh")]
 prompts = {
-    b"Accept recommended settings? (y/N)": b"n\n",
+    b"Accept recommended settings for this install? [Y/n]": b"n\n",
     b"VS Code/Codium settings/extensions: choose merge, overwrite (with backup), or skip.": b"\n",
 }
 
@@ -336,7 +336,7 @@ code = os.waitstatus_to_exitcode(status)
 sys.exit(code)
 PY
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Accept recommended settings? (y/N)"* ]]
+  [[ "$output" == *"Accept recommended settings for this install? [Y/n]"* ]]
   [[ "$output" == *"VS Code/Codium settings/extensions: choose merge, overwrite (with backup), or skip."* ]]
   [[ "$output" == *"Skipping IDE settings/extensions install."* ]]
   [ ! -f "${APP_ROOT}/.vscode/settings.json" ]
@@ -421,11 +421,11 @@ for key in (
 
 cmd = ["bash", os.path.join(addon_root, "dcq-install.sh")]
 prompts = {
-    b"Accept recommended settings? (y/N)": b"n\n",
-    b"Recommend installing drupal/core-dev as a dev dependency": b"n\n",
+    b"Accept recommended settings for this install? [Y/n]": b"n\n",
+    b"Install drupal/core-dev now to provide PHP code quality tools": b"n\n",
     b"Conflict at ": b"s\n",
     b"Set phpstan.neon level (0-10) (default: 0):": b"0\n",
-    b"[i]nstall these in the project root, [s]kip node module installation (default: install):": b"s\n",
+    b"[i]nstall in the project root, [s]kip (default: install):": b"s\n",
     b"Add 'dcq-reports/' to .gitignore?": b"n\n",
     b"VS Code/Codium settings/extensions: choose merge, overwrite (with backup), or skip.": b"\n",
 }
@@ -474,7 +474,7 @@ code = os.waitstatus_to_exitcode(status)
 sys.exit(code)
 PY
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Recommend installing drupal/core-dev as a dev dependency"* ]]
+  [[ "$output" == *"Install drupal/core-dev now to provide PHP code quality tools"* ]]
   [[ "$output" == *"Conflict at"* ]]
   [[ "$output" == *"ESLint, Prettier, and Stylelint require several packages to function properly."* ]]
   [[ "$output" == *"Add 'dcq-reports/' to .gitignore?"* ]]

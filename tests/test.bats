@@ -697,7 +697,7 @@ teardown() {
   health_checks
 }
 
-@test "installer prompt accepts recommended settings" {
+@test "installer prompt defaults to recommended settings" {
   set -u -o pipefail
   unset DCQ_NONINTERACTIVE
   unset DDEV_NONINTERACTIVE
@@ -724,7 +724,7 @@ import select
 import sys
 
 cmd = ["ddev", "add-on", "get", "${DIR}"]
-prompt = b"Accept recommended settings? (y/N)"
+prompt = b"Accept recommended settings for this install? [Y/n]"
 sent = False
 buf = b""
 
@@ -743,7 +743,7 @@ try:
             sys.stdout.buffer.flush()
             buf += data
             if (not sent) and (prompt in buf):
-                os.write(fd, b"y\\n")
+                os.write(fd, b"\\n")
                 sent = True
 except OSError:
     pass
@@ -753,7 +753,8 @@ code = os.waitstatus_to_exitcode(status)
 sys.exit(code)
 PY
   assert_success
-  assert_output --partial "Accept recommended settings? (y/N)"
+  assert_output --partial "Recommended defaults for this install:"
+  assert_output --partial "Accept recommended settings for this install? [Y/n]"
   assert_phpstan_level "3"
   if command -v rg >/dev/null 2>&1; then
     run rg -n "^dcq-reports/$" ".gitignore"
@@ -795,8 +796,8 @@ import sys
 cmd = ["ddev", "add-on", "get", "${DIR}"]
 # Answer 'n' to recommended settings, then respond to individual prompts
 responses = {
-    b"Accept recommended settings? (y/N)": b"n\n",
-    b"Recommend installing drupal/core-dev as a dev dependency": b"n\n",
+    b"Accept recommended settings for this install? [Y/n]": b"n\n",
+    b"Install drupal/core-dev now to provide PHP code quality tools": b"n\n",
     b"back up and replace, skip, or abort? [replace/skip/abort]": b"skip\n",
     b"Install Node toolchain": b"n\n",
     b"PHPStan level": b"0\n",
@@ -836,11 +837,13 @@ code = os.waitstatus_to_exitcode(status)
 sys.exit(code)
 PY
   assert_success
-  assert_output --partial "Accept recommended settings? (y/N)"
+  assert_output --partial "Recommended defaults for this install:"
+  assert_output --partial "Accept recommended settings for this install? [Y/n]"
   # Verify individual prompts appeared (user declined recommended settings)
-  assert_output --partial "Recommend installing drupal/core-dev as a dev dependency"
+  assert_output --partial "Install drupal/core-dev now to provide PHP code quality tools"
   assert_output --partial "VS Code/Codium settings/extensions: choose merge, overwrite (with backup), or skip."
   assert_output --partial "Skipping IDE settings/extensions install."
+  assert_output --partial "Add 'dcq-reports/' to .gitignore? [Y/n]"
   assert_output --partial "Set phpstan.neon level"
   # PHPStan level should be 0 (not the recommended 3) since user chose it
   assert_phpstan_level "0"
@@ -883,6 +886,7 @@ with open(path, encoding="utf-8") as fh:
 
 assert data.get("dcq.customSetting") == "keep"
 assert data.get("eslint.nodePath") == "custom"
+assert data.get("eslint.quiet") is True
 PY
   assert_success
 
@@ -964,10 +968,27 @@ PY
   assert_failure
   run grep -q '"eslint.options"' ".vscode/settings.json"
   assert_failure
+  run grep -q '"eslint.quiet": true' ".vscode/settings.json"
+  assert_success
   run grep -q '"stylelint.stylelintPath"' ".vscode/settings.json"
   assert_failure
   run grep -q '"prettier.prettierPath"' ".vscode/settings.json"
   assert_failure
+}
+
+@test "VS Code settings respect DCQ_ESLINT_QUIET override" {
+  set -u -o pipefail
+  export DCQ_INSTALL_DEPS=skip
+  export DCQ_INSTALL_NODE_DEPS=skip
+  export DCQ_INSTALL_IDE_SETTINGS=overwrite
+  export DCQ_ESLINT_QUIET=0
+
+  run ddev add-on get "${DIR}"
+  assert_success
+
+  assert_file_exist ".vscode/settings.json"
+  run grep -q '"eslint.quiet": false' ".vscode/settings.json"
+  assert_success
 }
 
 @test "path map prefers DDEV_HOST_PROJECT_ROOT" {
@@ -1015,8 +1036,203 @@ PY
   assert_success
   run grep -q "docroot/sites" phpstan.neon
   assert_success
-  run grep -q "docroot/sites/\*/files" phpstan.neon
+  run grep -q "docroot/sites/\*/files/\*" phpstan.neon
   assert_success
+}
+
+@test "stylelint-fix rewrites explicit web paths with non-web docroot" {
+  set -u -o pipefail
+  mkdir -p docroot
+  run ddev config --docroot=docroot
+  assert_success
+  retry_ddev_command ddev restart -y
+  assert_success
+
+  run ddev add-on get "${DIR}"
+  assert_success
+
+  mkdir -p node_modules/stylelint/bin
+  cat > node_modules/stylelint/bin/stylelint.mjs <<'JS'
+#!/usr/bin/env node
+process.exit(0);
+JS
+  chmod +x node_modules/stylelint/bin/stylelint.mjs
+
+  mkdir -p docroot/themes/custom/dcq_theme/css
+  cat > docroot/themes/custom/dcq_theme/css/fixable.css <<'CSS'
+.dcq-test {
+  color: red;
+}
+CSS
+
+  run wait_for_container_path "/var/www/html/node_modules/stylelint/bin/stylelint.mjs"
+  assert_success
+  run wait_for_container_path "/var/www/html/docroot/themes/custom/dcq_theme/css/fixable.css"
+  assert_success
+
+  run ddev stylelint-fix web/themes/custom/dcq_theme/css/fixable.css
+  assert_success
+}
+
+@test "eslint fixed mode falls back to .eslintrc.json when passing config is missing" {
+  set -u -o pipefail
+  export DCQ_INSTALL_DEPS=skip
+  export DCQ_INSTALL_NODE_DEPS=skip
+  run ddev add-on get "${DIR}"
+  assert_success
+
+  run rm -f .eslintrc.passing.json
+  assert_success
+
+  mkdir -p web/modules/custom/dcq_test/js
+  cat > web/modules/custom/dcq_test/js/fixed-mode.js <<'JS'
+const x = 1;
+JS
+
+  mkdir -p node_modules/eslint/bin
+  cat > node_modules/eslint/bin/eslint.js <<'JS'
+#!/usr/bin/env node
+process.stdout.write(process.argv.slice(2).join("\n"));
+JS
+  chmod +x node_modules/eslint/bin/eslint.js
+
+  run wait_for_container_path "/var/www/html/node_modules/eslint/bin/eslint.js"
+  assert_success
+
+  run ddev exec bash -lc 'cd /var/www/html && ESLINT_CONFIG_MODE=fixed ./.ddev/commands/web/eslint web/modules/custom/dcq_test/js/fixed-mode.js'
+  assert_success
+  assert_output --partial "--config=/var/www/html/.eslintrc.json"
+}
+
+@test "eslint default run targets configured docroot when no paths are provided" {
+  set -u -o pipefail
+  export DCQ_INSTALL_DEPS=skip
+  export DCQ_INSTALL_NODE_DEPS=skip
+  run ddev add-on get "${DIR}"
+  assert_success
+
+  mkdir -p node_modules/eslint/bin
+  cat > node_modules/eslint/bin/eslint.js <<'JS'
+#!/usr/bin/env node
+process.stdout.write(process.argv.slice(2).join("\n"));
+JS
+  chmod +x node_modules/eslint/bin/eslint.js
+
+  run wait_for_container_path "/var/www/html/node_modules/eslint/bin/eslint.js"
+  assert_success
+
+  run ddev exec bash -lc 'cd /var/www/html && ESLINT_CONFIG_MODE=nearest ./.ddev/commands/web/eslint'
+  assert_success
+  assert_output --partial "web"
+  case "$output" in
+    *"modules/custom"*)
+      echo "Expected no hardcoded custom-directory target list in eslint wrapper default run."
+      return 1
+      ;;
+  esac
+}
+
+@test "stylelint-fix fails with helpful message when project config is missing" {
+  set -u -o pipefail
+  export DCQ_INSTALL_DEPS=skip
+  export DCQ_INSTALL_NODE_DEPS=skip
+  run ddev add-on get "${DIR}"
+  assert_success
+
+  run rm -f .stylelintrc.json .stylelintrc .stylelintrc.yaml .stylelintrc.yml .stylelintrc.js
+  assert_success
+
+  mkdir -p node_modules/stylelint/bin
+  cat > node_modules/stylelint/bin/stylelint.mjs <<'JS'
+#!/usr/bin/env node
+process.exit(0);
+JS
+  chmod +x node_modules/stylelint/bin/stylelint.mjs
+
+  run wait_for_container_path "/var/www/html/node_modules/stylelint/bin/stylelint.mjs"
+  assert_success
+
+  run ddev stylelint-fix web/themes/custom/dcq_theme/css/fixable.css
+  assert_failure
+  assert_output --partial "Stylelint config file is missing."
+}
+
+@test "stylelint-fix uses nearest config when root config is missing" {
+  set -u -o pipefail
+  export DCQ_INSTALL_DEPS=skip
+  export DCQ_INSTALL_NODE_DEPS=skip
+  run ddev add-on get "${DIR}"
+  assert_success
+
+  run rm -f .stylelintrc.json .stylelintrc .stylelintrc.yaml .stylelintrc.yml .stylelintrc.js
+  assert_success
+
+  mkdir -p web/themes/custom/dcq_theme/css
+  cat > web/themes/custom/dcq_theme/.stylelintrc.json <<'JSON'
+{
+  "rules": {}
+}
+JSON
+  cat > web/themes/custom/dcq_theme/css/fixable.css <<'CSS'
+a {
+  color: RED;
+}
+CSS
+
+  mkdir -p node_modules/stylelint/bin
+  cat > node_modules/stylelint/bin/stylelint.mjs <<'JS'
+#!/usr/bin/env node
+process.stdout.write(process.argv.slice(2).join("\n"));
+JS
+  chmod +x node_modules/stylelint/bin/stylelint.mjs
+
+  run wait_for_container_path "/var/www/html/node_modules/stylelint/bin/stylelint.mjs"
+  assert_success
+
+  run ddev stylelint-fix web/themes/custom/dcq_theme/css/fixable.css
+  assert_success
+  assert_output --partial "--config"
+  assert_output --partial "/var/www/html/web/themes/custom/dcq_theme/.stylelintrc.json"
+}
+
+@test "prettier-fix fails with helpful message when project config is missing" {
+  set -u -o pipefail
+  export DCQ_INSTALL_DEPS=skip
+  export DCQ_INSTALL_NODE_DEPS=skip
+  run ddev add-on get "${DIR}"
+  assert_success
+
+  run rm -f .prettierrc.json
+  assert_success
+
+  mkdir -p node_modules/prettier/bin
+  cat > node_modules/prettier/bin/prettier.cjs <<'JS'
+#!/usr/bin/env node
+process.exit(0);
+JS
+  chmod +x node_modules/prettier/bin/prettier.cjs
+
+  run wait_for_container_path "/var/www/html/node_modules/prettier/bin/prettier.cjs"
+  assert_success
+
+  run ddev prettier-fix web/themes/custom/dcq_theme/js/prettier.js
+  assert_failure
+  assert_output --partial "Prettier config file is missing."
+}
+
+@test "checks runs phpcs without forcing explicit paths" {
+  set -u -o pipefail
+  export DCQ_INSTALL_DEPS=skip
+  export DCQ_INSTALL_NODE_DEPS=skip
+  run ddev add-on get "${DIR}"
+  assert_success
+
+  run ddev exec bash -lc $'for cmd in composer-validate php-parallel-lint phpstan eslint stylelint prettier cspell; do\ncat > "/var/www/html/.ddev/commands/web/\\${cmd}" <<\'SH\'\n#!/usr/bin/env bash\nexit 0\nSH\nchmod +x "/var/www/html/.ddev/commands/web/\\${cmd}"\ndone\ncat > /var/www/html/.ddev/commands/web/phpcs <<\'SH\'\n#!/usr/bin/env bash\nif [ "$#" -ne 0 ]; then\n  echo "unexpected phpcs args: $*" >&2\n  exit 23\nfi\nexit 0\nSH\nchmod +x /var/www/html/.ddev/commands/web/phpcs'
+  assert_success
+
+  run ddev checks
+  assert_success
+  assert_output --partial "- phpcs: PASS"
 }
 
 @test "install from directory with phpstan level override" {
@@ -1057,14 +1273,120 @@ PY
   # Check for excludePaths
   run grep -q "excludePaths:" phpstan.neon
   assert_success
-  run grep -q "web/sites/\*/files" phpstan.neon
+  run grep -q "web/sites/\*/files/\*" phpstan.neon
   assert_success
+}
+
+@test "phpstan excludes nested files directory descendants" {
+  set -u -o pipefail
+  run ddev add-on get "${DIR}"
+  assert_success
+
+  mkdir -p web/sites/default/files/php/twig/test-subdir
+  cat > web/sites/default/files/php/twig/test-subdir/should-not-scan.php <<'PHP'
+<?php
+
+final class DcqPhpstanExcludeProbe {}
+PHP
+
+  run ddev phpstan analyse --debug -c phpstan.neon web/sites
+  assert_failure
+
+  case "$output" in
+    *"test-subdir/should-not-scan.php"*)
+      echo "Expected phpstan excludePaths to skip files descendants under web/sites/*/files."
+      return 1
+      ;;
+  esac
+}
+
+@test "phpstan fails with helpful message when project config is missing" {
+  set -u -o pipefail
+  export DCQ_INSTALL_DEPS=skip
+  export DCQ_INSTALL_NODE_DEPS=skip
+  run ddev add-on get "${DIR}"
+  assert_success
+
+  run rm -f phpstan.neon phpstan.neon.dist phpstan.dist.neon
+  assert_success
+
+  mkdir -p vendor/bin
+  cat > vendor/bin/phpstan <<'SH'
+#!/bin/sh
+echo "stub phpstan"
+exit 0
+SH
+  chmod +x vendor/bin/phpstan
+
+  run wait_for_container_path "/var/www/html/vendor/bin/phpstan"
+  assert_success
+
+  run ddev phpstan
+  assert_failure
+  assert_output --partial "PHPStan config file is missing."
+  assert_output --partial "Create phpstan.neon in the project root"
+}
+
+@test "default ignore configs include DCQ scope exclusions after install" {
+  set -u -o pipefail
+  run ddev add-on get "${DIR}"
+  assert_success
+
+  assert_file_exist ".eslintignore"
+  assert_file_exist ".stylelintignore"
+  assert_file_exist ".prettierignore"
+
+  run grep -q '\*\*/core/\*\*' .eslintignore
+  assert_success
+  run grep -q '\*\*/sites/\*/files/\*\*' .eslintignore
+  assert_success
+
+  run grep -q '\*\*/core/\*\*' .stylelintignore
+  assert_success
+  run grep -q '\*\*/sites/\*/files/\*\*' .stylelintignore
+  assert_success
+
+  run grep -q '^\*\.yml$' .prettierignore
+  assert_success
+  run grep -q '\*\*/core/\*\*' .prettierignore
+  assert_success
+  run grep -q '\*\*/sites/\*/files/\*\*' .prettierignore
+  assert_success
+}
+
+@test "cspell default run targets current directory when no paths are provided" {
+  set -u -o pipefail
+  export DCQ_INSTALL_DEPS=skip
+  export DCQ_INSTALL_NODE_DEPS=skip
+  run ddev add-on get "${DIR}"
+  assert_success
+
+  mkdir -p node_modules/.bin
+  cat > node_modules/.bin/cspell <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$@"
+SH
+  chmod +x node_modules/.bin/cspell
+
+  run wait_for_container_path "/var/www/html/node_modules/.bin/cspell"
+  assert_success
+
+  run ddev exec bash -lc 'cd /var/www/html && ./.ddev/commands/web/cspell'
+  assert_success
+  assert_output --partial "."
 }
 
 @test "cspell config is expanded during installation" {
   set -u -o pipefail
-  run ddev add-on get "${DIR}"
+
+  # Provide minimal Drupal core dictionary files so expansion can run.
+  run ddev exec bash -lc 'mkdir -p /var/www/html/web/core/misc/cspell && printf "drupal\n" > /var/www/html/web/core/misc/cspell/drupal-dictionary.txt && printf "dictionary\n" > /var/www/html/web/core/misc/cspell/dictionary.txt'
   assert_success
+
+  run bash -lc "ddev add-on get \"${DIR}\" 2>&1"
+  assert_success
+  assert_output --partial "Expanding .cspell.json with project-specific settings..."
+  assert_output --partial "Successfully expanded .cspell.json"
 
   # Verify expanded dictionaries array includes Drupal and project-words
   run grep -q '"drupal"' .cspell.json
@@ -1092,6 +1414,29 @@ PY
 
   # Verify .cspell-project-words.txt was created
   assert_file_exist ".cspell-project-words.txt"
+}
+
+@test "cspell expansion explains skip when Drupal core dictionaries are missing" {
+  set -u -o pipefail
+
+  run bash -lc "ddev add-on get \"${DIR}\" 2>&1"
+  assert_success
+  assert_output --partial "Expanding .cspell.json with project-specific settings..."
+  assert_output --partial "Skipping CSpell expansion (Drupal core dictionary files are not available at web/core/misc/cspell)."
+}
+
+@test "container test -s rejects empty files and accepts non-empty files" {
+  # Validates the mechanism behind wait_for_container_file's readability check.
+  # An empty file (simulating a partially-synced inode) must fail test -s so
+  # that the installer waits for content to arrive rather than handing a zero-
+  # byte file to prepare-cspell.php.
+  set -u -o pipefail
+
+  run ddev exec bash -lc 'truncate -s 0 /tmp/dcq-empty-test && test -s /tmp/dcq-empty-test'
+  assert_failure
+
+  run ddev exec bash -lc 'printf "{}" > /tmp/dcq-nonempty-test && test -s /tmp/dcq-nonempty-test'
+  assert_success
 }
 
 @test "remove cleans ddev assets and shims" {
@@ -1135,7 +1480,7 @@ PY
 
   run ddev add-on get "${DIR}"
   assert_success
-  assert_output --partial "Node dependencies added (project root)."
+  assert_output --partial "Node toolchain installed (project root)."
   assert_container_file_exist "/var/www/html/package-lock.json"
   assert_container_file_exist "/var/www/html/node_modules/eslint-plugin-no-jquery/package.json"
   assert_container_file_exist "/var/www/html/node_modules/stylelint-prettier/package.json"
@@ -1158,7 +1503,7 @@ PY
 
   run ddev add-on get "${DIR}"
   assert_success
-  assert_output --partial "Node dependencies added (project root)."
+  assert_output --partial "Node toolchain installed (project root)."
   assert_container_file_exist "/var/www/html/yarn.lock"
   assert_container_file_exist "/var/www/html/node_modules/eslint-plugin-no-jquery/package.json"
   assert_container_file_exist "/var/www/html/node_modules/stylelint-prettier/package.json"
@@ -1175,10 +1520,41 @@ PY
 
   run ddev add-on get "${DIR}"
   assert_success
-  assert_output --partial "Node dependencies added (project root)."
+  assert_output --partial "Node toolchain installed (project root)."
   assert_container_file_exist "/var/www/html/package-lock.json"
   assert_container_file_exist "/var/www/html/node_modules/eslint-plugin-no-jquery/package.json"
   assert_container_file_exist "/var/www/html/node_modules/stylelint-prettier/package.json"
+}
+
+# bats test_tags=node
+@test "node install failure does not crash the installer" {
+  set -u -o pipefail
+  export DCQ_INSTALL_DEPS=skip
+  export DCQ_INSTALL_NODE_DEPS=root
+  mkdir -p web/core
+  write_stub_package_json "web/core/package.json"
+
+  # Pre-create a root package.json that includes the same deps as the core
+  # stub (so find_missing_node_deps returns nothing and we reach the fallback
+  # npm-install path) PLUS an unresolvable dependency so npm install fails.
+  # The installer should handle this gracefully instead of crashing the
+  # entire post-install action via set -e.
+  cat > package.json <<'JSON'
+{
+  "name": "dcq-fail-test",
+  "private": true,
+  "devDependencies": {
+    "eslint-plugin-no-jquery": "^3.1.1",
+    "stylelint-prettier": "^5.0.3",
+    "this-package-should-not-exist-dcq-test": "99999.0.0"
+  }
+}
+JSON
+
+  run bash -lc "ddev add-on get \"${DIR}\" 2>&1"
+  assert_success
+  assert_output --partial "JS dependency install failed."
+  assert_output --partial "You can retry manually"
 }
 
 # bats test_tags=full
@@ -1226,6 +1602,7 @@ PY
   assert_log_contains '"stylelint.stylelintPath": "./node_modules/stylelint"' ".vscode/settings.json"
   assert_log_contains '"prettier.prettierPath": "./node_modules/prettier"' ".vscode/settings.json"
   assert_log_contains '"eslint.nodePath": "node_modules"' ".vscode/settings.json"
+  assert_log_contains '"eslint.quiet": true' ".vscode/settings.json"
   assert_log_contains '"resolvePluginsRelativeTo": "."' ".vscode/settings.json"
 
   run ./.ddev/drupal-code-quality/tooling/bin/phpstan --version

@@ -435,7 +435,11 @@ maybe_install_missing_root_deps() {
     return 1
   fi
 
-  mapfile -t missing_node_deps_array <<< "$missing_node_deps"
+  # Avoid mapfile (requires bash 4+; macOS ships bash 3.2).
+  missing_node_deps_array=()
+  while IFS= read -r _line; do
+    [ -n "$_line" ] && missing_node_deps_array+=("$_line")
+  done <<< "$missing_node_deps"
   if [ "$suppress_list" -ne 1 ]; then
     emit 'Detected missing Drupal JS tooling dependencies in package.json (%d):\n' "${#missing_node_deps_array[@]}"
     for dep in "${missing_node_deps_array[@]}"; do
@@ -467,13 +471,22 @@ maybe_install_missing_root_deps() {
     done
     if [ "$package_manager" = "npm" ]; then
       cmd=( "$ddev_cmd" "exec" "bash" "-lc" "cd /var/www/html && npm install --save-dev --package-lock${deps_cmd}" )
-      run_command "${cmd[@]}"
+      if ! run_command "${cmd[@]}"; then
+        emit 'npm install --save-dev failed. You can retry manually.\n'
+        return 1
+      fi
       emit 'Node dependencies added (project root).\n'
       cmd=( "$ddev_cmd" "exec" "bash" "-lc" "cd /var/www/html && npm install --package-lock" )
-      run_command "${cmd[@]}"
+      if ! run_command "${cmd[@]}"; then
+        emit 'npm install failed. You can retry manually.\n'
+        return 1
+      fi
     else
       cmd=( "$ddev_cmd" "exec" "bash" "-lc" "cd /var/www/html && yarn add -D${deps_cmd}" )
-      run_command "${cmd[@]}"
+      if ! run_command "${cmd[@]}"; then
+        emit 'yarn add failed. You can retry manually.\n'
+        return 1
+      fi
       emit 'Node dependencies added (project root).\n'
     fi
     return 0
@@ -509,7 +522,7 @@ prompt_node_install_action() {
 
   emit 'ESLint, Prettier, and Stylelint require several packages to function properly.\n'
   emit '\n'
-  emit '[i]nstall these in the project root, [s]kip node module installation (default: install): '
+  emit '[i]nstall in the project root, [s]kip (default: install): '
   if ! IFS= read -r -u "$PROMPT_IN_FD" choice; then
     choice=""
   fi
@@ -602,24 +615,30 @@ prompt_yes_no() {
 }
 
 prompt_recommended_settings() {
-  # Prompt for accepting recommended settings (default: no).
+  # Prompt for accepting recommended settings (default: yes).
   if [ "${PROMPT_AVAILABLE:-0}" -ne 1 ]; then
     return 1
   fi
 
-  printf 'Accept recommended settings? (y/N) ' >&"$PROMPT_OUT_FD"
-  local answer=""
-  if ! IFS= read -r -u "$PROMPT_IN_FD" answer; then
-    answer=""
+  if prompt_yes_no "Accept recommended settings for this install?" 0; then
+    return 0
   fi
-  answer="$(string_lower "$answer")"
-  if [ -z "$answer" ]; then
-    return 1
-  fi
-  case "$answer" in
-    y|yes) return 0 ;;
-  esac
   return 1
+}
+
+print_recommended_settings_summary() {
+  # Show what the one-step recommended install will do before prompting.
+  if [ "${PROMPT_AVAILABLE:-0}" -ne 1 ]; then
+    return
+  fi
+
+  emit '\nRecommended defaults for this install:\n'
+  emit '  - If a copied config file already exists, the installer will create a backup and then replace the file.\n'
+  emit '  - Install missing PHP tooling via drupal/core-dev, including PHPStan, PHPCS, PHPCBF, and Drupal coding standards.\n'
+  emit '  - Install Node tooling in the project root, including ESLint, Stylelint, Prettier, and CSpell dependencies.\n'
+  emit '  - Set phpstan.neon level to 3 as a practical local default.\n'
+  emit '  - Merge DCQ VS Code/Codium settings into .vscode/settings.json and extension recommendations into .vscode/extensions.json.\n'
+  emit "  - Add 'dcq-reports/' to .gitignore so generated check logs and patch previews are not committed.\n"
 }
 
 set_default_env() {
@@ -809,7 +828,7 @@ maybe_add_gitignore_reports() {
 
   emit 'Add %s to .gitignore to avoid committing report logs.\n' "$entry"
   printf '\n'
-  if prompt_yes_no "Add '${entry}' to .gitignore?" 1; then
+  if prompt_yes_no "Add '${entry}' to .gitignore?" 0; then
     if [ -f "$gitignore" ]; then
       printf '\n%s\n' "$entry" >>"$gitignore"
     else
@@ -924,11 +943,50 @@ merge_phpcs_config() {
   rm -f "$tmp" "$merged"
 }
 
+append_unique_lines_from_file() {
+  local target="$1"
+  local source="$2"
+  local tmp
+  local line
+
+  if [ ! -f "$source" ]; then
+    return 0
+  fi
+
+  tmp="$(mktemp "${TMPDIR:-/tmp}/dcq-lines-XXXXXX")"
+  if [ -f "$target" ]; then
+    cat "$target" >"$tmp"
+  else
+    : >"$tmp"
+  fi
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    if [ "$line" = "#ddev-generated" ]; then
+      continue
+    fi
+    if grep -Fxq "$line" "$tmp"; then
+      continue
+    fi
+    printf '%s\n' "$line" >>"$tmp"
+  done <"$source"
+
+  if [ ! -f "$target" ] || ! cmp -s "$target" "$tmp"; then
+    cat "$tmp" >"$target"
+    emit_copy 'WRITE: %s\n' "$target"
+  fi
+  rm -f "$tmp"
+}
+
 expand_cspell_config() {
   local app_root="$1"
   local ddev_approot="${DDEV_APPROOT:-$app_root}"
   local prepare_script="${ddev_approot}/.ddev/drupal-code-quality/tooling/scripts/prepare-cspell.php"
   local cspell_config="${app_root%/}/.cspell.json"
+  local docroot="${DCQ_DOCROOT:-web}"
+  local ddev_cmd="${DDEV_EXECUTABLE:-ddev}"
+  local container_cspell="/var/www/html/.cspell.json"
+  local container_core_cspell_dir="/var/www/html/${docroot}/core/misc/cspell"
+  local container_prepare_script="/mnt/ddev_config/drupal-code-quality/tooling/scripts/prepare-cspell.php"
 
 
   # Check if CSpell config exists
@@ -944,36 +1002,36 @@ expand_cspell_config() {
   fi
 
   # Run prepare-cspell.php in the container to expand .cspell.json
-  if command_available "${DDEV_EXECUTABLE:-ddev}"; then
-    emit 'Expanding .cspell.json with project-specific settings...\n'
-    local ddev_cmd="${DDEV_EXECUTABLE:-ddev}"
-
-    # Copy prepare-cspell.php to project root for execution
-    local project_script="${app_root%/}/.prepare-cspell-tmp.php"
-    cp "$prepare_script" "$project_script" || {
-      emit 'Failed to copy prepare-cspell.php; skipping expansion.\n'
-      return 0
-    }
-
-    # Run the script in container from project root
-    # Capture both stdout and stderr, but don't fail the installer if it errors
-    # Pass the docroot via _WEB_ROOT environment variable
-    local output
-    if output=$("$ddev_cmd" exec bash -c "export _WEB_ROOT='${DCQ_DOCROOT:-web}' && php .prepare-cspell-tmp.php" 2>&1); then
-      if echo "$output" | grep -q "Writing json"; then
-        emit 'Successfully expanded .cspell.json\n'
-      else
-        emit 'CSpell expansion completed (no changes needed)\n'
-      fi
-    else
-      # Script failed - likely no Drupal core installed yet
-      emit 'Skipping CSpell expansion (Drupal core may not be installed yet)\n'
-    fi
-
-    # Clean up temp script
-    rm -f "$project_script"
-  else
+  if ! command_available "$ddev_cmd"; then
     emit 'DDEV not available; skipping CSpell expansion.\n'
+    return 0
+  fi
+
+  emit 'Expanding .cspell.json with project-specific settings...\n'
+
+  if ! wait_for_container_file "$ddev_cmd" "$container_cspell" 20 1 "readable"; then
+    emit 'Skipping CSpell expansion (.cspell.json not readable in the container after waiting).\n'
+    return 0
+  fi
+
+  if ! "$ddev_cmd" exec test -f "${container_core_cspell_dir}/dictionary.txt" >/dev/null 2>&1 \
+    || ! "$ddev_cmd" exec test -f "${container_core_cspell_dir}/drupal-dictionary.txt" >/dev/null 2>&1; then
+    emit 'Skipping CSpell expansion (Drupal core dictionary files are not available at %s).\n' "${docroot}/core/misc/cspell"
+    return 0
+  fi
+
+  local output
+  if output=$("$ddev_cmd" exec bash -lc "cd /var/www/html && export _WEB_ROOT='${docroot}' _CSPELL_DICTIONARY='.cspell-project-words.txt' && php '${container_prepare_script}'" 2>&1); then
+    if echo "$output" | grep -q "Writing json"; then
+      emit 'Successfully expanded .cspell.json\n'
+    else
+      emit 'CSpell expansion completed (no changes needed)\n'
+    fi
+  else
+    emit 'Skipping CSpell expansion (prepare-cspell.php failed).\n'
+    if truthy "${DCQ_VERBOSE:-0}" && [ -n "$output" ]; then
+      emit 'CSpell expansion error output:\n%s\n' "$output"
+    fi
   fi
 
   # Always return success - CSpell expansion is optional
@@ -1033,6 +1091,32 @@ command_available() {
   command -v "$1" >/dev/null 2>&1
 }
 
+wait_for_container_file() {
+  # Wait for a file to appear in the container.  When require_readable is set
+  # to a non-empty value the check additionally verifies that the file has
+  # non-zero size (test -s), which guards against filesystem-sync race
+  # conditions where the inode is visible but the content has not landed yet.
+  local ddev_cmd="$1"
+  local path="$2"
+  local max_attempts="${3:-20}"
+  local delay_seconds="${4:-1}"
+  local require_readable="${5:-}"
+  local attempts=0
+  local test_flag="-f"
+  if [ -n "$require_readable" ]; then
+    test_flag="-s"
+  fi
+
+  while [ "$attempts" -lt "$max_attempts" ]; do
+    if "$ddev_cmd" exec test "$test_flag" "$path" >/dev/null 2>&1; then
+      return 0
+    fi
+    attempts=$((attempts + 1))
+    sleep "$delay_seconds"
+  done
+  return 1
+}
+
 detect_package_manager() {
   local dir="$1"
   local has_yarn=0
@@ -1074,6 +1158,40 @@ escape_sed_replacement() {
   printf '%s' "${1:-}" | sed 's/[&|]/\\&/g'
 }
 
+eslint_quiet_disabled() {
+  case "${1:-}" in
+    0|false|FALSE|False|no|NO|off|OFF)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+resolve_eslint_quiet_setting() {
+  local app_root="$1"
+  local raw="${DCQ_ESLINT_QUIET:-}"
+  local config_file=""
+  local matched_line=""
+
+  if [ -z "$raw" ]; then
+    for config_file in "${app_root%/}/.ddev/config.yaml" "${app_root%/}/.ddev/config.yml"; do
+      [ -f "$config_file" ] || continue
+      matched_line="$(grep -E '^[[:space:]-]*["'"'"']?DCQ_ESLINT_QUIET=' "$config_file" | tail -n 1 || true)"
+      [ -n "$matched_line" ] || continue
+      raw="${matched_line#*=}"
+      raw="${raw%%#*}"
+      raw="$(printf '%s' "$raw" | tr -d "\"'" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+      [ -n "$raw" ] && break
+    done
+  fi
+
+  if eslint_quiet_disabled "$raw"; then
+    printf 'false'
+    return
+  fi
+  printf 'true'
+}
+
 render_ide_template() {
   # Render IDE settings template with resolved shim and tool paths.
   local template="$1"
@@ -1083,17 +1201,20 @@ render_ide_template() {
   local prettier_path="$5"
   local eslint_node_path="$6"
   local eslint_resolve_plugins="$7"
+  local eslint_quiet="$8"
   local escaped_shim
   local escaped_stylelint
   local escaped_prettier
   local escaped_node_path
   local escaped_resolve_plugins
+  local escaped_eslint_quiet
 
   escaped_shim="$(escape_sed_replacement "$shim_setting")"
   escaped_stylelint="$(escape_sed_replacement "$stylelint_path")"
   escaped_prettier="$(escape_sed_replacement "$prettier_path")"
   escaped_node_path="$(escape_sed_replacement "$eslint_node_path")"
   escaped_resolve_plugins="$(escape_sed_replacement "$eslint_resolve_plugins")"
+  escaped_eslint_quiet="$(escape_sed_replacement "$eslint_quiet")"
 
   sed \
     -e '1{/^#ddev-generated$/d;}' \
@@ -1102,6 +1223,7 @@ render_ide_template() {
     -e "s|__DCQ_PRETTIER_PATH__|${escaped_prettier}|g" \
     -e "s|__DCQ_ESLINT_NODE_PATH__|${escaped_node_path}|g" \
     -e "s|__DCQ_ESLINT_RESOLVE_PLUGINS__|${escaped_resolve_plugins}|g" \
+    -e "s|__DCQ_ESLINT_QUIET__|${escaped_eslint_quiet}|g" \
     "$template" >"$output"
 }
 
@@ -1475,7 +1597,10 @@ node_toolchain_present() {
 
 run_command() {
   # Echo and execute a command (simple transparency for users).
+  # In interactive installs we route output through a small sanitizer to drop
+  # terminal query/response noise (OSC/DSR bytes) that can appear as garbage.
   local arg
+  local status
   emit 'Running:'
   for arg in "$@"; do
     emit ' %q' "$arg"
@@ -1484,6 +1609,11 @@ run_command() {
   if [ "${non_interactive:-0}" -eq 1 ] || [ "${PROMPT_AVAILABLE:-0}" -ne 1 ]; then
     "$@"
   else
+    if command_available perl; then
+      "$@" 2>&1 | perl -pe 's/\e\][^\a\x1b]*(?:\a|\e\\)//g; s/\e\[[0-9;?]*R//g;' >&"$PROMPT_OUT_FD"
+      status=${PIPESTATUS[0]}
+      return "$status"
+    fi
     "$@" >&"$PROMPT_OUT_FD"
   fi
 }
@@ -1586,8 +1716,11 @@ fi
 # In non-interactive mode, or if user accepts, set recommended defaults for any unset vars.
 recommended_mode=0
 if [ "$non_interactive" -eq 0 ] && [ "${PROMPT_AVAILABLE:-0}" -eq 1 ]; then
+  print_recommended_settings_summary
   if prompt_recommended_settings; then
     recommended_mode=1
+  else
+    emit 'Using manual mode. You will be prompted for each setting.\n'
   fi
 fi
 
@@ -1602,14 +1735,14 @@ if [ "$non_interactive" -eq 1 ] || [ "$recommended_mode" -eq 1 ]; then
   set_default_env "DCQ_INSTALL_GITIGNORE" "add"
 fi
 
-# Fail loudly if ddev exec cannot resolve a project. Silent skips later are
+# Fail loudly if ddev describe cannot resolve a project. Silent skips later are
 # usually caused by running in a context where DDEV can't find .ddev/config.yaml.
 ddev_cmd="${DDEV_EXECUTABLE:-ddev}"
 if command_available "$ddev_cmd"; then
-  if ! "$ddev_cmd" exec true >/dev/null 2>&1; then
-    emit 'ERROR: ddev exec could not resolve a project from %s.\n' "${PWD:-.}"
+  if ! "$ddev_cmd" describe >/dev/null 2>&1; then
+    emit 'ERROR: ddev describe could not resolve a project from %s.\n' "${PWD:-.}"
     emit 'Run the installer from the target project (for add-on installs, this should be automatic).\n'
-    emit 'Try: cd %s && ddev exec true\n' "$app_root"
+    emit 'Try: cd %s && ddev describe\n' "$app_root"
     exit 1
   fi
 fi
@@ -1681,9 +1814,9 @@ if [ "${#missing_tools[@]}" -gt 0 ]; then
     fi
 
     if [ "$action" = "install" ]; then
-      question="Recommend installing PHP dev tools from composer.lock. Proceed?"
+      question="Install PHP dev tools from composer.lock now?"
     else
-      question="Recommend installing drupal/core-dev as a dev dependency to install PHP code quality tools and Drupal coding standards. Proceed?"
+      question="Install drupal/core-dev now to provide PHP code quality tools and Drupal coding standards?"
     fi
 
     should_install=0
@@ -1905,6 +2038,11 @@ while IFS= read -r -d '' source; do
   copy_changed=$((copy_changed + 1))
 done < <(find "$addon_root" -type f -print0)
 
+# Append DCQ scope defaults to the project prettier ignore file.
+append_unique_lines_from_file \
+  "${app_root%/}/.prettierignore" \
+  "${addon_root}/config-amendments/.prettierignore.dcq"
+
 if [ "$copy_changed" -eq 0 ] && [ "$copy_skipped" -eq 0 ]; then
   emit 'All files already match; no changes.\n'
 else
@@ -2099,9 +2237,16 @@ if [ "$core_package_json_present" -eq 1 ]; then
           else
             cmd=( "$ddev_cmd" "exec" "bash" "-lc" "cd /var/www/html && yarn install" )
           fi
-          run_command "${cmd[@]}"
+          if run_command "${cmd[@]}"; then
+            node_install_done=1
+          else
+            emit 'JS dependency install failed. You can retry manually:\n'
+            emit '  ddev exec bash -lc "cd /var/www/html && %s install"\n' "${root_pm:-npm}"
+          fi
         fi
-        emit 'Node toolchain installed (project root).\n'
+        if [ "$node_install_done" -eq 1 ]; then
+          emit 'Node toolchain installed (project root).\n'
+        fi
       fi
     fi
   fi
@@ -2190,6 +2335,7 @@ if [ -f "$ide_settings_template" ] || [ -f "$ide_extensions_template" ]; then
       js_modules=""
       eslint_node_path=""
       eslint_resolve_plugins=""
+      eslint_quiet="$(resolve_eslint_quiet_setting "$app_root")"
       if [ "$ide_node_mode" = "root" ] && [ "$has_root_node_modules" -eq 1 ]; then
         js_modules="./node_modules"
         eslint_node_path="node_modules"
@@ -2205,7 +2351,7 @@ if [ -f "$ide_settings_template" ] || [ -f "$ide_extensions_template" ]; then
       fi
 
       render_ide_template "$ide_settings_template" "$ide_tmp" "$shim_setting" \
-        "$stylelint_path" "$prettier_path" "$eslint_node_path" "$eslint_resolve_plugins"
+        "$stylelint_path" "$prettier_path" "$eslint_node_path" "$eslint_resolve_plugins" "$eslint_quiet"
       if [ "$ide_js_paths_set" -eq 0 ]; then
         strip_ide_js_settings "$ide_tmp" || true
         emit 'JS tool paths not configured (node_modules missing). Install JS deps and re-run the installer or update settings manually.\n'

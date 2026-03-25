@@ -11,6 +11,9 @@ Usage: ddev eslint-fix [args]
 
 Applies ESLint fixes directly to files (matches standard eslint --fix behavior).
 
+Defaults:
+  - Uses --quiet (GitLab CI parity). Set DCQ_ESLINT_QUIET=0 to include warnings.
+
 Use --preview to see a patch preview and confirm before applying fixes.
 This generates a patch in dcq-reports/ and prompts for confirmation.
 
@@ -31,6 +34,11 @@ preview_mode=false
 clean_args=()
 ESLINT_TOOLCHAIN="${ESLINT_TOOLCHAIN:-auto}"
 ESLINT_CONFIG_MODE="${ESLINT_CONFIG_MODE:-nearest}"
+DCQ_ESLINT_QUIET="${DCQ_ESLINT_QUIET:-1}"
+QUIET_ENABLED=1
+case "$DCQ_ESLINT_QUIET" in
+  0|false|FALSE|False|no|NO|off|OFF) QUIET_ENABLED=0 ;;
+esac
 
 for arg in "$@"; do
   if [ "$arg" = "--preview" ]; then
@@ -183,34 +191,42 @@ if [ "${#RAW_PATHS[@]}" -gt 0 ]; then
     TARGET_PREFIXES+=("$(normalize_path "$raw")")
   done
 else
-  # Default to custom code when no explicit paths are passed.
-  for candidate in "${DOCROOT}/modules/custom" "${DOCROOT}/themes/custom" "${DOCROOT}/profiles/custom"; do
-    if [ -d "$candidate" ]; then
-      TARGET_PREFIXES+=("$candidate")
-    fi
-  done
+  TARGET_PREFIXES+=("$DOCROOT")
 fi
 
-CMD_BASE=(env "NODE_PATH=$NODE_PATH" node "$TOOLCHAIN_BIN" --quiet)
+CMD_BASE=(env "NODE_PATH=$NODE_PATH" node "$TOOLCHAIN_BIN")
+DEFAULT_ARGS=()
+if [ "$QUIET_ENABLED" -eq 1 ]; then
+  DEFAULT_ARGS+=(--quiet)
+fi
 if [ -n "$RESOLVE_PLUGINS_DIR" ]; then
   CMD_BASE+=(--resolve-plugins-relative-to "$RESOLVE_PLUGINS_DIR")
 fi
-if [ "$has_config" = false ] && [ "$ESLINT_CONFIG_MODE" != "nearest" ]; then
-  if [ -f "${PROJECT_ROOT}/.eslintrc.passing.json" ]; then
-    CMD_BASE+=(--config="${PROJECT_ROOT}/.eslintrc.passing.json")
-  else
-    CMD_BASE+=(--config="${DOCROOT_PATH}/core/.eslintrc.passing.json")
-    echo "Warning: using core ESLint config (${DOCROOT}/core/.eslintrc.passing.json); project config not found." >&2
-  fi
+FIXED_CONFIG=""
+if [ -f "${PROJECT_ROOT}/.eslintrc.passing.json" ]; then
+  FIXED_CONFIG="${PROJECT_ROOT}/.eslintrc.passing.json"
+elif [ -f "${PROJECT_ROOT}/.eslintrc.json" ]; then
+  FIXED_CONFIG="${PROJECT_ROOT}/.eslintrc.json"
 fi
-CMD_BASE+=(--ext .js,.yml --ignore-pattern "**/node_modules/**")
+if [ "$has_config" = false ] && [ "$ESLINT_CONFIG_MODE" != "nearest" ]; then
+  if [ -z "$FIXED_CONFIG" ]; then
+    echo "ESLint config file is missing. Create .eslintrc.passing.json (or .eslintrc.json) in the project root, or pass --config." >&2
+    exit 2
+  fi
+  CMD_BASE+=(--config="$FIXED_CONFIG")
+fi
+CMD_BASE+=(--ext .js,.yml)
+CMD_BASE+=("${DEFAULT_ARGS[@]}")
 
 find_nearest_config() {
   local file_path="$1"
   local dir
   dir="$(dirname "$file_path")"
   while true; do
-    for candidate in .eslintrc .eslintrc.json .eslintrc.yaml .eslintrc.yml .eslintrc.js .eslintrc.cjs; do
+    for candidate in .eslintrc.passing.json .eslintrc .eslintrc.json .eslintrc.yaml .eslintrc.yml .eslintrc.js .eslintrc.cjs; do
+      if [ "$dir" = "$DOCROOT" ] || [ "$dir" = "./$DOCROOT" ]; then
+        continue
+      fi
       if [ -f "$dir/$candidate" ]; then
         echo "$dir/$candidate"
         return 0
@@ -322,17 +338,11 @@ fi
 
 DEFAULT_FILES=()
 if [ "$explicit_paths" = false ]; then
-  for candidate in "${DOCROOT}/modules/custom" "${DOCROOT}/themes/custom" "${DOCROOT}/profiles/custom"; do
-    if [ -d "$candidate" ]; then
-      while IFS= read -r file_path; do
-        DEFAULT_FILES+=("$file_path")
-      done < <(find "$candidate" -path '*/node_modules/*' -prune -o -type f \( -name '*.js' -o -name '*.yml' \) -print)
-    fi
-  done
-  if [ "${#DEFAULT_FILES[@]}" -eq 0 ]; then
-    echo "No custom JS/YML files found under modules/custom, themes/custom, or profiles/custom. Nothing to fix." >&2
+  if [ ! -d "$DOCROOT" ]; then
+    echo "Configured docroot '$DOCROOT' does not exist. Nothing to fix." >&2
     exit 2
   fi
+  DEFAULT_FILES=("$DOCROOT")
 fi
 
 FILES=()
@@ -343,11 +353,7 @@ else
 fi
 
 DEFAULT_CONFIG=""
-if [ -f "${PROJECT_ROOT}/.eslintrc.passing.json" ]; then
-  DEFAULT_CONFIG="${PROJECT_ROOT}/.eslintrc.passing.json"
-elif [ -f "${DOCROOT_PATH}/core/.eslintrc.passing.json" ]; then
-  DEFAULT_CONFIG="${DOCROOT_PATH}/core/.eslintrc.passing.json"
-fi
+DEFAULT_CONFIG="$FIXED_CONFIG"
 
 # ============================================================================
 # PREVIEW MODE: Generate patch, show preview, prompt to apply
@@ -373,7 +379,7 @@ if [ "$preview_mode" = true ]; then
     --exclude='*/.git/*' \
     . | (cd "$tmp_root" && tar -xf -)
 
-  if [ "$ESLINT_CONFIG_MODE" = "nearest" ]; then
+  if [ "$ESLINT_CONFIG_MODE" = "nearest" ] && [ "$explicit_paths" = true ]; then
     # Group files by nearest config to avoid plugin conflicts across modules/themes.
     declare -A ESLINT_GROUPS
     for file_path in "${FILES[@]}"; do
@@ -410,11 +416,12 @@ if [ "$preview_mode" = true ]; then
       config_dir="$(dirname "$config_path_abs")"
       plugins_dir="$(resolve_plugins_dir "$config_dir")"
       echo "ESLint-fix preview: config ${config_path_abs} (${#filtered_files[@]} file(s))." >&2
-      group_cmd=(env "NODE_PATH=$NODE_PATH" node "$TOOLCHAIN_BIN" --quiet --config="$config_path_run")
+      group_cmd=(env "NODE_PATH=$NODE_PATH" node "$TOOLCHAIN_BIN" --config="$config_path_run")
       if [ -n "$plugins_dir" ]; then
         group_cmd+=(--resolve-plugins-relative-to "$plugins_dir")
       fi
-      group_cmd+=(--ext .js,.yml --ignore-pattern "**/node_modules/**" --fix)
+      group_cmd+=(--ext .js,.yml --fix)
+      group_cmd+=("${DEFAULT_ARGS[@]}")
       (cd "$tmp_root" && "${group_cmd[@]}" "${filtered_files[@]}")
       status=$?
       if [ $status -ne 0 ]; then
@@ -473,7 +480,7 @@ if [ "$preview_mode" = true ]; then
 
   # Apply fixes
   cd "$PROJECT_ROOT"
-  if [ "$ESLINT_CONFIG_MODE" = "nearest" ]; then
+  if [ "$ESLINT_CONFIG_MODE" = "nearest" ] && [ "$explicit_paths" = true ]; then
     fix_exit=0
     for config_path in "${!ESLINT_GROUPS[@]}"; do
       mapfile -t group_files <<< "${ESLINT_GROUPS[$config_path]}"
@@ -496,11 +503,12 @@ if [ "$preview_mode" = true ]; then
       config_dir="$(dirname "$config_path_abs")"
       plugins_dir="$(resolve_plugins_dir "$config_dir")"
       echo "Applying ESLint fixes: config ${config_path_abs} (${#filtered_files[@]} file(s))." >&2
-      group_cmd=(env "NODE_PATH=$NODE_PATH" node "$TOOLCHAIN_BIN" --quiet --config="$config_path_run")
+      group_cmd=(env "NODE_PATH=$NODE_PATH" node "$TOOLCHAIN_BIN" --config="$config_path_run")
       if [ -n "$plugins_dir" ]; then
         group_cmd+=(--resolve-plugins-relative-to "$plugins_dir")
       fi
-      group_cmd+=(--ext .js,.yml --ignore-pattern "**/node_modules/**" --fix)
+      group_cmd+=(--ext .js,.yml --fix)
+      group_cmd+=("${DEFAULT_ARGS[@]}")
       "${group_cmd[@]}" "${filtered_files[@]}"
       status=$?
       if [ $status -ne 0 ]; then
@@ -531,7 +539,7 @@ fi
 # ============================================================================
 cd "$PROJECT_ROOT"
 
-if [ "$ESLINT_CONFIG_MODE" = "nearest" ]; then
+if [ "$ESLINT_CONFIG_MODE" = "nearest" ] && [ "$explicit_paths" = true ]; then
   # Group files by nearest config to avoid plugin conflicts across modules/themes.
   declare -A ESLINT_GROUPS
   for file_path in "${FILES[@]}"; do
@@ -567,11 +575,12 @@ if [ "$ESLINT_CONFIG_MODE" = "nearest" ]; then
     fi
     config_dir="$(dirname "$config_path_abs")"
     plugins_dir="$(resolve_plugins_dir "$config_dir")"
-    group_cmd=(env "NODE_PATH=$NODE_PATH" node "$TOOLCHAIN_BIN" --quiet --config="$config_path_run")
+    group_cmd=(env "NODE_PATH=$NODE_PATH" node "$TOOLCHAIN_BIN" --config="$config_path_run")
     if [ -n "$plugins_dir" ]; then
       group_cmd+=(--resolve-plugins-relative-to "$plugins_dir")
     fi
-    group_cmd+=(--ext .js,.yml --ignore-pattern "**/node_modules/**" --fix)
+    group_cmd+=(--ext .js,.yml --fix)
+    group_cmd+=("${DEFAULT_ARGS[@]}")
     "${group_cmd[@]}" "${filtered_files[@]}"
     status=$?
     if [ $status -ne 0 ]; then

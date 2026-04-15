@@ -175,6 +175,10 @@ normalize_docroot_arg() {
 }
 
 CONFIG_PATH=""
+# LATE_FLAGS holds flags that must survive any CMD reassignment during
+# config discovery (e.g. --ignore-path, --custom-syntax). They are spliced
+# into every invocation via "${CMD[@]}" "${LATE_FLAGS[@]}" ...
+LATE_FLAGS=()
 CMD=(env "NODE_PATH=$NODE_PATH" node "$TOOLCHAIN_BIN")
 DEFAULT_CONFIG_PATH=""
 if [ "$has_config" = false ]; then
@@ -186,7 +190,7 @@ if [ "$has_config" = false ]; then
   DEFAULT_CONFIG_PATH="$CONFIG_PATH"
 fi
 if [ "$has_ignore_path" = false ] && [ -f "${PROJECT_ROOT}/.stylelintignore" ]; then
-  CMD+=(--ignore-path="${PROJECT_ROOT}/.stylelintignore")
+  LATE_FLAGS+=(--ignore-path="${PROJECT_ROOT}/.stylelintignore")
 fi
 
 uses_scss=false
@@ -317,7 +321,7 @@ if [ "$explicit_paths" = false ]; then
     scss_allowed=true
   fi
   if [ "$uses_scss" = true ] && [ "$scss_allowed" = true ] && find_scss_parser; then
-    CMD+=(--custom-syntax="$CUSTOM_SYNTAX_PATH")
+    LATE_FLAGS+=(--custom-syntax="$CUSTOM_SYNTAX_PATH")
     has_scss_parser=true
   fi
   if [ "$uses_scss" = true ] && [ "$scss_allowed" = false ]; then
@@ -332,7 +336,7 @@ if [ "$explicit_paths" = false ]; then
       echo "No CSS files left to lint after excluding SCSS/Sass (config does not support SCSS)." >&2
       exit 2
     fi
-    "${CMD[@]}" "$@" "${FILTERED_FILES[@]}"
+    "${CMD[@]}" "${LATE_FLAGS[@]}" "$@" "${FILTERED_FILES[@]}"
     exit $?
   fi
   if [ "$uses_scss" = true ] && [ "$has_scss_parser" = false ]; then
@@ -347,10 +351,10 @@ if [ "$explicit_paths" = false ]; then
       echo "No CSS files left to lint after excluding SCSS/Sass (no SCSS parser available)." >&2
       exit 2
     fi
-    "${CMD[@]}" "$@" "${FILTERED_FILES[@]}"
+    "${CMD[@]}" "${LATE_FLAGS[@]}" "$@" "${FILTERED_FILES[@]}"
     exit $?
   fi
-  "${CMD[@]}" "$@" "${DEFAULT_FILES[@]}"
+  "${CMD[@]}" "${LATE_FLAGS[@]}" "$@" "${DEFAULT_FILES[@]}"
   exit $?
 fi
 
@@ -363,7 +367,7 @@ if [ "$uses_scss" = true ] && config_supports_scss "$CONFIG_PATH"; then
   scss_allowed=true
 fi
 if [ "$uses_scss" = true ] && [ "$scss_allowed" = true ] && find_scss_parser; then
-  CMD+=(--custom-syntax="$CUSTOM_SYNTAX_PATH")
+  LATE_FLAGS+=(--custom-syntax="$CUSTOM_SYNTAX_PATH")
   has_scss_parser=true
 fi
 
@@ -379,7 +383,7 @@ if [ "$uses_scss" = true ] && [ "$scss_allowed" = false ]; then
     echo "No CSS files left to lint after excluding SCSS/Sass (config does not support SCSS)." >&2
     exit 2
   fi
-  "${CMD[@]}" "${FILTERED_ARGS[@]}"
+  "${CMD[@]}" "${LATE_FLAGS[@]}" "${FILTERED_ARGS[@]}"
   exit $?
 fi
 
@@ -395,9 +399,9 @@ if [ "$uses_scss" = true ] && [ "$has_scss_parser" = false ]; then
     echo "No CSS files left to lint after excluding SCSS/Sass (no SCSS parser available)." >&2
     exit 2
   fi
-  "${CMD[@]}" "${FILTERED_ARGS[@]}"
+  "${CMD[@]}" "${LATE_FLAGS[@]}" "${FILTERED_ARGS[@]}"
   exit $?
 fi
 
-"${CMD[@]}" "${FINAL_ARGS[@]}"
+"${CMD[@]}" "${LATE_FLAGS[@]}" "${FINAL_ARGS[@]}"
 exit $?

@@ -1195,6 +1195,103 @@ JS
   assert_output --partial "/var/www/html/web/themes/custom/dcq_theme/.stylelintrc.json"
 }
 
+@test "stylelint preserves --ignore-path with explicit paths when nearest config triggers CMD reassignment" {
+  set -u -o pipefail
+  export DCQ_INSTALL_DEPS=skip
+  export DCQ_INSTALL_NODE_DEPS=skip
+  run ddev add-on get "${DIR}"
+  assert_success
+
+  # Root config triggers the first CMD reassignment.
+  cat > .stylelintrc.json <<'JSON'
+{
+  "rules": {}
+}
+JSON
+
+  # .stylelintignore is what we expect to survive the reassignments.
+  cat > .stylelintignore <<'TXT'
+web/core/**
+TXT
+
+  # Nearest config inside the theme triggers the explicit-paths CMD reassignment
+  # that previously wiped --ignore-path.
+  mkdir -p web/themes/custom/dcq_theme/css
+  cat > web/themes/custom/dcq_theme/.stylelintrc.json <<'JSON'
+{
+  "rules": {}
+}
+JSON
+  cat > web/themes/custom/dcq_theme/css/fixable.css <<'CSS'
+a {
+  color: RED;
+}
+CSS
+
+  mkdir -p node_modules/stylelint/bin
+  cat > node_modules/stylelint/bin/stylelint.mjs <<'JS'
+#!/usr/bin/env node
+process.stdout.write(process.argv.slice(2).join("\n"));
+JS
+  chmod +x node_modules/stylelint/bin/stylelint.mjs
+
+  run wait_for_container_path "/var/www/html/node_modules/stylelint/bin/stylelint.mjs"
+  assert_success
+
+  run ddev stylelint web/themes/custom/dcq_theme/css/fixable.css
+  assert_success
+  assert_output --partial "--ignore-path="
+  assert_output --partial "/var/www/html/.stylelintignore"
+}
+
+@test "stylelint preserves --ignore-path in default-files mode when nearest config triggers CMD reassignment" {
+  set -u -o pipefail
+  export DCQ_INSTALL_DEPS=skip
+  export DCQ_INSTALL_NODE_DEPS=skip
+  run ddev add-on get "${DIR}"
+  assert_success
+
+  cat > .stylelintrc.json <<'JSON'
+{
+  "rules": {}
+}
+JSON
+
+  cat > .stylelintignore <<'TXT'
+web/core/**
+TXT
+
+  # Nearest config inside the theme triggers the default-files-branch CMD
+  # reassignment that previously wiped --ignore-path.
+  mkdir -p web/themes/custom/dcq_theme/css
+  cat > web/themes/custom/dcq_theme/.stylelintrc.json <<'JSON'
+{
+  "rules": {}
+}
+JSON
+  cat > web/themes/custom/dcq_theme/css/fixable.css <<'CSS'
+a {
+  color: RED;
+}
+CSS
+
+  mkdir -p node_modules/stylelint/bin
+  cat > node_modules/stylelint/bin/stylelint.mjs <<'JS'
+#!/usr/bin/env node
+process.stdout.write(process.argv.slice(2).join("\n"));
+JS
+  chmod +x node_modules/stylelint/bin/stylelint.mjs
+
+  run wait_for_container_path "/var/www/html/node_modules/stylelint/bin/stylelint.mjs"
+  assert_success
+
+  # No explicit paths -- exercises the default-files branch.
+  run ddev stylelint
+  assert_success
+  assert_output --partial "--ignore-path="
+  assert_output --partial "/var/www/html/.stylelintignore"
+}
+
 @test "prettier-fix fails with helpful message when project config is missing" {
   set -u -o pipefail
   export DCQ_INSTALL_DEPS=skip

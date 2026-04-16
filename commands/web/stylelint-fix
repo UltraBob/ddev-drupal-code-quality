@@ -44,9 +44,9 @@ for arg in "$@"; do
   fi
   case "$arg" in
     --preview)
-      echo "Warning: --preview has been removed. Running --fix directly." >&2
-      echo "Use 'git diff' after 'ddev stylelint-fix' to review changes." >&2
-      continue
+      echo "Error: --preview has been removed." >&2
+      echo "Use 'ddev stylelint-fix' then 'git diff' to review changes." >&2
+      exit 1
       ;;
     -h|--help)
       cat <<'USAGE'
@@ -88,9 +88,18 @@ USAGE
 done
 
 if [ "$has_positional" = false ]; then
-  args+=('**/*.css' '**/*.scss' '**/*.sass')
+  args+=('**/*.css')
 fi
 
 cd "$PROJECT_ROOT"
+
+# Hint about SCSS/Sass if present but not in default scan scope.
+if [ "$has_positional" = false ]; then
+  if find . -name '*.scss' -o -name '*.sass' 2>/dev/null | grep -q .; then
+    echo "Tip: SCSS/Sass files found but not included in the default scan." >&2
+    echo "To lint SCSS, extend stylelint-config-standard-scss in your .stylelintrc.json" >&2
+    echo "and pass SCSS paths explicitly, e.g.: ddev stylelint-fix '**/*.scss'" >&2
+  fi
+fi
 
 exec env NODE_PATH="$NODE_PATH" node "$TOOLCHAIN_BIN" --fix "${args[@]}"

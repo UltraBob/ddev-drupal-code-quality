@@ -80,13 +80,22 @@ USAGE
 done
 
 # Inject default globs when no file paths are supplied, so bare
-# `ddev stylelint` scans all custom code via .stylelintignore exclusions.
+# `ddev stylelint` scans all CSS via .stylelintignore exclusions.
 if [ "$has_positional" = false ]; then
-  args+=('**/*.css' '**/*.scss' '**/*.sass')
+  args+=('**/*.css')
 fi
 
 # Run from project root so native .stylelintignore auto-discovery and
 # cosmiconfig upward config walk work correctly.
 cd "$PROJECT_ROOT"
+
+# Hint about SCSS/Sass if present but not in default scan scope.
+if [ "$has_positional" = false ]; then
+  if find . -name '*.scss' -o -name '*.sass' 2>/dev/null | grep -q .; then
+    echo "Tip: SCSS/Sass files found but not included in the default scan." >&2
+    echo "To lint SCSS, extend stylelint-config-standard-scss in your .stylelintrc.json" >&2
+    echo "and pass SCSS paths explicitly, e.g.: ddev stylelint '**/*.scss'" >&2
+  fi
+fi
 
 exec env NODE_PATH="$NODE_PATH" node "$TOOLCHAIN_BIN" "${args[@]}"

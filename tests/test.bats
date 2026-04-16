@@ -1031,7 +1031,7 @@ PY
   assert_success
 }
 
-@test "stylelint-fix rewrites explicit web paths with non-web docroot" {
+@test "stylelint-fix passes paths through with non-web docroot" {
   set -u -o pipefail
   mkdir -p docroot
   run ddev config --docroot=docroot
@@ -1045,7 +1045,7 @@ PY
   mkdir -p node_modules/stylelint/bin
   cat > node_modules/stylelint/bin/stylelint.mjs <<'JS'
 #!/usr/bin/env node
-process.exit(0);
+process.stdout.write(process.argv.slice(2).join("\n"));
 JS
   chmod +x node_modules/stylelint/bin/stylelint.mjs
 
@@ -1061,8 +1061,11 @@ CSS
   run wait_for_container_path "/var/www/html/docroot/themes/custom/dcq_theme/css/fixable.css"
   assert_success
 
-  run ddev stylelint-fix web/themes/custom/dcq_theme/css/fixable.css
+  # Wrapper passes paths through as-is; no docroot rewriting.
+  run ddev stylelint-fix docroot/themes/custom/dcq_theme/css/fixable.css
   assert_success
+  assert_output --partial "--fix"
+  assert_output --partial "docroot/themes/custom/dcq_theme/css/fixable.css"
 }
 
 @test "eslint fixed mode falls back to .eslintrc.json when passing config is missing" {
@@ -1123,52 +1126,16 @@ JS
   esac
 }
 
-@test "stylelint-fix fails with helpful message when project config is missing" {
+@test "stylelint-fix delegates config and ignore handling to native stylelint" {
   set -u -o pipefail
   export DCQ_INSTALL_DEPS=skip
   export DCQ_INSTALL_NODE_DEPS=skip
   run ddev add-on get "${DIR}"
   assert_success
 
+  # Remove root configs — wrapper should not care; native stylelint handles errors.
   run rm -f .stylelintrc.json .stylelintrc .stylelintrc.yaml .stylelintrc.yml .stylelintrc.js
   assert_success
-
-  mkdir -p node_modules/stylelint/bin
-  cat > node_modules/stylelint/bin/stylelint.mjs <<'JS'
-#!/usr/bin/env node
-process.exit(0);
-JS
-  chmod +x node_modules/stylelint/bin/stylelint.mjs
-
-  run wait_for_container_path "/var/www/html/node_modules/stylelint/bin/stylelint.mjs"
-  assert_success
-
-  run ddev stylelint-fix web/themes/custom/dcq_theme/css/fixable.css
-  assert_failure
-  assert_output --partial "Stylelint config file is missing."
-}
-
-@test "stylelint-fix uses nearest config when root config is missing" {
-  set -u -o pipefail
-  export DCQ_INSTALL_DEPS=skip
-  export DCQ_INSTALL_NODE_DEPS=skip
-  run ddev add-on get "${DIR}"
-  assert_success
-
-  run rm -f .stylelintrc.json .stylelintrc .stylelintrc.yaml .stylelintrc.yml .stylelintrc.js
-  assert_success
-
-  mkdir -p web/themes/custom/dcq_theme/css
-  cat > web/themes/custom/dcq_theme/.stylelintrc.json <<'JSON'
-{
-  "rules": {}
-}
-JSON
-  cat > web/themes/custom/dcq_theme/css/fixable.css <<'CSS'
-a {
-  color: RED;
-}
-CSS
 
   mkdir -p node_modules/stylelint/bin
   cat > node_modules/stylelint/bin/stylelint.mjs <<'JS'
@@ -1180,33 +1147,33 @@ JS
   run wait_for_container_path "/var/www/html/node_modules/stylelint/bin/stylelint.mjs"
   assert_success
 
+  # Wrapper no longer checks for config or injects flags — all native.
   run ddev stylelint-fix web/themes/custom/dcq_theme/css/fixable.css
   assert_success
-  assert_output --partial "--config"
-  assert_output --partial "/var/www/html/web/themes/custom/dcq_theme/.stylelintrc.json"
+  refute_output --partial "Stylelint config file is missing."
+  assert_output --partial "--fix"
+  refute_output --partial "--config"
+  refute_output --partial "--config-basedir"
+  refute_output --partial "--ignore-path"
 }
 
-@test "stylelint preserves --ignore-path with explicit paths when nearest config triggers CMD reassignment" {
+@test "stylelint trusts native ignore-file handling with explicit paths" {
   set -u -o pipefail
   export DCQ_INSTALL_DEPS=skip
   export DCQ_INSTALL_NODE_DEPS=skip
   run ddev add-on get "${DIR}"
   assert_success
 
-  # Root config triggers the first CMD reassignment.
   cat > .stylelintrc.json <<'JSON'
 {
   "rules": {}
 }
 JSON
 
-  # .stylelintignore is what we expect to survive the reassignments.
   cat > .stylelintignore <<'TXT'
 web/core/**
 TXT
 
-  # Nearest config inside the theme triggers the explicit-paths CMD reassignment
-  # that previously wiped --ignore-path.
   mkdir -p web/themes/custom/dcq_theme/css
   cat > web/themes/custom/dcq_theme/.stylelintrc.json <<'JSON'
 {
@@ -1229,13 +1196,17 @@ JS
   run wait_for_container_path "/var/www/html/node_modules/stylelint/bin/stylelint.mjs"
   assert_success
 
+  # Wrapper delegates .stylelintignore handling to native stylelint (CWD=PROJECT_ROOT).
+  # No --ignore-path injection — the CMD-reassignment bug (issue #27) is structurally impossible.
   run ddev stylelint web/themes/custom/dcq_theme/css/fixable.css
   assert_success
-  assert_output --partial "--ignore-path="
-  assert_output --partial "/var/www/html/.stylelintignore"
+  refute_output --partial "--ignore-path"
+  refute_output --partial "--config"
+  # Path translation still works.
+  assert_output --partial "web/themes/custom/dcq_theme/css/fixable.css"
 }
 
-@test "stylelint preserves --ignore-path in default-files mode when nearest config triggers CMD reassignment" {
+@test "stylelint trusts native ignore-file handling in default-glob mode" {
   set -u -o pipefail
   export DCQ_INSTALL_DEPS=skip
   export DCQ_INSTALL_NODE_DEPS=skip
@@ -1252,8 +1223,6 @@ JSON
 web/core/**
 TXT
 
-  # Nearest config inside the theme triggers the default-files-branch CMD
-  # reassignment that previously wiped --ignore-path.
   mkdir -p web/themes/custom/dcq_theme/css
   cat > web/themes/custom/dcq_theme/.stylelintrc.json <<'JSON'
 {
@@ -1276,11 +1245,47 @@ JS
   run wait_for_container_path "/var/www/html/node_modules/stylelint/bin/stylelint.mjs"
   assert_success
 
-  # No explicit paths -- exercises the default-files branch.
+  # No explicit paths — default glob injected. No --ignore-path injection;
+  # native stylelint picks up .stylelintignore from CWD (PROJECT_ROOT).
   run ddev stylelint
   assert_success
-  assert_output --partial "--ignore-path="
-  assert_output --partial "/var/www/html/.stylelintignore"
+  refute_output --partial "--ignore-path"
+  refute_output --partial "--config"
+  # Default glob is CSS-only.
+  assert_output --partial "**/*.css"
+}
+
+@test "stylelint emits SCSS hint when SCSS files are present" {
+  set -u -o pipefail
+  export DCQ_INSTALL_DEPS=skip
+  export DCQ_INSTALL_NODE_DEPS=skip
+  run ddev add-on get "${DIR}"
+  assert_success
+
+  mkdir -p node_modules/stylelint/bin
+  cat > node_modules/stylelint/bin/stylelint.mjs <<'JS'
+#!/usr/bin/env node
+process.stdout.write(process.argv.slice(2).join("\n"));
+JS
+  chmod +x node_modules/stylelint/bin/stylelint.mjs
+
+  # Create an SCSS file outside node_modules/vendor.
+  mkdir -p web/themes/custom/dcq_theme/scss
+  cat > web/themes/custom/dcq_theme/scss/style.scss <<'SCSS'
+$primary: #333;
+a { color: $primary; }
+SCSS
+
+  run wait_for_container_path "/var/www/html/node_modules/stylelint/bin/stylelint.mjs"
+  assert_success
+  run wait_for_container_path "/var/www/html/web/themes/custom/dcq_theme/scss/style.scss"
+  assert_success
+
+  # Default invocation (no args) should emit SCSS hint to stderr.
+  run ddev stylelint
+  assert_success
+  assert_output --partial "SCSS/Sass files found but not included in the default scan"
+  assert_output --partial "stylelint-config-standard-scss"
 }
 
 @test "prettier-fix fails with helpful message when project config is missing" {
@@ -1918,12 +1923,8 @@ JSON
   assert_not_equal "$before_prettier" "$after_prettier"
   assert_file_exist "dcq-reports/_prettier.patch"
 
-  # Test stylelint-fix --preview shows prompt and patch
-  before_stylelint="$(read_container_file /var/www/html/web/themes/custom/dcq_theme/css/fixable.css)"
-  run_with_prompt_yes "Apply these changes? [y/N]" ./.ddev/drupal-code-quality/tooling/bin/stylelint-fix --preview web/themes/custom/dcq_theme/css/fixable.css
-  assert_success
-  assert_output --partial "Apply these changes? [y/N]"
-  after_stylelint="$(read_container_file /var/www/html/web/themes/custom/dcq_theme/css/fixable.css)"
-  assert_not_equal "$before_stylelint" "$after_stylelint"
-  assert_file_exist "dcq-reports/_stylelint.patch"
+  # Test stylelint-fix --preview exits with error (preview mode removed)
+  run ./.ddev/drupal-code-quality/tooling/bin/stylelint-fix --preview web/themes/custom/dcq_theme/css/fixable.css
+  assert_failure
+  assert_output --partial "--preview has been removed"
 }

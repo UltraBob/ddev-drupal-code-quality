@@ -6,4 +6,8 @@
 **/libraries/**
 **/node_modules/**
 vendor/**
+**/dist/**
+**/build/**
 **/sites/*/files/**
+# Playwright report output contains minified CSS that causes false positives.
+# **/playwright-report/**

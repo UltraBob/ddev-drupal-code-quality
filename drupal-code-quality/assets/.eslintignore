@@ -6,4 +6,6 @@
 **/libraries/**
 **/node_modules/**
 vendor/**
+**/dist/**
+**/build/**
 **/sites/*/files/**

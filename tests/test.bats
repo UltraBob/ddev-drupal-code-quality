@@ -1284,7 +1284,7 @@ SCSS
   # Default invocation (no args) should emit SCSS hint to stderr.
   run ddev stylelint
   assert_success
-  assert_output --partial "SCSS/Sass files found but not included in the default scan"
+  assert_output --partial "SCSS/Sass files detected but not included in the default scan"
   assert_output --partial "stylelint-config-standard-scss"
 }
 

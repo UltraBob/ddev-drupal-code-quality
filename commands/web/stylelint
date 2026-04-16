@@ -3,6 +3,7 @@
 set -u
 
 source /mnt/ddev_config/commands/helpers/path-map.sh
+source /mnt/ddev_config/commands/helpers/node-toolchain.sh
 
 print_help() {
   cat <<'USAGE'
@@ -15,8 +16,6 @@ USAGE
 PROJECT_ROOT="/var/www/html"
 DOCROOT="${DCQ_DOCROOT:-web}"
 DOCROOT_PATH="${PROJECT_ROOT}/${DOCROOT}"
-CORE_STYLELINT="${DOCROOT_PATH}/core/node_modules/stylelint/bin/stylelint.mjs"
-ROOT_STYLELINT="${PROJECT_ROOT}/node_modules/stylelint/bin/stylelint.mjs"
 TOOLCHAIN_BIN=""
 NODE_PATH=""
 
@@ -74,15 +73,9 @@ if ! command -v node >/dev/null 2>&1; then
   exit 127
 fi
 
-if [ -f "$ROOT_STYLELINT" ]; then
-  TOOLCHAIN_BIN="$ROOT_STYLELINT"
-  NODE_PATH="${PROJECT_ROOT}/node_modules"
-elif [ -f "$CORE_STYLELINT" ]; then
-  TOOLCHAIN_BIN="$CORE_STYLELINT"
-  NODE_PATH="${DOCROOT_PATH}/core/node_modules"
-else
-  echo "Stylelint is not installed in ${DOCROOT}/core/node_modules or node_modules." >&2
-  echo "Enable corepack and run 'yarn install' in ${DOCROOT}/core, or install stylelint in the project root." >&2
+if ! resolve_node_tool "stylelint/bin/stylelint.mjs"; then
+  echo "Stylelint is not installed at the project root (${PROJECT_ROOT}/node_modules)." >&2
+  echo "Re-run the DDEV add-on installer and accept Node dependency installation, or install stylelint manually in the project root (npm install / yarn install)." >&2
   exit 127
 fi
 

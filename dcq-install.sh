@@ -1278,7 +1278,7 @@ merge_json_settings() {
     return 2
   fi
 
-  if ! "$python_bin" - "$existing" "$template" "$dest" <<'PY'
+  "$python_bin" - "$existing" "$template" "$dest" <<'PY'
 import copy
 import json
 import sys
@@ -1403,9 +1403,7 @@ with open(dest_path, "w", encoding="utf-8") as f:
     json.dump(existing, f, indent=2, ensure_ascii=True)
     f.write("\n")
 PY
-  then
-    return 1
-  fi
+  return $?
 }
 
 merge_json_extensions() {
@@ -1423,7 +1421,7 @@ merge_json_extensions() {
     return 2
   fi
 
-  if ! "$python_bin" - "$existing" "$template" "$dest" <<'PY'
+  "$python_bin" - "$existing" "$template" "$dest" <<'PY'
 import json
 import sys
 
@@ -1572,9 +1570,7 @@ with open(dest_path, "w", encoding="utf-8") as f:
     json.dump(merged, f, indent=2, ensure_ascii=True)
     f.write("\n")
 PY
-  then
-    return 1
-  fi
+  return $?
 }
 
 node_toolchain_present() {

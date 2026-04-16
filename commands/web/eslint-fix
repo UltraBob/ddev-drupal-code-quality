@@ -4,6 +4,7 @@
 set -u
 
 source /mnt/ddev_config/commands/helpers/path-map.sh
+source /mnt/ddev_config/commands/helpers/node-toolchain.sh
 
 print_help() {
   cat <<'USAGE'
@@ -32,7 +33,6 @@ seen_double_dash=false
 explicit_paths=false
 preview_mode=false
 clean_args=()
-ESLINT_TOOLCHAIN="${ESLINT_TOOLCHAIN:-auto}"
 ESLINT_CONFIG_MODE="${ESLINT_CONFIG_MODE:-nearest}"
 DCQ_ESLINT_QUIET="${DCQ_ESLINT_QUIET:-1}"
 QUIET_ENABLED=1
@@ -88,38 +88,16 @@ fi
 PROJECT_ROOT="/var/www/html"
 DOCROOT="${DCQ_DOCROOT:-web}"
 DOCROOT_PATH="${PROJECT_ROOT}/${DOCROOT}"
-CORE_ESLINT="${DOCROOT_PATH}/core/node_modules/eslint/bin/eslint.js"
-ROOT_ESLINT="${PROJECT_ROOT}/node_modules/eslint/bin/eslint.js"
 TOOLCHAIN_BIN=""
 NODE_PATH=""
 RESOLVE_PLUGINS_DIR=""
 
-prefer_root=false
-if [ "$ESLINT_TOOLCHAIN" = "root" ]; then
-  prefer_root=true
-elif [ "$ESLINT_TOOLCHAIN" = "auto" ]; then
-  if [ -f "${PROJECT_ROOT}/.eslintrc.json" ] || [ -f "${PROJECT_ROOT}/.eslintrc.passing.json" ] || [ -f "${PROJECT_ROOT}/.eslintrc.jquery.json" ]; then
-    prefer_root=true
-  fi
-fi
-
-if [ "$prefer_root" = true ] && [ -f "$ROOT_ESLINT" ]; then
-  TOOLCHAIN_BIN="$ROOT_ESLINT"
-  NODE_PATH="${PROJECT_ROOT}/node_modules"
-  RESOLVE_PLUGINS_DIR="$NODE_PATH"
-elif [ -f "$CORE_ESLINT" ]; then
-  TOOLCHAIN_BIN="$CORE_ESLINT"
-  NODE_PATH="${DOCROOT_PATH}/core/node_modules"
-  RESOLVE_PLUGINS_DIR="$NODE_PATH"
-elif [ -f "$ROOT_ESLINT" ]; then
-  TOOLCHAIN_BIN="$ROOT_ESLINT"
-  NODE_PATH="${PROJECT_ROOT}/node_modules"
-  RESOLVE_PLUGINS_DIR="$NODE_PATH"
-else
-  echo "ESLint is not installed in ${DOCROOT}/core/node_modules or node_modules." >&2
-  echo "Enable corepack and run 'yarn install' in ${DOCROOT}/core, or install eslint in the project root." >&2
+if ! resolve_node_tool "eslint/bin/eslint.js"; then
+  echo "ESLint is not installed at the project root (${PROJECT_ROOT}/node_modules)." >&2
+  echo "Re-run the DDEV add-on installer and accept Node dependency installation, or install eslint manually in the project root (npm install / yarn install)." >&2
   exit 127
 fi
+RESOLVE_PLUGINS_DIR="$NODE_PATH"
 
 if [ "$has_help" = true ]; then
   node "$TOOLCHAIN_BIN" --help
@@ -257,10 +235,6 @@ resolve_plugins_dir() {
     echo "${PROJECT_ROOT}"
     return
   fi
-  if [ -d "${DOCROOT_PATH}/core/node_modules" ]; then
-    echo "${DOCROOT_PATH}/core"
-    return
-  fi
   echo ""
 }
 
@@ -372,9 +346,9 @@ if [ "$preview_mode" = true ]; then
     --exclude=./.git \
     --exclude=./.trunk \
     --exclude=./node_modules \
+    --exclude="./${DOCROOT}/*/node_modules" \
     --exclude=./vendor \
     --exclude=./dcq-reports \
-    --exclude=./${DOCROOT}/core/node_modules \
     --exclude='*/.git' \
     --exclude='*/.git/*' \
     . | (cd "$tmp_root" && tar -xf -)

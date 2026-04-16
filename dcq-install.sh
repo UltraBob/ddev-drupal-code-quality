@@ -1599,11 +1599,7 @@ run_command() {
   # terminal query/response noise (OSC/DSR bytes) that can appear as garbage.
   local arg
   local status
-  emit 'Running:'
-  for arg in "$@"; do
-    emit ' %q' "$arg"
-  done
-  emit '\n'
+  emit 'Running: %s\n' "$*"
   if [ "${non_interactive:-0}" -eq 1 ] || [ "${PROMPT_AVAILABLE:-0}" -ne 1 ]; then
     "$@"
   else

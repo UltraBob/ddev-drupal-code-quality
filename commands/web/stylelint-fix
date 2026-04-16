@@ -88,18 +88,9 @@ USAGE
 done
 
 if [ "$has_positional" = false ]; then
-  args+=('**/*.css')
+  args+=('**/*.css' '**/*.scss' '**/*.sass')
 fi
 
 cd "$PROJECT_ROOT"
-
-# Hint about SCSS/Sass if present but not in default scan scope.
-if [ "$has_positional" = false ]; then
-  if find . \( -path ./node_modules -o -path ./vendor \) -prune -o \( -name '*.scss' -o -name '*.sass' \) -print -quit 2>/dev/null | grep -q .; then
-    echo "Tip: SCSS/Sass files detected but not included in the default scan." >&2
-    echo "To add SCSS to default runs: extend stylelint-config-standard-scss in" >&2
-    echo "your .stylelintrc.json, then run: ddev stylelint-fix '**/*.css' '**/*.scss'" >&2
-  fi
-fi
 
 exec env NODE_PATH="$NODE_PATH" node "$TOOLCHAIN_BIN" --fix "${args[@]}"

@@ -1245,17 +1245,18 @@ JS
   run wait_for_container_path "/var/www/html/node_modules/stylelint/bin/stylelint.mjs"
   assert_success
 
-  # No explicit paths — default glob injected. No --ignore-path injection;
+  # No explicit paths — default globs injected. No --ignore-path injection;
   # native stylelint picks up .stylelintignore from CWD (PROJECT_ROOT).
   run ddev stylelint
   assert_success
   refute_output --partial "--ignore-path"
   refute_output --partial "--config"
-  # Default glob is CSS-only.
+  # Default globs include CSS, SCSS, and Sass.
   assert_output --partial "**/*.css"
+  assert_output --partial "**/*.scss"
 }
 
-@test "stylelint emits SCSS hint when SCSS files are present" {
+@test "stylelint default scan includes CSS and SCSS globs" {
   set -u -o pipefail
   export DCQ_INSTALL_DEPS=skip
   export DCQ_INSTALL_NODE_DEPS=skip
@@ -1269,23 +1270,15 @@ process.stdout.write(process.argv.slice(2).join("\n"));
 JS
   chmod +x node_modules/stylelint/bin/stylelint.mjs
 
-  # Create an SCSS file outside node_modules/vendor.
-  mkdir -p web/themes/custom/dcq_theme/scss
-  cat > web/themes/custom/dcq_theme/scss/style.scss <<'SCSS'
-$primary: #333;
-a { color: $primary; }
-SCSS
-
   run wait_for_container_path "/var/www/html/node_modules/stylelint/bin/stylelint.mjs"
   assert_success
-  run wait_for_container_path "/var/www/html/web/themes/custom/dcq_theme/scss/style.scss"
-  assert_success
 
-  # Default invocation (no args) should emit SCSS hint to stderr.
+  # Default invocation includes CSS, SCSS, and Sass globs.
   run ddev stylelint
   assert_success
-  assert_output --partial "SCSS/Sass files detected but not included in the default scan"
-  assert_output --partial "stylelint-config-standard-scss"
+  assert_output --partial "**/*.css"
+  assert_output --partial "**/*.scss"
+  assert_output --partial "**/*.sass"
 }
 
 @test "prettier-fix fails with helpful message when project config is missing" {

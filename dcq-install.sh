@@ -1593,6 +1593,14 @@ node_toolchain_present() {
   return 1
 }
 
+detect_scss_files() {
+  # Check if the project contains .scss or .sass files (excluding dependencies).
+  local search_root="$1"
+  find "$search_root" \
+    -type d \( -name node_modules -o -name vendor -o -name .git -o -name .ddev \) -prune \
+    -o -type f \( -name '*.scss' -o -name '*.sass' \) -print -quit 2>/dev/null | grep -q .
+}
+
 run_command() {
   # Echo and execute a command (simple transparency for users).
   # In interactive installs we route output through a small sanitizer to drop
@@ -2074,6 +2082,9 @@ fi
 # Expand CSpell configuration with project-specific settings
 expand_cspell_config "$app_root"
 
+scss_detected="false"
+scss_install_scss="false"
+
 emit '\n==> Phase 3: JS toolchain dependencies\n'
 core_package_json="${app_root%/}/${DCQ_DOCROOT}/core/package.json"
 core_package_json_present=0
@@ -2174,6 +2185,47 @@ if [ "$core_package_json_present" -eq 1 ]; then
         missing_node_deps=""
       fi
     fi
+    # Detect SCSS files before Node install so we can offer to set up support.
+    scss_install_scss="false"
+    if detect_scss_files "$app_root"; then
+      # Check if SCSS support is already fully configured.
+      # Both conditions must be true: stylelint config references scss AND
+      # the DDEV env var includes scss globs.
+      stylelintrc="${app_root%/}/.stylelintrc.json"
+      scss_has_config=false
+      scss_has_globs=false
+      if [ -f "$stylelintrc" ] && grep -q 'scss' "$stylelintrc"; then
+        scss_has_config=true
+      fi
+      if grep -rlq 'DCQ_STYLELINT_GLOBS.*scss' "${app_root%/}/.ddev/"*.yaml 2>/dev/null; then
+        scss_has_globs=true
+      fi
+      scss_already_configured=false
+      if [ "$scss_has_config" = true ] && [ "$scss_has_globs" = true ]; then
+        scss_already_configured=true
+      fi
+
+      if [ "$scss_already_configured" = true ]; then
+        scss_detected="configured"
+        emit 'SCSS files detected — SCSS support appears to be configured already.\n'
+      elif [ "$non_interactive" -eq 0 ] && [ "${PROMPT_AVAILABLE:-0}" -eq 1 ]; then
+        emit '\nYour project contains SCSS files, but Stylelint is currently configured\n'
+        emit 'to check CSS only. Would you like to set up SCSS support? [Y/n] '
+        scss_answer=""
+        if IFS= read -r -u "$PROMPT_IN_FD" scss_answer; then
+          scss_answer="$(printf '%s' "$scss_answer" | tr -d '\r\n')"
+        fi
+        if [ -z "$scss_answer" ] || [ "$scss_answer" = "y" ] || [ "$scss_answer" = "Y" ]; then
+          scss_install_scss="true"
+          scss_detected="pending"
+        else
+          scss_detected="declined"
+        fi
+      else
+        scss_detected="true"
+      fi
+    fi
+
     if [ "$node_mode" != "skip" ]; then
       emit 'Preparing JS toolchain install.\n'
       if ! command_available "$ddev_cmd"; then
@@ -2257,6 +2309,26 @@ if [ "$core_package_json_present" -eq 1 ]; then
       fi
     fi
   fi
+fi
+
+# If user accepted SCSS support, write the SCSS globs to the add-on config.
+# The package install command and config change are shown in the summary
+# so the user can see them all together and handle version conflicts.
+if [ "$scss_install_scss" = "true" ]; then
+  dcq_config="${app_root%/}/.ddev/config.drupal-code-quality.yaml"
+  cat > "$dcq_config" <<'DCQYAML'
+# Drupal Code Quality add-on configuration.
+web_environment:
+  - "DCQ_STYLELINT_GLOBS=**/*.css **/*.scss"
+DCQYAML
+  emit 'Updated .ddev/config.drupal-code-quality.yaml with SCSS globs.\n'
+  emit 'Note: there are manual steps to complete after install — look for the\n'
+  emit 'SCSS instructions in the install summary at the end.\n'
+  if [ "${PROMPT_AVAILABLE:-0}" -eq 1 ]; then
+    emit 'Press Enter to continue...'
+    IFS= read -r -u "$PROMPT_IN_FD" _ || true
+  fi
+  scss_detected="accepted"
 fi
 
 emit '\n==> Optional: .gitignore update\n'
@@ -2428,6 +2500,8 @@ print_install_summary() {
   local node_status="$2"
   local ide_status="$3"
   local configs_count="$4"
+  local has_scss="$5"
+  local pkg_mgr="${6:-npm}"
 
   emit '\n'
   emit '===============================================================\n'
@@ -2477,6 +2551,43 @@ print_install_summary() {
     emit '  %s. Setup VS Code: see .ddev/drupal-code-quality/ide-settings/vscode/README.md\n' "$step_num"
   fi
 
+  local scss_install_cmd
+  if [ "$pkg_mgr" = "yarn" ]; then
+    scss_install_cmd="ddev yarn add --dev stylelint-config-standard-scss"
+  else
+    scss_install_cmd="ddev npm install --save-dev stylelint-config-standard-scss"
+  fi
+
+  if [ "$has_scss" = "accepted" ]; then
+    emit '\n'
+    emit 'SCSS support — complete these steps to finish setup:\n'
+    emit '  1. Install the SCSS config package:\n'
+    emit '       %s\n' "$scss_install_cmd"
+    emit '  2. Update .stylelintrc.json — replace "stylelint-config-standard" with\n'
+    emit '     "stylelint-config-standard-scss" in the "extends" array.\n'
+    emit '  3. Run: ddev restart\n'
+    emit '  (SCSS scan globs have already been configured in\n'
+    emit '   .ddev/config.drupal-code-quality.yaml)\n'
+  elif [ "$has_scss" = "true" ] || [ "$has_scss" = "declined" ]; then
+    emit '\n'
+    if [ "$has_scss" = "declined" ]; then
+      emit 'SCSS support was not installed. Stylelint will only check CSS files.\n'
+    else
+      emit 'SCSS files were detected but SCSS support was not configured.\n'
+      emit 'Stylelint will only check CSS files.\n'
+    fi
+    emit 'To enable SCSS linting later:\n'
+    emit '  - Re-run the installer interactively and accept SCSS setup, or:\n'
+    emit '  1. Install the SCSS config package:\n'
+    emit '       %s\n' "$scss_install_cmd"
+    emit '  2. Update .stylelintrc.json — replace "stylelint-config-standard" with\n'
+    emit '     "stylelint-config-standard-scss" in the "extends" array.\n'
+    emit '  3. In .ddev/config.drupal-code-quality.yaml, uncomment and update the\n'
+    emit '     DCQ_STYLELINT_GLOBS line under web_environment:\n'
+    emit '       - "DCQ_STYLELINT_GLOBS=**/*.css **/*.scss"\n'
+    emit '  4. Run: ddev restart\n'
+  fi
+
   emit '\n'
   emit 'More info: https://github.com/UltraBob/ddev-drupal-code-quality\n'
   emit '===============================================================\n'
@@ -2497,4 +2608,23 @@ ide_summary="${ide_mode:-skip}"
 
 configs_copied="${copy_changed:-0}"
 
-print_install_summary "$php_deps_summary" "$node_summary" "$ide_summary" "$configs_copied"
+# Detect SCSS if not already done during Node deps phase (e.g. Node was skipped).
+if [ "$scss_detected" = "false" ] && detect_scss_files "$app_root"; then
+  # Check if SCSS support is already fully configured (both config and globs).
+  stylelintrc="${app_root%/}/.stylelintrc.json"
+  scss_has_config=false
+  scss_has_globs=false
+  if [ -f "$stylelintrc" ] && grep -q 'scss' "$stylelintrc"; then
+    scss_has_config=true
+  fi
+  if grep -rlq 'DCQ_STYLELINT_GLOBS.*scss' "${app_root%/}/.ddev/"*.yaml 2>/dev/null; then
+    scss_has_globs=true
+  fi
+  if [ "$scss_has_config" = true ] && [ "$scss_has_globs" = true ]; then
+    scss_detected="configured"
+  else
+    scss_detected="true"
+  fi
+fi
+
+print_install_summary "$php_deps_summary" "$node_summary" "$ide_summary" "$configs_copied" "$scss_detected" "${root_pm:-npm}"

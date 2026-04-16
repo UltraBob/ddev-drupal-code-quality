@@ -80,9 +80,11 @@ USAGE
 done
 
 # Inject default globs when no file paths are supplied, so bare
-# `ddev stylelint` scans all style files via .stylelintignore exclusions.
+# `ddev stylelint` scans style files via .stylelintignore exclusions.
+# Override with DCQ_STYLELINT_GLOBS (space-separated, stylelint CLI syntax).
 if [ "$has_positional" = false ]; then
-  args+=('**/*.css' '**/*.scss' '**/*.sass')
+  read -ra _globs <<< "${DCQ_STYLELINT_GLOBS:-**/*.css}"
+  args+=("${_globs[@]}")
 fi
 
 # Run from project root so native .stylelintignore auto-discovery and

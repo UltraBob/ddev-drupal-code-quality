@@ -4,6 +4,7 @@ name: drupal-code-quality
 
 # Files copied into the project's .ddev directory.
 project_files:
+  - config.drupal-code-quality.yaml
   - commands/helpers/path-map.sh
   - commands/helpers/node-toolchain.sh
   - commands/web/checks

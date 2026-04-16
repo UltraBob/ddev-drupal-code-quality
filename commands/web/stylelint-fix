@@ -87,8 +87,10 @@ USAGE
   esac
 done
 
+# Override with DCQ_STYLELINT_GLOBS (space-separated, stylelint CLI syntax).
 if [ "$has_positional" = false ]; then
-  args+=('**/*.css' '**/*.scss' '**/*.sass')
+  read -ra _globs <<< "${DCQ_STYLELINT_GLOBS:-**/*.css}"
+  args+=("${_globs[@]}")
 fi
 
 cd "$PROJECT_ROOT"

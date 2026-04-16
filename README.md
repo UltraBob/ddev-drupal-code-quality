@@ -151,10 +151,9 @@ The template points PHP tooling at `.ddev/drupal-code-quality/tooling/bin` and J
   - `dcq-reports/` is created at the project root when running `checks`
     or the `*-fix` commands (logs + patch previews).
   - Add `dcq-reports/` to `.gitignore` if you do not want to track it.
-- ESLint toolchain selection:
-  - `ESLINT_TOOLCHAIN=auto` (default) prefers root toolchain when root configs exist.
-  - `ESLINT_TOOLCHAIN=core` forces Drupal core JS toolchain.
-  - `ESLINT_TOOLCHAIN=root` forces project root toolchain.
+- ESLint toolchain: Node tooling is installed at the project root only
+  (see `docs/decisions/node-deps-root-only-2026-01-22.md`). All wrappers resolve
+  tools from `node_modules/` at the project root.
 - ESLint config mode:
   - `ESLINT_CONFIG_MODE=nearest` (default) groups by nearest config file.
   - `ESLINT_CONFIG_MODE=fixed` prefers `.eslintrc.passing.json`, then

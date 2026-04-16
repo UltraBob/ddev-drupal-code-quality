@@ -139,7 +139,7 @@ create_root_package_json() {
   local status
 
   php_code=$(cat <<'PHP'
-$path = "__DOCROOT_CORE__/package.json";
+$path = "__DOCROOT_COREDIR__/package.json";
 $data = json_decode(file_get_contents($path), true);
 if (!is_array($data)) {
   fwrite(STDERR, "Failed to read core package.json\n");
@@ -180,7 +180,7 @@ if (isset($data["devDependencies"])) {
 echo json_encode($out, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . PHP_EOL;
 PHP
   )
-  php_code="${php_code//__DOCROOT_CORE__/${DOCROOT_CORE}}"
+  php_code="${php_code//__DOCROOT_COREDIR__/${DOCROOT_COREDIR}}"
   php_payload="$(printf '%s' "$php_code" | base64 | tr -d '\n')"
 
   # Use bash -lc so the php -r argument stays quoted; ddev exec can reparse
@@ -232,7 +232,7 @@ find_missing_node_deps() {
 
   php_code=$(cat <<'PHP'
 $rootPath = "/var/www/html/package.json";
-$corePath = "__DOCROOT_CORE__/package.json";
+$corePath = "__DOCROOT_COREDIR__/package.json";
 $assetsRoot = "/var/www/html/.ddev/drupal-code-quality/assets";
 
 function read_json_file(string $path): ?array {
@@ -403,7 +403,7 @@ foreach ($missing as $name => $version) {
 }
 PHP
   )
-  php_code="${php_code//__DOCROOT_CORE__/${DOCROOT_CORE}}"
+  php_code="${php_code//__DOCROOT_COREDIR__/${DOCROOT_COREDIR}}"
   php_payload="$(printf '%s' "$php_code" | base64 | tr -d '\n')"
 
   # Use bash -lc so the php -r argument stays quoted; ddev exec can reparse
@@ -1578,11 +1578,9 @@ PY
 }
 
 node_toolchain_present() {
-  # Detect installed eslint tooling in either root or core node_modules.
+  # Detect installed eslint tooling at the project root (root-only policy).
   local app_root="$1"
   local paths=(
-    "$app_root/${DCQ_DOCROOT}/core/node_modules/.bin/eslint"
-    "$app_root/${DCQ_DOCROOT}/core/node_modules/eslint/bin/eslint.js"
     "$app_root/node_modules/.bin/eslint"
     "$app_root/node_modules/eslint/bin/eslint.js"
   )
@@ -1675,7 +1673,7 @@ fi
 dcq_docroot="$(detect_docroot "${app_root%/}/.ddev/config.yaml")"
 DCQ_DOCROOT="$dcq_docroot"
 DOCROOT_CONTAINER="/var/www/html/${DCQ_DOCROOT}"
-DOCROOT_CORE="${DOCROOT_CONTAINER}/core"
+DOCROOT_COREDIR="${DOCROOT_CONTAINER}/core"
 docroot_file="${app_root%/}/.ddev/.dcq-docroot"
 if [ -f "$docroot_file" ]; then
   if ! grep -Fxq "$DCQ_DOCROOT" "$docroot_file"; then
@@ -2111,6 +2109,19 @@ if [ "$core_package_json_present" -eq 1 ]; then
   if [ -z "$node_mode_raw" ] && [ "$node_toolchain_existing" -eq 1 ]; then
     node_mode_raw="skip"
     skip_due_to_existing_toolchain=1
+  fi
+
+  # Detect legacy core-only installs that need migration to project root.
+  if [ -z "$node_mode_raw" ] && [ "$node_toolchain_existing" -eq 0 ]; then
+    core_dir="${DCQ_DOCROOT}/core"
+    legacy_core_nm="${app_root}/${core_dir}/node_modules"
+    if [ -e "${legacy_core_nm}/.bin/eslint" ] || \
+       [ -e "${legacy_core_nm}/eslint/bin/eslint.js" ]; then
+      emit 'Legacy core-only Node toolchain detected. The add-on now requires tooling at the project root.\n'
+      if [ "$non_interactive" -eq 1 ]; then
+        node_mode_raw="root"
+      fi
+    fi
   fi
 
   if [ "$node_mode_raw" != "skip" ] || [ "$skip_due_to_existing_toolchain" -eq 1 ]; then

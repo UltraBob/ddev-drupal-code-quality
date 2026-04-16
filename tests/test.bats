@@ -388,16 +388,7 @@ wait_for_container_path() {
 }
 
 ensure_node_toolchain() {
-  if ddev exec test -x /var/www/html/web/core/node_modules/.bin/cspell >/dev/null 2>&1; then
-    return 0
-  fi
   if ddev exec test -x /var/www/html/node_modules/.bin/cspell >/dev/null 2>&1; then
-    return 0
-  fi
-
-  if ddev exec test -f /var/www/html/web/core/package.json >/dev/null 2>&1; then
-    run ddev exec bash -lc "corepack enable && cd /var/www/html/web/core && yarn install"
-    assert_success
     return 0
   fi
 
@@ -1682,13 +1673,15 @@ JSON
   restart_or_start_ddev
   assert_addon_installed
   ensure_node_toolchain
-  run ddev exec bash -lc $'mkdir -p /var/www/html/web/core/node_modules/.bin\ncat > /var/www/html/web/core/node_modules/.bin/cspell <<\'SH\'\n#!/bin/sh\necho \"core cspell should not be used\" >&2\nexit 99\nSH\nchmod +x /var/www/html/web/core/node_modules/.bin/cspell\nmkdir -p /var/www/html/web/core/node_modules/stylelint/bin\ncat > /var/www/html/web/core/node_modules/stylelint/bin/stylelint.mjs <<\'JS\'\nconsole.error(\"core stylelint should not be used\");\nprocess.exit(99);\nJS\ncat > /var/www/html/web/core/node_modules/.bin/prettier <<\'SH\'\n#!/bin/sh\necho \"core prettier should not be used\" >&2\nexit 99\nSH\nchmod +x /var/www/html/web/core/node_modules/.bin/prettier'
+  run ddev exec bash -lc $'mkdir -p /var/www/html/web/core/node_modules/.bin\ncat > /var/www/html/web/core/node_modules/.bin/cspell <<\'SH\'\n#!/bin/sh\necho \"core cspell should not be used\" >&2\nexit 99\nSH\nchmod +x /var/www/html/web/core/node_modules/.bin/cspell\nmkdir -p /var/www/html/web/core/node_modules/stylelint/bin\ncat > /var/www/html/web/core/node_modules/stylelint/bin/stylelint.mjs <<\'JS\'\nconsole.error(\"core stylelint should not be used\");\nprocess.exit(99);\nJS\ncat > /var/www/html/web/core/node_modules/.bin/prettier <<\'SH\'\n#!/bin/sh\necho \"core prettier should not be used\" >&2\nexit 99\nSH\nchmod +x /var/www/html/web/core/node_modules/.bin/prettier\nmkdir -p /var/www/html/web/core/node_modules/eslint/bin\ncat > /var/www/html/web/core/node_modules/eslint/bin/eslint.js <<\'JS\'\nconsole.error(\"core eslint should not be used\");\nprocess.exit(99);\nJS'
   assert_success
   run ./.ddev/drupal-code-quality/tooling/bin/cspell --version
   assert_success
   run ./.ddev/drupal-code-quality/tooling/bin/stylelint --version
   assert_success
   run ./.ddev/drupal-code-quality/tooling/bin/prettier --version
+  assert_success
+  run ./.ddev/drupal-code-quality/tooling/bin/eslint --version
   assert_success
   assert_file_exist ".vscode/settings.json"
   assert_file_exist ".vscode/extensions.json"

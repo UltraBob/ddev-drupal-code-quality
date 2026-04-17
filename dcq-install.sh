@@ -2185,12 +2185,14 @@ if [ "$core_package_json_present" -eq 1 ]; then
     scss_install_scss="false"
     if detect_scss_files "$app_root"; then
       # Check if SCSS support is already fully configured.
-      # Both conditions must be true: stylelint config references scss AND
+      # Both conditions must be true: a stylelint config references scss AND
       # the DDEV env var includes scss globs.
-      stylelintrc="${app_root%/}/.stylelintrc.json"
       scss_has_config=false
       scss_has_globs=false
-      if [ -f "$stylelintrc" ] && grep -q 'scss' "$stylelintrc"; then
+      if find "$app_root" -maxdepth 4 \
+           -type d \( -name node_modules -o -name vendor -o -name .git -o -name .ddev \) -prune \
+           -o -name '.stylelintrc*' -type f -print0 2>/dev/null \
+         | xargs -0 grep -lq 'scss' 2>/dev/null; then
         scss_has_config=true
       fi
       if grep -rlq 'DCQ_STYLELINT_GLOBS.*scss' "${app_root%/}/.ddev/"*.yaml 2>/dev/null; then
@@ -2204,7 +2206,7 @@ if [ "$core_package_json_present" -eq 1 ]; then
       if [ "$scss_already_configured" = true ]; then
         scss_detected="configured"
         emit 'SCSS files detected — SCSS support appears to be configured already.\n'
-      elif [ "$non_interactive" -eq 0 ] && [ "${PROMPT_AVAILABLE:-0}" -eq 1 ]; then
+      elif [ "$non_interactive" -eq 0 ] && [ "$recommended_mode" -eq 0 ] && [ "${PROMPT_AVAILABLE:-0}" -eq 1 ]; then
         emit '\nYour project contains SCSS files, but Stylelint is currently configured\n'
         emit 'to check CSS only. Would you like to set up SCSS support? [Y/n] '
         scss_answer=""
@@ -2607,10 +2609,12 @@ configs_copied="${copy_changed:-0}"
 # Detect SCSS if not already done during Node deps phase (e.g. Node was skipped).
 if [ "$scss_detected" = "false" ] && detect_scss_files "$app_root"; then
   # Check if SCSS support is already fully configured (both config and globs).
-  stylelintrc="${app_root%/}/.stylelintrc.json"
   scss_has_config=false
   scss_has_globs=false
-  if [ -f "$stylelintrc" ] && grep -q 'scss' "$stylelintrc"; then
+  if find "$app_root" -maxdepth 4 \
+       -type d \( -name node_modules -o -name vendor -o -name .git -o -name .ddev \) -prune \
+       -o -name '.stylelintrc*' -type f -print0 2>/dev/null \
+     | xargs -0 grep -lq 'scss' 2>/dev/null; then
     scss_has_config=true
   fi
   if grep -rlq 'DCQ_STYLELINT_GLOBS.*scss' "${app_root%/}/.ddev/"*.yaml 2>/dev/null; then

@@ -1756,6 +1756,7 @@ case "$install_mode" in
 esac
 
 emit '\n==> Phase 1: PHP tooling dependencies\n'
+php_deps_failed=0
 vendor_bin="${app_root%/}/vendor/bin"
 missing_tools=()
 for tool in phpstan phpcs phpcbf; do
@@ -1830,14 +1831,66 @@ if [ "${#missing_tools[@]}" -gt 0 ]; then
     if [ "$should_install" -ne 1 ]; then
       emit "Skipping dependency install. Run '%s' later to enable PHPStan/PHPCS/PHPCBF.\n" "${cmd[*]}"
     else
-      (
-        cd "$app_root"
-        if [ "$recommended_mode" -eq 1 ]; then
-          ensure_composer_plugin_blocked "$ddev_cmd" "$app_root"
+      composer_succeeded=0
+      while true; do
+        if (
+          cd "$app_root"
+          if [ "$recommended_mode" -eq 1 ]; then
+            ensure_composer_plugin_blocked "$ddev_cmd" "$app_root"
+          fi
+          run_command "${cmd[@]}"
+        ); then
+          composer_succeeded=1
+          break
         fi
-        run_command "${cmd[@]}"
-      )
-      emit 'Dependencies installed.\n'
+
+        emit '\n'
+        emit 'WARNING: PHP dev tools installation failed.\n'
+        emit 'The composer output above should indicate the cause. Common issues:\n'
+        emit '  - Security advisories blocking dependency resolution (update Drupal core first)\n'
+        emit '  - allow-plugins not configured (add the plugin to composer.json allow-plugins)\n'
+        emit '\n'
+        emit 'You can fix the issue in another terminal and retry.\n'
+        emit 'Command was: %s\n' "${cmd[*]}"
+
+        if [ "$non_interactive" -eq 1 ]; then
+          emit 'Non-interactive mode: proceeding without PHP dev tools.\n'
+          break
+        fi
+
+        if [ "${PROMPT_AVAILABLE:-0}" -ne 1 ]; then
+          emit 'No interactive terminal: proceeding without PHP dev tools.\n'
+          break
+        fi
+
+        printf '\n[r]etry, [p]roceed without PHP tools, [a]bort install (default: proceed): ' >&"$PROMPT_OUT_FD"
+        fail_answer=""
+        if ! IFS= read -r -u "$PROMPT_IN_FD" fail_answer; then
+          fail_answer=""
+        fi
+        fail_answer="$(string_lower "$(printf '%s' "$fail_answer" | tr -d '\r\n')")"
+
+        case "$fail_answer" in
+          r|retry)
+            emit 'Retrying composer install...\n'
+            continue
+            ;;
+          a|abort)
+            emit 'Aborting install.\n'
+            exit 1
+            ;;
+          *)
+            emit 'Proceeding without PHP dev tools.\n'
+            break
+            ;;
+        esac
+      done
+
+      if [ "$composer_succeeded" -eq 1 ]; then
+        emit 'Dependencies installed.\n'
+      else
+        php_deps_failed=1
+      fi
     fi
   fi
 fi
@@ -2512,6 +2565,8 @@ print_install_summary() {
 
   if [ "$php_deps_status" = "installed" ]; then
     emit '  - PHP dev tools (PHPStan, PHPCS, etc.)\n'
+  elif [ "$php_deps_status" = "failed" ]; then
+    emit '  - PHP dev tools: FAILED (see warning below)\n'
   else
     emit '  - PHP dev tools: NOT installed\n'
   fi
@@ -2532,7 +2587,12 @@ print_install_summary() {
   emit 'Next steps:\n'
   local step_num=1
 
-  if [ "$php_deps_status" != "installed" ]; then
+  if [ "$php_deps_status" = "failed" ]; then
+    emit '  %s. FIX: PHP dev tools failed to install. Resolve the composer issue\n' "$step_num"
+    emit '     (see error output above), then run:\n'
+    emit '     ddev composer require --dev drupal/core-dev --with-all-dependencies\n'
+    step_num=$((step_num + 1))
+  elif [ "$php_deps_status" != "installed" ]; then
     emit '  %s. Install PHP tools: ddev composer require --dev drupal/core-dev\n' "$step_num"
     step_num=$((step_num + 1))
   fi
@@ -2593,7 +2653,9 @@ print_install_summary() {
 
 # Determine summary statuses
 php_deps_summary="skipped"
-if [ "${should_install:-0}" -eq 1 ]; then
+if [ "${php_deps_failed:-0}" -eq 1 ]; then
+  php_deps_summary="failed"
+elif [ "${should_install:-0}" -eq 1 ]; then
   php_deps_summary="installed"
 fi
 

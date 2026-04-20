@@ -1728,6 +1728,100 @@ SH
   assert_success
 }
 
+@test "stylelint rejects Node.js older than 18" {
+  set -u -o pipefail
+  export DCQ_INSTALL_DEPS=skip
+  export DCQ_INSTALL_NODE_DEPS=skip
+  run ddev add-on get "${DIR}"
+  assert_success
+
+  # Write test scripts to the project root (writable, syncs to container).
+  cat > dcq-node-check-fail.sh <<'SH'
+#!/usr/bin/env bash
+set -u
+NODE_MAJOR=16
+if [ "${NODE_MAJOR:-0}" -lt 18 ]; then
+  echo "Error: Node.js $NODE_MAJOR is too old. Stylelint requires Node.js 18 or later." >&2
+  exit 1
+fi
+SH
+  cat > dcq-node-check-pass.sh <<'SH'
+#!/usr/bin/env bash
+set -u
+NODE_MAJOR=$(node -e 'console.log(process.versions.node.split(".")[0])')
+if [ "${NODE_MAJOR:-0}" -lt 18 ]; then
+  echo "Error: Node.js $NODE_MAJOR is too old." >&2
+  exit 1
+fi
+echo "Node $NODE_MAJOR OK"
+SH
+  chmod +x dcq-node-check-fail.sh dcq-node-check-pass.sh
+
+  run wait_for_container_path "/var/www/html/dcq-node-check-fail.sh"
+  assert_success
+
+  # Simulated Node 16 should trigger the guard.
+  run ddev exec bash /var/www/html/dcq-node-check-fail.sh
+  assert_failure
+  assert_output --partial "too old"
+  assert_output --partial "Node.js 18 or later"
+
+  # Real container Node version should pass.
+  run ddev exec bash /var/www/html/dcq-node-check-pass.sh
+  assert_success
+  assert_output --partial "OK"
+}
+
+@test "installer prompts abort/skip when DDEV nodejs_version is below 18" {
+  set -u -o pipefail
+  export DCQ_INSTALL_DEPS=skip
+
+  # Add nodejs_version: "16" to the main DDEV config (check_nodejs_version
+  # reads .ddev/config.yaml directly via awk, not the DDEV merge files).
+  echo 'nodejs_version: "16"' >> .ddev/config.yaml
+
+  # Phase 3 only fires when core package.json is present on the host.
+  local docroot="${DCQ_TEST_DOCROOT:-web}"
+  mkdir -p "${docroot}/core"
+  echo '{"name": "drupal/core", "devDependencies": {}}' > "${docroot}/core/package.json"
+
+  # Non-interactive mode defaults to skip.
+  run ddev add-on get "${DIR}"
+  assert_success
+  assert_output --partial "Node.js 18 or higher is required"
+  assert_output --partial 'nodejs_version: "16"'
+  assert_output --partial "ddev config --nodejs-version 20"
+  assert_output --partial "Skipping JS toolchain install (Node.js too old)"
+  # PHP tooling message should still appear
+  assert_output --partial "PHP tooling is still available"
+}
+
+@test "installer offers engines.node for package.json without engines" {
+  set -u -o pipefail
+  export DCQ_INSTALL_DEPS=skip
+  # Must be root/install so Phase 3 reaches the maybe_add_engines_node call.
+  export DCQ_INSTALL_NODE_DEPS=root
+
+  # Create a minimal package.json without engines.
+  cat > package.json <<'JSON'
+{
+  "name": "dcq-test-project",
+  "private": true
+}
+JSON
+
+  # Phase 3 needs core package.json to activate.
+  local docroot="${DCQ_TEST_DOCROOT:-web}"
+  mkdir -p "${docroot}/core"
+  echo '{"name": "drupal/core", "devDependencies": {}}' > "${docroot}/core/package.json"
+
+  run ddev add-on get "${DIR}"
+  # Install may fail during npm install (no real deps), but should still
+  # reach the engines check before that.
+  assert_output --partial "engines"
+  assert_output --partial ">=20.0"
+}
+
 @test "remove cleans ddev assets and shims" {
   set -u -o pipefail
   run ddev add-on get "${DIR}"

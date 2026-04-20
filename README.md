@@ -258,6 +258,34 @@ DCQ_FULL_TESTS=1 bats --jobs 4 ./tests/test.bats
 A weekly GitHub Actions workflow (`upstream-config-check.yml`) automatically
 checks for upstream drift and opens an issue when changes are detected.
 
+## Troubleshooting
+
+### Stylelint crashes with "RangeError: Invalid string length"
+
+On projects with a very large number of Stylelint violations (2000+), the
+default `string` formatter may crash because it builds a single table string
+that exceeds Node.js memory limits. This is a
+[known stylelint limitation](https://github.com/stylelint/stylelint/issues/4133).
+
+**Workaround:** Use the `compact` formatter, which outputs one line per warning
+and does not hit the string length limit:
+
+```bash
+ddev stylelint --formatter compact
+```
+
+### Stylelint crashes with "findLastIndex is not a function"
+
+This means your DDEV container is running Node.js 16 or earlier.
+`Array.prototype.findLastIndex` requires Node.js 18+. Update your DDEV config:
+
+```yaml
+# .ddev/config.yaml
+nodejs_version: "20"
+```
+
+Then run `ddev restart`.
+
 ## Uninstall
 
 Removing the add-on cleans up the `.ddev` payload (commands, shims, assets,

@@ -55,6 +55,157 @@ detect_docroot() {
   printf '%s' "$value"
 }
 
+detect_nodejs_version() {
+  # Read the nodejs_version value from .ddev/config.yaml.
+  # Returns the version string (e.g. "16", "20") or empty if not set.
+  local config_path="$1"
+  local value=""
+
+  if [ -f "$config_path" ]; then
+    value="$(awk -F: '/^[[:space:]]*nodejs_version:/ {
+      val=$2
+      sub(/^[[:space:]]+/, "", val)
+      sub(/[[:space:]]+$/, "", val)
+      gsub(/^"|"$/, "", val)
+      gsub(/^'\''|'\''$/, "", val)
+      print val
+      exit
+    }' "$config_path")"
+  fi
+
+  printf '%s' "$value"
+}
+
+check_nodejs_version() {
+  # Check if the DDEV container's Node.js version meets the minimum requirement.
+  # Sets NODEJS_VERSION_TOO_OLD=1 and NODEJS_DETECTED_VERSION if too old.
+  # Returns 0 if OK or not set (DDEV defaults to 20), 1 if too old.
+  local config_path="$1"
+  local node_ver
+  NODEJS_VERSION_TOO_OLD=0
+  NODEJS_DETECTED_VERSION=""
+  node_ver="$(detect_nodejs_version "$config_path")"
+
+  if [ -z "$node_ver" ]; then
+    return 0
+  fi
+
+  # Extract major version (handle values like "16", "16.x", "16.20.2").
+  local major="${node_ver%%[.x-]*}"
+  if [ -z "$major" ] || ! [[ "$major" =~ ^[0-9]+$ ]]; then
+    return 0
+  fi
+
+  if [ "$major" -lt 18 ]; then
+    NODEJS_VERSION_TOO_OLD=1
+    NODEJS_DETECTED_VERSION="$node_ver"
+    return 1
+  fi
+
+  return 0
+}
+
+prompt_nodejs_version_action() {
+  # Prompt the user to abort, skip node tooling, or remove the add-on when
+  # the DDEV Node.js version is too old.
+  # Sets NODE_VERSION_ACTION to: abort, skip, or remove.
+  local node_ver="$1"
+  local non_interactive="$2"
+  NODE_VERSION_ACTION="skip"
+
+  emit '\n'
+  emit 'Node.js 18 or higher is required for the JS-based code quality tooling\n'
+  emit '(Stylelint, ESLint, Prettier). Your DDEV config sets nodejs_version: "%s".\n' "$node_ver"
+  emit '\n'
+  emit 'We recommend you fix this before continuing. You can:\n'
+  emit '\n'
+  emit '  [a]bort  — Exit the installer. Fix with:\n'
+  emit '             ddev config --nodejs-version 20 && ddev restart\n'
+  emit '             then re-run: ddev add-on get UltraBob/ddev-drupal-code-quality\n'
+  emit '             To fully remove the add-on instead:\n'
+  emit '             ddev add-on remove drupal-code-quality\n'
+  emit '\n'
+  emit '  [s]kip   — Continue without JS tooling (PHP tools still work)\n'
+  emit '\n'
+
+  if [ "$non_interactive" -eq 1 ]; then
+    emit 'Non-interactive mode: skipping JS toolchain install (Node.js too old).\n'
+    NODE_VERSION_ACTION="skip"
+    return
+  fi
+
+  if [ "${PROMPT_AVAILABLE:-0}" -ne 1 ]; then
+    emit 'No interactive terminal; skipping JS toolchain install.\n'
+    NODE_VERSION_ACTION="skip"
+    return
+  fi
+
+  printf '[a]bort or [s]kip? (default: skip) ' >&"$PROMPT_OUT_FD"
+  local answer=""
+  if ! IFS= read -r -u "$PROMPT_IN_FD" answer; then
+    answer=""
+  fi
+  answer="$(string_lower "$answer")"
+  answer="${answer//$'\r'/}"
+  answer="${answer//$'\n'/}"
+  answer="$(printf '%s' "$answer" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+
+  case "${answer:0:1}" in
+    a) NODE_VERSION_ACTION="abort" ;;
+    *) NODE_VERSION_ACTION="skip" ;;
+  esac
+}
+
+maybe_add_engines_node() {
+  # Offer to add engines.node to an existing package.json that lacks it.
+  # Skipped in non-interactive mode unless the field is missing and we just
+  # created the file (create_root_package_json already handles new files).
+  local app_root="$1"
+  local non_interactive="$2"
+  local pkg="${app_root%/}/package.json"
+
+  if [ ! -f "$pkg" ]; then
+    return 0
+  fi
+
+  # Check if engines.node is already present.
+  if grep -q '"engines"' "$pkg" 2>/dev/null; then
+    return 0
+  fi
+
+  if [ "$non_interactive" -eq 1 ]; then
+    emit 'Note: package.json has no "engines" field. Consider adding "engines": {"node": ">=20.0"} for compatibility.\n'
+    return 0
+  fi
+
+  if ! prompt_yes_no 'Your package.json has no "engines" field. Add "engines": {"node": ">=20.0"} for Node.js compatibility?' 0; then
+    return 0
+  fi
+
+  # Use PHP inside the container (same base64 pattern as create_root_package_json).
+  local ddev_cmd="${DDEV_EXECUTABLE:-ddev}"
+  local php_add_engines
+  php_add_engines=$(cat <<'PHPCODE'
+$path = "/var/www/html/package.json";
+$data = json_decode(file_get_contents($path), true);
+if (!is_array($data) || isset($data["engines"])) { exit(1); }
+$data["engines"] = ["node" => ">=20.0"];
+file_put_contents($path, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
+PHPCODE
+  )
+  local php_payload
+  php_payload="$(printf '%s' "$php_add_engines" | base64 | tr -d '\n')"
+  if command_available "$ddev_cmd" && \
+     "$ddev_cmd" exec bash -lc "php -r 'eval(base64_decode(\"${php_payload}\"));'" >/dev/null 2>&1; then
+    # Sync the container file back to the host.
+    "$ddev_cmd" exec cat /var/www/html/package.json > "$pkg" 2>/dev/null || true
+    emit 'Added "engines": {"node": ">=20.0"} to package.json.\n'
+  else
+    emit 'Could not update package.json automatically. Add manually:\n'
+    emit '  "engines": {"node": ">=20.0"}\n'
+  fi
+}
+
 prompt_setup() {
   # Detect a usable TTY for prompts. Falls back to /dev/tty when stdin/stdout
   # are redirected (e.g., running from automation).
@@ -2156,6 +2307,24 @@ elif command_available "${DDEV_EXECUTABLE:-ddev}"; then
 fi
 
 if [ "$core_package_json_present" -eq 1 ]; then
+  # Check DDEV Node.js version before proceeding with JS toolchain setup.
+  ddev_config="${app_root%/}/.ddev/config.yaml"
+  if ! check_nodejs_version "$ddev_config"; then
+    prompt_nodejs_version_action "$NODEJS_DETECTED_VERSION" "$non_interactive"
+    case "$NODE_VERSION_ACTION" in
+      abort)
+        emit 'Aborting installer. Fix your Node.js version, then re-run the add-on install.\n'
+        exit 0
+        ;;
+      skip)
+        emit 'Skipping JS toolchain install (Node.js too old). PHP tooling is still available.\n'
+        core_package_json_present=0
+        ;;
+    esac
+  fi
+fi
+
+if [ "$core_package_json_present" -eq 1 ]; then
   node_mode_raw="$(string_lower "${DCQ_INSTALL_NODE_DEPS:-}")"
   node_toolchain_existing=0
   if node_toolchain_present "$app_root"; then
@@ -2321,6 +2490,11 @@ if [ "$core_package_json_present" -eq 1 ]; then
 
       if [ "$target" = "root" ]; then
         node_target_choice="$target"
+      fi
+
+      # Offer to add engines.node to existing package.json before installing.
+      if [ "$target" = "root" ] && [ "$has_root_package_json" -eq 1 ]; then
+        maybe_add_engines_node "$app_root" "$non_interactive"
       fi
 
       node_install_done=0

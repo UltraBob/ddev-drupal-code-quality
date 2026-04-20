@@ -16,6 +16,14 @@ if ! command -v node >/dev/null 2>&1; then
   exit 127
 fi
 
+# Stylelint requires Node.js 18+ (Array.prototype.findLastIndex).
+NODE_MAJOR="$(node -e 'console.log(process.versions.node.split(".")[0])')"
+if [ "${NODE_MAJOR:-0}" -lt 18 ]; then
+  echo "Error: Node.js $NODE_MAJOR is too old. Stylelint requires Node.js 18 or later." >&2
+  echo "Update nodejs_version in .ddev/config.yaml (recommended: \"20\") and run \"ddev restart\"." >&2
+  exit 1
+fi
+
 if ! resolve_node_tool "stylelint/bin/stylelint.mjs"; then
   echo "Stylelint is not installed at the project root (${PROJECT_ROOT}/node_modules)." >&2
   echo "Re-run the DDEV add-on installer and accept Node dependency installation," >&2

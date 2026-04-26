@@ -39,6 +39,7 @@ args=()
 has_positional=false
 after_double_dash=false
 map_next=false
+pass_next=false
 
 for arg in "$@"; do
   if [ "$after_double_dash" = true ]; then
@@ -49,6 +50,11 @@ for arg in "$@"; do
   if [ "$map_next" = true ]; then
     args+=("$(map_path "$arg")")
     map_next=false
+    continue
+  fi
+  if [ "$pass_next" = true ]; then
+    args+=("$arg")
+    pass_next=false
     continue
   fi
   case "$arg" in
@@ -71,6 +77,10 @@ USAGE
     -c|--config|--ignore-path)
       args+=("$arg")
       map_next=true
+      ;;
+    -f|--formatter|--custom-formatter|--custom-syntax|-o|--output-file|--cache-location|--max-warnings|--stdin-filename|--suppress-location)
+      args+=("$arg")
+      pass_next=true
       ;;
     --config=*|--ignore-path=*)
       flag="${arg%%=*}"

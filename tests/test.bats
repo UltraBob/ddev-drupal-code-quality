@@ -269,8 +269,23 @@ write_stub_package_json() {
 {
   "name": "dcq-test",
   "private": true,
+  "engines": {
+    "node": ">= 20.0"
+  },
   "devDependencies": {
+    "cspell": "^9.2.2",
+    "eslint": "^8.57.1",
+    "eslint-config-airbnb-base": "^15.0.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-import": "^2.32.0",
+    "eslint-plugin-jsdoc": "^61.2.1",
     "eslint-plugin-no-jquery": "^3.1.1",
+    "eslint-plugin-prettier": "^5.5.4",
+    "eslint-plugin-yml": "^1.19.0",
+    "prettier": "^3.6.2",
+    "stylelint": "^16.25.0",
+    "stylelint-config-standard": "^38.0.0",
+    "stylelint-order": "^7.0.0",
     "stylelint-prettier": "^5.0.3"
   }
 }
@@ -686,6 +701,66 @@ teardown() {
   fi
   assert_success
   health_checks
+}
+
+@test "install excludes DDEV-generated files and sets allowEmptyInput" {
+  set -u -o pipefail
+  run ddev add-on get "${DIR}"
+  assert_success
+
+  # F10: dcq-packages.json should NOT be in the project root.
+  run test -f dcq-packages.json
+  assert_failure
+
+  # F3: allowEmptyInput should be merged into .stylelintrc.json.
+  run grep -q '"allowEmptyInput"' .stylelintrc.json
+  assert_success
+
+  # F4: settings.ddev.php should be excluded from PHPCS.
+  run grep 'settings\.ddev\.php' .phpcs.xml
+  assert_success
+
+  # F4: settings.ddev.php and default.settings.php should be excluded from PHPStan.
+  run grep 'settings\.ddev\.php' phpstan.neon
+  assert_success
+  run grep 'default\.settings\.php' phpstan.neon
+  assert_success
+
+  # F4: settings.ddev.php should be excluded from CSpell.
+  run grep 'settings\.ddev\.php' .cspell.json
+  assert_success
+
+  # Playwright-report should be excluded from eslint, stylelint, prettier ignore files.
+  run grep 'playwright-report' .eslintignore
+  assert_success
+  run grep 'playwright-report' .stylelintignore
+  assert_success
+  run grep 'playwright-report' .prettierignore
+  assert_success
+}
+
+@test "install summary says already present when tools exist" {
+  set -u -o pipefail
+  # First install to get tools in place.
+  run ddev add-on get "${DIR}"
+  assert_success
+
+  # Re-install with skip mode — tools are already present.
+  export DCQ_INSTALL_MODE=skip
+  run ddev add-on get "${DIR}"
+  assert_success
+  assert_output --partial "PHP dev tools already present"
+  assert_output --partial "already present (skipped)"
+  # Should NOT suggest installing tools that are already present.
+  refute_output --partial "Install PHP tools:"
+}
+
+@test "install does not emit dcq-install.sh removal message" {
+  set -u -o pipefail
+  run ddev add-on get "${DIR}"
+  assert_success
+  refute_output --partial "Removed"
+  refute_output --partial "dcq-install.sh"
 }
 
 @test "installer prompt defaults to recommended settings" {
@@ -1927,7 +2002,19 @@ JSON
   "name": "dcq-fail-test",
   "private": true,
   "devDependencies": {
+    "cspell": "^9.2.2",
+    "eslint": "^8.57.1",
+    "eslint-config-airbnb-base": "^15.0.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-import": "^2.32.0",
+    "eslint-plugin-jsdoc": "^61.2.1",
     "eslint-plugin-no-jquery": "^3.1.1",
+    "eslint-plugin-prettier": "^5.5.4",
+    "eslint-plugin-yml": "^1.19.0",
+    "prettier": "^3.6.2",
+    "stylelint": "^16.25.0",
+    "stylelint-config-standard": "^38.0.0",
+    "stylelint-order": "^7.0.0",
     "stylelint-prettier": "^5.0.3",
     "this-package-should-not-exist-dcq-test": "99999.0.0"
   }

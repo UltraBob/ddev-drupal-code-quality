@@ -279,8 +279,9 @@ prompt_choice() {
 }
 
 create_root_package_json() {
-  # Create a project-root package.json based on Drupal core's package.json.
-  # Uses PHP inside the DDEV container to read core dependencies.
+  # Create a minimal project-root package.json with only the packages DCQ needs.
+  # Reads curated package names from dcq-packages.json; resolves versions and
+  # engines.node from core's package.json.
   local ddev_cmd="$1"
   local app_root="$2"
   local container_package_json="/var/www/html/package.json"
@@ -290,12 +291,27 @@ create_root_package_json() {
   local status
 
   php_code=$(cat <<'PHP'
-$path = "__DOCROOT_COREDIR__/package.json";
-$data = json_decode(file_get_contents($path), true);
-if (!is_array($data)) {
+$corePath = "__DOCROOT_COREDIR__/package.json";
+$dcqPath = "/var/www/html/.ddev/drupal-code-quality/assets/dcq-packages.json";
+
+$core = json_decode(file_get_contents($corePath), true);
+if (!is_array($core)) {
   fwrite(STDERR, "Failed to read core package.json\n");
   exit(1);
 }
+$dcq = json_decode(file_get_contents($dcqPath), true);
+if (!is_array($dcq) || !isset($dcq["packages"])) {
+  fwrite(STDERR, "Failed to read dcq-packages.json\n");
+  exit(1);
+}
+
+$coreDeps = [];
+foreach (["dependencies", "devDependencies"] as $key) {
+  if (isset($core[$key]) && is_array($core[$key])) {
+    $coreDeps += $core[$key];
+  }
+}
+
 $projectName = null;
 $configPath = "/var/www/html/.ddev/config.yaml";
 if (is_readable($configPath)) {
@@ -309,25 +325,21 @@ if (is_readable($configPath)) {
     }
   }
 }
+
 $out = [
-  "name" => $projectName ?: ($data["name"] ?? "drupal-project"),
+  "name" => $projectName ?: "drupal-project",
   "private" => true,
 ];
-if (isset($data["description"])) {
-  $out["description"] = $data["description"];
+if (isset($core["engines"]["node"])) {
+  $out["engines"] = ["node" => $core["engines"]["node"]];
 }
-if (isset($data["license"])) {
-  $out["license"] = $data["license"];
+
+$devDeps = [];
+foreach ($dcq["packages"] as $pkg) {
+  $devDeps[$pkg] = $coreDeps[$pkg] ?? "";
 }
-if (isset($data["engines"])) {
-  $out["engines"] = $data["engines"];
-}
-if (isset($data["dependencies"])) {
-  $out["dependencies"] = $data["dependencies"];
-}
-if (isset($data["devDependencies"])) {
-  $out["devDependencies"] = $data["devDependencies"];
-}
+$out["devDependencies"] = $devDeps;
+
 echo json_encode($out, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . PHP_EOL;
 PHP
   )
@@ -368,13 +380,14 @@ PHP
     fi
   fi
 
-  emit 'Created package.json from Drupal core devDependencies; review and customize as needed.\n'
+  emit 'Created package.json with DCQ dependencies (versions from Drupal core); review and customize as needed.\n'
   return 0
 }
 
 find_missing_node_deps() {
-  # Determine missing JS tooling deps by comparing root package.json to
-  # Drupal core + add-on config requirements (via a PHP helper in the container).
+  # Determine missing JS tooling deps by comparing root package.json to the
+  # curated list in dcq-packages.json (versions from core). Config files are
+  # also scanned as a safety net for user-added plugins not in the curated list.
   local ddev_cmd="$1"
   local php_code
   local php_payload
@@ -385,6 +398,7 @@ find_missing_node_deps() {
 $rootPath = "/var/www/html/package.json";
 $corePath = "__DOCROOT_COREDIR__/package.json";
 $assetsRoot = "/var/www/html/.ddev/drupal-code-quality/assets";
+$dcqPath = $assetsRoot . "/dcq-packages.json";
 
 function read_json_file(string $path): ?array {
   if (!is_readable($path)) {
@@ -458,13 +472,18 @@ if (!is_array($root) || !is_array($core)) {
 
 $rootDeps = merge_deps($root);
 $coreDeps = merge_deps($core);
-$required = $coreDeps;
 
-$basePackages = ["eslint", "prettier", "stylelint", "cspell"];
-foreach ($basePackages as $pkg) {
-  add_required($required, $pkg, $coreDeps);
+// Seed required set from the curated package list.
+$dcqData = read_json_file($dcqPath);
+$required = [];
+if (is_array($dcqData) && isset($dcqData["packages"])) {
+  foreach ($dcqData["packages"] as $pkg) {
+    $required[$pkg] = $coreDeps[$pkg] ?? "";
+  }
 }
 
+// Safety net: also scan config files for user-added plugins/extends not in
+// the curated list.
 $eslintConfigs = [
   $assetsRoot . "/.eslintrc.json",
   $assetsRoot . "/.eslintrc.jquery.json",
@@ -621,21 +640,26 @@ maybe_install_missing_root_deps() {
       deps_cmd+=" $(printf '%q' "$dep")"
     done
     if [ "$package_manager" = "npm" ]; then
-      cmd=( "$ddev_cmd" "exec" "bash" "-lc" "cd /var/www/html && npm install --save-dev --package-lock${deps_cmd}" )
+      # shellcheck disable=SC2086
+      cmd=( "$ddev_cmd" "npm" "install" "--save-dev" "--package-lock"${deps_cmd} )
       if ! run_command "${cmd[@]}"; then
         emit 'npm install --save-dev failed. You can retry manually.\n'
+        emit_dcq_package_list "npm"
         return 1
       fi
       emit 'Node dependencies added (project root).\n'
-      cmd=( "$ddev_cmd" "exec" "bash" "-lc" "cd /var/www/html && npm install --package-lock" )
+      cmd=( "$ddev_cmd" "npm" "install" "--package-lock" )
       if ! run_command "${cmd[@]}"; then
         emit 'npm install failed. You can retry manually.\n'
+        emit_dcq_package_list "npm"
         return 1
       fi
     else
-      cmd=( "$ddev_cmd" "exec" "bash" "-lc" "cd /var/www/html && yarn add -D${deps_cmd}" )
+      # shellcheck disable=SC2086
+      cmd=( "$ddev_cmd" "yarn" "add" "-D"${deps_cmd} )
       if ! run_command "${cmd[@]}"; then
         emit 'yarn add failed. You can retry manually.\n'
+        emit_dcq_package_list "yarn"
         return 1
       fi
       emit 'Node dependencies added (project root).\n'
@@ -710,15 +734,15 @@ emit_node_install_command() {
 
   if [ -n "$deps_cmd" ]; then
     if [ "$package_manager" = "npm" ]; then
-      cmd="ddev exec bash -lc \"cd /var/www/html && npm install --save-dev${deps_cmd}\""
+      cmd="ddev npm install --save-dev${deps_cmd}"
     else
-      cmd="ddev exec bash -lc \"cd /var/www/html && yarn add -D${deps_cmd}\""
+      cmd="ddev yarn add -D${deps_cmd}"
     fi
   else
     if [ "$package_manager" = "npm" ]; then
-      cmd="ddev exec bash -lc \"cd /var/www/html && npm install\""
+      cmd="ddev npm install"
     else
-      cmd="ddev exec bash -lc \"cd /var/www/html && yarn install\""
+      cmd="ddev yarn install"
     fi
   fi
 
@@ -726,6 +750,35 @@ emit_node_install_command() {
     emit 'No project package.json found. The install requires one at the project root.\n'
   fi
   emit 'Run:\n  %s\n' "$cmd"
+}
+
+emit_dcq_package_list() {
+  # Print the curated DCQ package list and a manual install command.
+  # Usage: emit_dcq_package_list <package_manager>
+  local package_manager="${1:-npm}"
+  local assets_dir
+  assets_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/drupal-code-quality/assets"
+  local dcq_packages_file="${assets_dir}/dcq-packages.json"
+  local packages=""
+
+  if [ -f "$dcq_packages_file" ]; then
+    # Extract package names from the JSON array (lines containing only a quoted
+    # string, no colon — excludes keys like "packages" and "_comment").
+    packages="$(grep -v ':' "$dcq_packages_file" | grep '"' | sed 's/.*"\([^"]*\)".*/\1/' | tr '\n' ' ')"
+  fi
+
+  if [ -z "$packages" ]; then
+    packages="cspell eslint eslint-config-airbnb-base eslint-config-prettier eslint-plugin-import eslint-plugin-jsdoc eslint-plugin-no-jquery eslint-plugin-prettier eslint-plugin-yml prettier stylelint stylelint-config-standard stylelint-order stylelint-prettier"
+  fi
+
+  emit '\nDCQ requires these npm packages for code quality tooling:\n'
+  emit '  %s\n' "$packages"
+  emit '\nTo install manually:\n'
+  if [ "$package_manager" = "yarn" ]; then
+    emit '  ddev yarn add -D %s\n' "$packages"
+  else
+    emit '  ddev npm install --save-dev %s\n' "$packages"
+  fi
 }
 
 prompt_yes_no() {
@@ -1092,6 +1145,64 @@ merge_phpcs_config() {
 
   # Cleanup
   rm -f "$tmp" "$merged"
+}
+
+merge_stylelint_config() {
+  # Merge .stylelintrc.dcq.json amendments into .stylelintrc.json.
+  # Adds top-level keys from the amendment file that are missing in the target.
+  local stylelint_dcq_source="$1"
+  local target="$2"
+  local python_bin=""
+
+  if [ ! -f "$stylelint_dcq_source" ]; then
+    return 0
+  fi
+  if [ ! -f "$target" ]; then
+    return 0
+  fi
+
+  if command_available python3; then
+    python_bin="python3"
+  elif command_available python; then
+    python_bin="python"
+  else
+    emit 'Warning: python not available; unable to merge stylelint amendments.\n'
+    return 1
+  fi
+
+  "$python_bin" - "$target" "$stylelint_dcq_source" <<'PY'
+import json
+import sys
+
+target_path, amendment_path = sys.argv[1:3]
+
+with open(target_path, encoding="utf-8") as f:
+    content = f.read()
+lines = content.splitlines()
+if lines and lines[0].strip() == "#ddev-generated":
+    content = "\n".join(lines[1:])
+target = json.loads(content)
+
+with open(amendment_path, encoding="utf-8") as f:
+    content = f.read()
+lines = content.splitlines()
+if lines and lines[0].strip() == "#ddev-generated":
+    content = "\n".join(lines[1:])
+amendment = json.loads(content)
+
+changed = False
+for key, value in amendment.items():
+    if key.startswith("_"):
+        continue
+    if key not in target:
+        target[key] = value
+        changed = True
+
+if changed:
+    with open(target_path, "w", encoding="utf-8") as f:
+        json.dump(target, f, indent=4, ensure_ascii=False)
+        f.write("\n")
+PY
 }
 
 append_unique_lines_from_file() {
@@ -1916,7 +2027,9 @@ for tool in phpstan phpcs phpcbf; do
   fi
 done
 
-if [ "${#missing_tools[@]}" -gt 0 ]; then
+if [ "${#missing_tools[@]}" -eq 0 ]; then
+  emit 'PHP dev tools already present (phpstan, phpcs, phpcbf). No action needed.\n'
+elif [ "${#missing_tools[@]}" -gt 0 ]; then
   composer_json="${app_root%/}/composer.json"
   has_core_dev=0
   if [ -f "$composer_json" ] && grep -q '"drupal/core-dev"' "$composer_json"; then
@@ -2049,7 +2162,6 @@ fi
 script_path="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 if [[ "$script_path" == */.ddev/dcq-install.sh ]]; then
   rm -f "$script_path"
-  emit 'Removed %s after install.\n' "$script_path"
 fi
 
 emit '\n==> Phase 2: Copy Drupal.org GitLab CI template configs and shims\n'
@@ -2079,6 +2191,9 @@ while IFS= read -r -d '' source; do
     continue
   fi
   if [[ "$rel" == config-amendments/* ]]; then
+    continue
+  fi
+  if [[ "$rel" == assets/dcq-packages.json ]]; then
     continue
   fi
   is_shim=0
@@ -2244,6 +2359,18 @@ done < <(find "$addon_root" -type f -print0)
 append_unique_lines_from_file \
   "${app_root%/}/.prettierignore" \
   "${addon_root}/config-amendments/.prettierignore.dcq"
+
+# Merge stylelint DCQ amendments (runs post-loop so it applies even when the
+# base config was unchanged and skipped by the copy loop).
+if [ -f "${app_root%/}/.stylelintrc.json" ]; then
+  stylelint_dcq_source="${addon_root}/config-amendments/.stylelintrc.dcq.json"
+  merge_stylelint_config "$stylelint_dcq_source" "${app_root%/}/.stylelintrc.json"
+fi
+
+# Clean up dcq-packages.json from project root if left by a prior install.
+if [ -f "${app_root%/}/dcq-packages.json" ]; then
+  rm -f "${app_root%/}/dcq-packages.json"
+fi
 
 if [ "$copy_changed" -eq 0 ] && [ "$copy_skipped" -eq 0 ]; then
   emit 'All files already match; no changes.\n'
@@ -2515,17 +2642,18 @@ if [ "$core_package_json_present" -eq 1 ]; then
               ensure_root_yarnrc "$app_root"
             fi
           fi
-          emit 'Installing JS deps in project root using %s.\n' "${root_pm:-npm}"
+          emit 'Installing JS deps in project root using %s (this may take several minutes).\n' "${root_pm:-npm}"
           if [ "${root_pm:-npm}" = "npm" ]; then
-            cmd=( "$ddev_cmd" "exec" "bash" "-lc" "cd /var/www/html && npm install" )
+            cmd=( "$ddev_cmd" "npm" "install" )
           else
-            cmd=( "$ddev_cmd" "exec" "bash" "-lc" "cd /var/www/html && yarn install" )
+            cmd=( "$ddev_cmd" "yarn" "install" )
           fi
           if run_command "${cmd[@]}"; then
             node_install_done=1
           else
             emit 'JS dependency install failed. You can retry manually:\n'
-            emit '  ddev exec bash -lc "cd /var/www/html && %s install"\n' "${root_pm:-npm}"
+            emit '  ddev %s install\n' "${root_pm:-npm}"
+            emit_dcq_package_list "${root_pm:-npm}"
           fi
         fi
         if [ "$node_install_done" -eq 1 ]; then
@@ -2739,6 +2867,8 @@ print_install_summary() {
 
   if [ "$php_deps_status" = "installed" ]; then
     emit '  - PHP dev tools (PHPStan, PHPCS, etc.)\n'
+  elif [ "$php_deps_status" = "present" ]; then
+    emit '  - PHP dev tools: already present (skipped)\n'
   elif [ "$php_deps_status" = "failed" ]; then
     emit '  - PHP dev tools: FAILED (see warning below)\n'
   else
@@ -2747,6 +2877,8 @@ print_install_summary() {
 
   if [ "$node_status" = "root" ]; then
     emit '  - Node toolchain (ESLint, Prettier, Stylelint)\n'
+  elif [ "$node_status" = "present" ]; then
+    emit '  - Node toolchain: already present (skipped)\n'
   else
     emit '  - Node toolchain: NOT installed\n'
   fi
@@ -2766,13 +2898,14 @@ print_install_summary() {
     emit '     (see error output above), then run:\n'
     emit '     ddev composer require --dev drupal/core-dev --with-all-dependencies\n'
     step_num=$((step_num + 1))
-  elif [ "$php_deps_status" != "installed" ]; then
+  elif [ "$php_deps_status" != "installed" ] && [ "$php_deps_status" != "present" ]; then
     emit '  %s. Install PHP tools: ddev composer require --dev drupal/core-dev\n' "$step_num"
     step_num=$((step_num + 1))
   fi
 
-  if [ "$node_status" != "root" ]; then
-    emit '  %s. Install Node tools: ddev exec bash -lc "cd /var/www/html && npm install"\n' "$step_num"
+  if [ "$node_status" != "root" ] && [ "$node_status" != "present" ]; then
+    emit '  %s. Install Node tools:\n' "$step_num"
+    emit_dcq_package_list "$pkg_mgr"
     step_num=$((step_num + 1))
   fi
 
@@ -2792,12 +2925,12 @@ print_install_summary() {
 
   if [ "$has_scss" = "accepted" ]; then
     emit '\n'
-    emit 'SCSS support — complete these steps to finish setup:\n'
-    emit '  1. Install the SCSS config package:\n'
+    emit 'SCSS Setup (complete these steps to finish):\n'
+    emit '  a. Install the SCSS config package:\n'
     emit '       %s\n' "$scss_install_cmd"
-    emit '  2. Update .stylelintrc.json — replace "stylelint-config-standard" with\n'
+    emit '  b. Update .stylelintrc.json — replace "stylelint-config-standard" with\n'
     emit '     "stylelint-config-standard-scss" in the "extends" array.\n'
-    emit '  3. Run: ddev restart\n'
+    emit '  c. Run: ddev restart\n'
     emit '  (SCSS scan globs have already been configured in\n'
     emit '   .ddev/config.drupal-code-quality.yaml)\n'
   elif [ "$has_scss" = "true" ] || [ "$has_scss" = "declined" ]; then
@@ -2810,14 +2943,14 @@ print_install_summary() {
     fi
     emit 'To enable SCSS linting later:\n'
     emit '  - Re-run the installer interactively and accept SCSS setup, or:\n'
-    emit '  1. Install the SCSS config package:\n'
+    emit '  a. Install the SCSS config package:\n'
     emit '       %s\n' "$scss_install_cmd"
-    emit '  2. Update .stylelintrc.json — replace "stylelint-config-standard" with\n'
+    emit '  b. Update .stylelintrc.json — replace "stylelint-config-standard" with\n'
     emit '     "stylelint-config-standard-scss" in the "extends" array.\n'
-    emit '  3. In .ddev/config.drupal-code-quality.yaml, uncomment and update the\n'
+    emit '  c. In .ddev/config.drupal-code-quality.yaml, uncomment and update the\n'
     emit '     DCQ_STYLELINT_GLOBS line under web_environment:\n'
     emit '       - "DCQ_STYLELINT_GLOBS=**/*.css **/*.scss"\n'
-    emit '  4. Run: ddev restart\n'
+    emit '  d. Run: ddev restart\n'
   fi
 
   emit '\n'
@@ -2825,17 +2958,31 @@ print_install_summary() {
   emit '===============================================================\n'
 }
 
-# Determine summary statuses
+# Determine summary statuses — report actual state, not just what this run did.
 php_deps_summary="skipped"
 if [ "${php_deps_failed:-0}" -eq 1 ]; then
   php_deps_summary="failed"
 elif [ "${should_install:-0}" -eq 1 ]; then
   php_deps_summary="installed"
 fi
+# Check if tools are actually present regardless of what happened in this run.
+if [ "$php_deps_summary" = "skipped" ]; then
+  _all_php_present=1
+  for _tool in phpstan phpcs phpcbf; do
+    if [ ! -e "${vendor_bin}/${_tool}" ]; then _all_php_present=0; break; fi
+  done
+  if [ "$_all_php_present" -eq 1 ]; then
+    php_deps_summary="present"
+  fi
+fi
 
 node_summary="skipped"
 if [ -n "${node_target_choice:-}" ] && [ "$node_target_choice" = "root" ]; then
   node_summary="root"
+fi
+# Check if Node toolchain is actually present regardless of what happened in this run.
+if [ "$node_summary" = "skipped" ] && node_toolchain_present "$app_root"; then
+  node_summary="present"
 fi
 
 ide_summary="${ide_mode:-skip}"

@@ -33,7 +33,9 @@
         "./gitlab_templates/CHANGELOG.md",
         "./gitlab_templates/docs/jobs/composer.md",
         "./gitlab_templates/assets/internal/composer.json",
-        "./composer.json"
+        "./composer.json",
+        "**/settings.ddev.php",
+        "**/playwright-report/**"
     ],
     "dictionaries": [
         "companies",

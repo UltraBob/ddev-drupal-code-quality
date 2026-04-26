@@ -9,3 +9,4 @@ vendor/**
 **/dist/**
 **/build/**
 **/sites/*/files/**
+**/playwright-report/**

@@ -10,4 +10,4 @@ vendor/**
 **/build/**
 **/sites/*/files/**
 # Playwright report output contains minified CSS that causes false positives.
-# **/playwright-report/**
+**/playwright-report/**

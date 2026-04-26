@@ -11,3 +11,4 @@
   <exclude-pattern>**/contrib/**</exclude-pattern>
   <exclude-pattern>**/node_modules/**</exclude-pattern>
   <exclude-pattern>__DOCROOT__/sites/*/files/**</exclude-pattern>
+  <exclude-pattern>__DOCROOT__/sites/*/settings.ddev.php</exclude-pattern>

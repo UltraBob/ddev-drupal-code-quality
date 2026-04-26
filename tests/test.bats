@@ -391,12 +391,15 @@ wait_for_container_path() {
   local path="$1"
   local attempts=0
 
-  while [ "$attempts" -lt 5 ]; do
-    if ddev exec test -r "$path" >/dev/null 2>&1; then
+  # Flush Mutagen sync to ensure content (not just inodes) is present.
+  ddev mutagen sync >/dev/null 2>&1 || true
+
+  while [ "$attempts" -lt 10 ]; do
+    if ddev exec test -s "$path" >/dev/null 2>&1; then
       return 0
     fi
     attempts=$((attempts + 1))
-    sleep 1
+    sleep 2
   done
   echo "Timed out waiting for $path to sync into the container."
   return 1

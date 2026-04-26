@@ -254,6 +254,58 @@ for entry in "${MANIFEST[@]}"; do
   fi
 done
 
+# --- Package list drift check ---
+# Compare curated dcq-packages.json against core's package.json to detect:
+# - Curated packages that core dropped (we depend on something core no longer ships)
+# - New eslint/stylelint/prettier/cspell packages in core we might want to adopt
+printf "\n"
+printf "${BOLD}%-40s${RESET} " "dcq-packages.json vs core"
+total=$((total + 1))
+
+core_pkg_url="${base_url}/project/drupal/-/raw/${branch_core}/core/package.json"
+core_pkg_fetched="${tmp_dir}/core-package.json"
+http_code=$(curl --fail --silent --output "$core_pkg_fetched" --write-out '%{http_code}' "$core_pkg_url" 2>/dev/null || true)
+
+if [[ ! -f "$core_pkg_fetched" ]] || [[ ! -s "$core_pkg_fetched" ]] || [[ "$http_code" -ge 400 ]]; then
+  printf "${RED}FETCH FAILED (HTTP %s)${RESET}\n" "$http_code"
+  fetch_errors=$((fetch_errors + 1))
+else
+  drift_output=$(python3 -c "
+import json, sys
+core = json.load(open(sys.argv[1]))
+dcq = json.load(open(sys.argv[2]))
+core_deps = {**core.get('dependencies', {}), **core.get('devDependencies', {})}
+curated = set(dcq.get('packages', []))
+prefixes = ('eslint-', 'eslint', 'stylelint-', 'stylelint', 'prettier', 'cspell')
+
+missing = sorted(p for p in curated if p not in core_deps)
+new_linting = sorted(
+    p for p in core_deps
+    if p not in curated and any(p == x or p.startswith(x + '-') for x in prefixes)
+)
+
+if missing:
+    print('Curated packages MISSING from core:')
+    for p in missing:
+        print(f'  - {p}')
+if new_linting:
+    print('New linting packages in core (not in curated list):')
+    for p in new_linting:
+        print(f'  + {p}')
+if not missing and not new_linting:
+    sys.exit(0)
+sys.exit(1)
+" "$core_pkg_fetched" "${repo_root}/drupal-code-quality/assets/dcq-packages.json" 2>&1) && {
+    printf "${GREEN}up to date${RESET}\n"
+    up_to_date=$((up_to_date + 1))
+  } || {
+    printf "${RED}DRIFT DETECTED${RESET}\n"
+    echo "$drift_output"
+    echo
+    changed=$((changed + 1))
+  }
+fi
+
 # --- Summary ---
 echo
 printf "${BOLD}Summary:${RESET} %d checked, %d up to date, %d changed" "$total" "$up_to_date" "$changed"

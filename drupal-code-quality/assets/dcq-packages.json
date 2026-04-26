@@ -1,0 +1,19 @@
+{
+  "_comment": "Curated npm packages required by DCQ configs. Names only; versions resolve from core at install time. To update: review .eslintrc.json, .eslintrc.jquery.json, .stylelintrc.json for extends/plugins/peer-deps.",
+  "packages": [
+    "cspell",
+    "eslint",
+    "eslint-config-airbnb-base",
+    "eslint-config-prettier",
+    "eslint-plugin-import",
+    "eslint-plugin-jsdoc",
+    "eslint-plugin-no-jquery",
+    "eslint-plugin-prettier",
+    "eslint-plugin-yml",
+    "prettier",
+    "stylelint",
+    "stylelint-config-standard",
+    "stylelint-order",
+    "stylelint-prettier"
+  ]
+}

@@ -269,8 +269,23 @@ write_stub_package_json() {
 {
   "name": "dcq-test",
   "private": true,
+  "engines": {
+    "node": ">= 20.0"
+  },
   "devDependencies": {
+    "cspell": "^9.2.2",
+    "eslint": "^8.57.1",
+    "eslint-config-airbnb-base": "^15.0.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-import": "^2.32.0",
+    "eslint-plugin-jsdoc": "^61.2.1",
     "eslint-plugin-no-jquery": "^3.1.1",
+    "eslint-plugin-prettier": "^5.5.4",
+    "eslint-plugin-yml": "^1.19.0",
+    "prettier": "^3.6.2",
+    "stylelint": "^16.25.0",
+    "stylelint-config-standard": "^38.0.0",
+    "stylelint-order": "^7.0.0",
     "stylelint-prettier": "^5.0.3"
   }
 }
@@ -376,28 +391,22 @@ wait_for_container_path() {
   local path="$1"
   local attempts=0
 
-  while [ "$attempts" -lt 5 ]; do
-    if ddev exec test -r "$path" >/dev/null 2>&1; then
+  # Flush Mutagen sync to ensure content (not just inodes) is present.
+  ddev mutagen sync >/dev/null 2>&1 || true
+
+  while [ "$attempts" -lt 10 ]; do
+    if ddev exec test -s "$path" >/dev/null 2>&1; then
       return 0
     fi
     attempts=$((attempts + 1))
-    sleep 1
+    sleep 2
   done
   echo "Timed out waiting for $path to sync into the container."
   return 1
 }
 
 ensure_node_toolchain() {
-  if ddev exec test -x /var/www/html/web/core/node_modules/.bin/cspell >/dev/null 2>&1; then
-    return 0
-  fi
   if ddev exec test -x /var/www/html/node_modules/.bin/cspell >/dev/null 2>&1; then
-    return 0
-  fi
-
-  if ddev exec test -f /var/www/html/web/core/package.json >/dev/null 2>&1; then
-    run ddev exec bash -lc "corepack enable && cd /var/www/html/web/core && yarn install"
-    assert_success
     return 0
   fi
 
@@ -697,6 +706,72 @@ teardown() {
   health_checks
 }
 
+@test "install excludes DDEV-generated files and sets allowEmptyInput" {
+  set -u -o pipefail
+  run ddev add-on get "${DIR}"
+  assert_success
+
+  # F10: dcq-packages.json should NOT be in the project root.
+  run test -f dcq-packages.json
+  assert_failure
+
+  # F3: allowEmptyInput should be merged into .stylelintrc.json.
+  run grep -q '"allowEmptyInput"' .stylelintrc.json
+  assert_success
+
+  # F4: settings.ddev.php should be excluded from PHPCS.
+  run grep 'settings\.ddev\.php' .phpcs.xml
+  assert_success
+
+  # F4: settings.ddev.php and default.settings.php should be excluded from PHPStan.
+  run grep 'settings\.ddev\.php' phpstan.neon
+  assert_success
+  run grep 'default\.settings\.php' phpstan.neon
+  assert_success
+
+  # F4: settings.ddev.php should be excluded from CSpell.
+  run grep 'settings\.ddev\.php' .cspell.json
+  assert_success
+
+  # Playwright-report should be excluded from eslint, stylelint, prettier ignore files.
+  run grep 'playwright-report' .eslintignore
+  assert_success
+  run grep 'playwright-report' .stylelintignore
+  assert_success
+  run grep 'playwright-report' .prettierignore
+  assert_success
+}
+
+@test "install summary says already present when tools exist" {
+  set -u -o pipefail
+  # First install to get configs in place.
+  run ddev add-on get "${DIR}"
+  assert_success
+
+  # Create fake vendor/bin tools so the "already present" check succeeds.
+  mkdir -p vendor/bin
+  for tool in phpstan phpcs phpcbf; do
+    printf '#!/bin/sh\nexit 0\n' > "vendor/bin/$tool"
+    chmod +x "vendor/bin/$tool"
+  done
+
+  # Re-install with skip mode — tools are already present.
+  export DCQ_INSTALL_MODE=skip
+  run ddev add-on get "${DIR}"
+  assert_success
+  assert_output --partial "PHP dev tools already present"
+  assert_output --partial "already present (skipped)"
+  # Should NOT suggest installing tools that are already present.
+  refute_output --partial "Install PHP tools:"
+}
+
+@test "install does not emit dcq-install.sh removal message" {
+  set -u -o pipefail
+  run ddev add-on get "${DIR}"
+  assert_success
+  refute_output --partial "Removed"
+}
+
 @test "installer prompt defaults to recommended settings" {
   set -u -o pipefail
   unset DCQ_NONINTERACTIVE
@@ -778,6 +853,15 @@ PY
   # Ensure PHP dependency prompt path is exercised.
   write_minimal_composer_json "composer.json"
 
+  # Add SCSS files so the SCSS detection path is exercised.
+  # Node install is declined in this test, so the SCSS prompt won't appear
+  # (it requires node_mode != skip), but summary guidance should.
+  mkdir -p web/themes/custom/dcq_theme/src/sass
+  cat > web/themes/custom/dcq_theme/src/sass/style.scss <<'SCSS'
+$color: red;
+body { color: $color; }
+SCSS
+
   python_bin=""
   if command -v python3 >/dev/null 2>&1; then
     python_bin="python3"
@@ -845,6 +929,10 @@ PY
   assert_output --partial "Skipping IDE settings/extensions install."
   assert_output --partial "Add 'dcq-reports/' to .gitignore? [Y/n]"
   assert_output --partial "Set phpstan.neon level"
+  # SCSS files exist but Node was skipped — summary should show guidance.
+  # Assert before helpers that use `run` (which overwrites $output).
+  assert_output --partial "SCSS files were detected but SCSS support was not configured"
+  assert_output --partial "stylelint-config-standard-scss"
   # PHPStan level should be 0 (not the recommended 3) since user chose it
   assert_phpstan_level "0"
   assert_file_not_exist ".vscode/settings.json"
@@ -1022,9 +1110,9 @@ PY
   assert_failure
   run grep -n '<rule ref="DrupalPractice"/>' ".phpcs.xml"
   assert_success
-  run grep -n "<file>docroot</file>" ".phpcs.xml"
+  run grep -n "<file>docroot/modules</file>" ".phpcs.xml"
   assert_success
-  run grep -n "docroot/core/\\*\\*" ".phpcs.xml"
+  run grep -n "<file>docroot/themes/custom</file>" ".phpcs.xml"
   assert_success
   run grep -n "docroot/sites" ".phpcs.xml"
   assert_success
@@ -1040,7 +1128,7 @@ PY
   assert_success
 }
 
-@test "stylelint-fix rewrites explicit web paths with non-web docroot" {
+@test "stylelint-fix passes paths through with non-web docroot" {
   set -u -o pipefail
   mkdir -p docroot
   run ddev config --docroot=docroot
@@ -1054,7 +1142,7 @@ PY
   mkdir -p node_modules/stylelint/bin
   cat > node_modules/stylelint/bin/stylelint.mjs <<'JS'
 #!/usr/bin/env node
-process.exit(0);
+process.stdout.write(process.argv.slice(2).join("\n"));
 JS
   chmod +x node_modules/stylelint/bin/stylelint.mjs
 
@@ -1070,8 +1158,11 @@ CSS
   run wait_for_container_path "/var/www/html/docroot/themes/custom/dcq_theme/css/fixable.css"
   assert_success
 
-  run ddev stylelint-fix web/themes/custom/dcq_theme/css/fixable.css
+  # Wrapper passes paths through as-is; no docroot rewriting.
+  run ddev stylelint-fix docroot/themes/custom/dcq_theme/css/fixable.css
   assert_success
+  assert_output --partial "--fix"
+  assert_output --partial "docroot/themes/custom/dcq_theme/css/fixable.css"
 }
 
 @test "eslint fixed mode falls back to .eslintrc.json when passing config is missing" {
@@ -1132,52 +1223,16 @@ JS
   esac
 }
 
-@test "stylelint-fix fails with helpful message when project config is missing" {
+@test "stylelint-fix delegates config and ignore handling to native stylelint" {
   set -u -o pipefail
   export DCQ_INSTALL_DEPS=skip
   export DCQ_INSTALL_NODE_DEPS=skip
   run ddev add-on get "${DIR}"
   assert_success
 
+  # Remove root configs — wrapper should not care; native stylelint handles errors.
   run rm -f .stylelintrc.json .stylelintrc .stylelintrc.yaml .stylelintrc.yml .stylelintrc.js
   assert_success
-
-  mkdir -p node_modules/stylelint/bin
-  cat > node_modules/stylelint/bin/stylelint.mjs <<'JS'
-#!/usr/bin/env node
-process.exit(0);
-JS
-  chmod +x node_modules/stylelint/bin/stylelint.mjs
-
-  run wait_for_container_path "/var/www/html/node_modules/stylelint/bin/stylelint.mjs"
-  assert_success
-
-  run ddev stylelint-fix web/themes/custom/dcq_theme/css/fixable.css
-  assert_failure
-  assert_output --partial "Stylelint config file is missing."
-}
-
-@test "stylelint-fix uses nearest config when root config is missing" {
-  set -u -o pipefail
-  export DCQ_INSTALL_DEPS=skip
-  export DCQ_INSTALL_NODE_DEPS=skip
-  run ddev add-on get "${DIR}"
-  assert_success
-
-  run rm -f .stylelintrc.json .stylelintrc .stylelintrc.yaml .stylelintrc.yml .stylelintrc.js
-  assert_success
-
-  mkdir -p web/themes/custom/dcq_theme/css
-  cat > web/themes/custom/dcq_theme/.stylelintrc.json <<'JSON'
-{
-  "rules": {}
-}
-JSON
-  cat > web/themes/custom/dcq_theme/css/fixable.css <<'CSS'
-a {
-  color: RED;
-}
-CSS
 
   mkdir -p node_modules/stylelint/bin
   cat > node_modules/stylelint/bin/stylelint.mjs <<'JS'
@@ -1189,33 +1244,33 @@ JS
   run wait_for_container_path "/var/www/html/node_modules/stylelint/bin/stylelint.mjs"
   assert_success
 
+  # Wrapper no longer checks for config or injects flags — all native.
   run ddev stylelint-fix web/themes/custom/dcq_theme/css/fixable.css
   assert_success
-  assert_output --partial "--config"
-  assert_output --partial "/var/www/html/web/themes/custom/dcq_theme/.stylelintrc.json"
+  refute_output --partial "Stylelint config file is missing."
+  assert_output --partial "--fix"
+  refute_output --partial "--config"
+  refute_output --partial "--config-basedir"
+  refute_output --partial "--ignore-path"
 }
 
-@test "stylelint preserves --ignore-path with explicit paths when nearest config triggers CMD reassignment" {
+@test "stylelint trusts native ignore-file handling with explicit paths" {
   set -u -o pipefail
   export DCQ_INSTALL_DEPS=skip
   export DCQ_INSTALL_NODE_DEPS=skip
   run ddev add-on get "${DIR}"
   assert_success
 
-  # Root config triggers the first CMD reassignment.
   cat > .stylelintrc.json <<'JSON'
 {
   "rules": {}
 }
 JSON
 
-  # .stylelintignore is what we expect to survive the reassignments.
   cat > .stylelintignore <<'TXT'
 web/core/**
 TXT
 
-  # Nearest config inside the theme triggers the explicit-paths CMD reassignment
-  # that previously wiped --ignore-path.
   mkdir -p web/themes/custom/dcq_theme/css
   cat > web/themes/custom/dcq_theme/.stylelintrc.json <<'JSON'
 {
@@ -1238,13 +1293,17 @@ JS
   run wait_for_container_path "/var/www/html/node_modules/stylelint/bin/stylelint.mjs"
   assert_success
 
+  # Wrapper delegates .stylelintignore handling to native stylelint (CWD=PROJECT_ROOT).
+  # No --ignore-path injection — the CMD-reassignment bug (issue #27) is structurally impossible.
   run ddev stylelint web/themes/custom/dcq_theme/css/fixable.css
   assert_success
-  assert_output --partial "--ignore-path="
-  assert_output --partial "/var/www/html/.stylelintignore"
+  refute_output --partial "--ignore-path"
+  refute_output --partial "--config"
+  # Path translation still works.
+  assert_output --partial "web/themes/custom/dcq_theme/css/fixable.css"
 }
 
-@test "stylelint preserves --ignore-path in default-files mode when nearest config triggers CMD reassignment" {
+@test "stylelint trusts native ignore-file handling in default-glob mode" {
   set -u -o pipefail
   export DCQ_INSTALL_DEPS=skip
   export DCQ_INSTALL_NODE_DEPS=skip
@@ -1261,8 +1320,6 @@ JSON
 web/core/**
 TXT
 
-  # Nearest config inside the theme triggers the default-files-branch CMD
-  # reassignment that previously wiped --ignore-path.
   mkdir -p web/themes/custom/dcq_theme/css
   cat > web/themes/custom/dcq_theme/.stylelintrc.json <<'JSON'
 {
@@ -1285,11 +1342,230 @@ JS
   run wait_for_container_path "/var/www/html/node_modules/stylelint/bin/stylelint.mjs"
   assert_success
 
-  # No explicit paths -- exercises the default-files branch.
+  # No explicit paths — default globs injected. No --ignore-path injection;
+  # native stylelint picks up .stylelintignore from CWD (PROJECT_ROOT).
   run ddev stylelint
   assert_success
-  assert_output --partial "--ignore-path="
-  assert_output --partial "/var/www/html/.stylelintignore"
+  refute_output --partial "--ignore-path"
+  refute_output --partial "--config"
+  # Default glob is CSS-only (safe default matching shipped config).
+  assert_output --partial "**/*.css"
+  refute_output --partial "**/*.scss"
+  refute_output --partial "**/*.sass"
+}
+
+@test "stylelint default scan is CSS-only" {
+  set -u -o pipefail
+  export DCQ_INSTALL_DEPS=skip
+  export DCQ_INSTALL_NODE_DEPS=skip
+  run ddev add-on get "${DIR}"
+  assert_success
+
+  mkdir -p node_modules/stylelint/bin
+  cat > node_modules/stylelint/bin/stylelint.mjs <<'JS'
+#!/usr/bin/env node
+process.stdout.write(process.argv.slice(2).join("\n"));
+JS
+  chmod +x node_modules/stylelint/bin/stylelint.mjs
+
+  run wait_for_container_path "/var/www/html/node_modules/stylelint/bin/stylelint.mjs"
+  assert_success
+
+  # Default invocation includes only CSS globs — SCSS/Sass require opt-in
+  # via DCQ_STYLELINT_GLOBS because the shipped config is CSS-only.
+  run ddev stylelint
+  assert_success
+  assert_output --partial "**/*.css"
+  refute_output --partial "**/*.scss"
+  refute_output --partial "**/*.sass"
+}
+
+@test "DCQ_STYLELINT_GLOBS overrides default stylelint scan globs" {
+  set -u -o pipefail
+  export DCQ_INSTALL_DEPS=skip
+  export DCQ_INSTALL_NODE_DEPS=skip
+
+  # Set custom globs via web_environment in a separate config file
+  # (the real user workflow — DDEV merges config.*.yaml automatically).
+  cat > .ddev/config.dcq-test.yaml <<'YAML'
+web_environment:
+  - "DCQ_STYLELINT_GLOBS=**/*.css **/*.scss"
+YAML
+
+  run ddev add-on get "${DIR}"
+  assert_success
+  # web_environment requires a restart to propagate to the container.
+  run ddev restart
+  assert_success
+
+  mkdir -p node_modules/stylelint/bin
+  cat > node_modules/stylelint/bin/stylelint.mjs <<'JS'
+#!/usr/bin/env node
+process.stdout.write(process.argv.slice(2).join("\n"));
+JS
+  chmod +x node_modules/stylelint/bin/stylelint.mjs
+
+  run wait_for_container_path "/var/www/html/node_modules/stylelint/bin/stylelint.mjs"
+  assert_success
+
+  # Custom globs from DCQ_STYLELINT_GLOBS replace the default.
+  run ddev stylelint
+  assert_success
+  assert_output --partial "**/*.css"
+  assert_output --partial "**/*.scss"
+  # Sass was not in the custom globs.
+  refute_output --partial "**/*.sass"
+}
+
+@test "DCQ_STYLELINT_GLOBS overrides stylelint-fix default globs too" {
+  set -u -o pipefail
+  export DCQ_INSTALL_DEPS=skip
+  export DCQ_INSTALL_NODE_DEPS=skip
+
+  cat > .ddev/config.dcq-test.yaml <<'YAML'
+web_environment:
+  - "DCQ_STYLELINT_GLOBS=**/*.vue **/*.svelte"
+YAML
+
+  run ddev add-on get "${DIR}"
+  assert_success
+  # web_environment requires a restart to propagate to the container.
+  run ddev restart
+  assert_success
+
+  mkdir -p node_modules/stylelint/bin
+  cat > node_modules/stylelint/bin/stylelint.mjs <<'JS'
+#!/usr/bin/env node
+process.stdout.write(process.argv.slice(2).join("\n"));
+JS
+  chmod +x node_modules/stylelint/bin/stylelint.mjs
+
+  run wait_for_container_path "/var/www/html/node_modules/stylelint/bin/stylelint.mjs"
+  assert_success
+
+  # stylelint-fix should also respect the env var with non-default globs.
+  run ddev stylelint-fix
+  assert_success
+  assert_output --partial "--fix"
+  assert_output --partial "**/*.vue"
+  assert_output --partial "**/*.svelte"
+  # Default globs should NOT appear when overridden.
+  refute_output --partial "**/*.css"
+}
+
+@test "installer prints SCSS guidance when scss files detected and using defaults" {
+  set -u -o pipefail
+  export DCQ_INSTALL_DEPS=skip
+  export DCQ_INSTALL_NODE_DEPS=skip
+
+  # Create SCSS files that the installer should detect.
+  mkdir -p web/themes/custom/dcq_theme/src/sass
+  cat > web/themes/custom/dcq_theme/src/sass/style.scss <<'SCSS'
+$color: red;
+body { color: $color; }
+SCSS
+
+  run ddev add-on get "${DIR}"
+  assert_success
+
+  # Non-interactive install with SCSS files should print guidance,
+  # not silently configure SCSS support.
+  assert_output --partial "SCSS"
+  assert_output --partial "stylelint-config-standard-scss"
+  assert_output --partial "DCQ_STYLELINT_GLOBS"
+}
+
+@test "installer creates config.drupal-code-quality.yaml with commented defaults" {
+  set -u -o pipefail
+  export DCQ_INSTALL_DEPS=skip
+  export DCQ_INSTALL_NODE_DEPS=skip
+  run ddev add-on get "${DIR}"
+  assert_success
+
+  # The add-on config file should exist with documented defaults.
+  assert_file_exist ".ddev/config.drupal-code-quality.yaml"
+  run cat .ddev/config.drupal-code-quality.yaml
+  assert_output --partial "DCQ_STYLELINT_GLOBS"
+}
+
+@test "installer detects fully configured SCSS support" {
+  set -u -o pipefail
+  export DCQ_INSTALL_DEPS=skip
+  export DCQ_INSTALL_NODE_DEPS=skip
+  # Use skip mode so the user's .stylelintrc.json is preserved.
+  export DCQ_INSTALL_MODE=skip
+
+  # Create SCSS files.
+  mkdir -p web/themes/custom/dcq_theme/src/sass
+  cat > web/themes/custom/dcq_theme/src/sass/style.scss <<'SCSS'
+$color: red;
+SCSS
+
+  # Both conditions: stylelintrc references scss AND DDEV config has scss globs.
+  cat > .stylelintrc.json <<'JSON'
+{
+  "extends": ["stylelint-config-standard-scss"]
+}
+JSON
+  cat > .ddev/config.drupal-code-quality.yaml <<'YAML'
+# Drupal Code Quality add-on configuration.
+web_environment:
+  - "DCQ_STYLELINT_GLOBS=**/*.css **/*.scss"
+YAML
+
+  run ddev add-on get "${DIR}"
+  assert_success
+
+  # Should detect SCSS is already configured, not print setup guidance.
+  refute_output --partial "SCSS files were detected but"
+  refute_output --partial "To enable SCSS linting"
+}
+
+@test "installer detects partial SCSS config as not configured" {
+  set -u -o pipefail
+  export DCQ_INSTALL_DEPS=skip
+  export DCQ_INSTALL_NODE_DEPS=skip
+  # Use skip mode so the user's .stylelintrc.json is preserved.
+  export DCQ_INSTALL_MODE=skip
+
+  # Create SCSS files.
+  mkdir -p web/themes/custom/dcq_theme/src/sass
+  cat > web/themes/custom/dcq_theme/src/sass/style.scss <<'SCSS'
+$color: red;
+SCSS
+
+  # Only the stylelintrc — missing DDEV globs config.
+  cat > .stylelintrc.json <<'JSON'
+{
+  "extends": ["stylelint-config-standard-scss"]
+}
+JSON
+
+  run ddev add-on get "${DIR}"
+  assert_success
+
+  # Partial config should still show guidance.
+  assert_output --partial "SCSS"
+  assert_output --partial "DCQ_STYLELINT_GLOBS"
+}
+
+@test "installer does not print SCSS guidance when no scss files exist" {
+  set -u -o pipefail
+  export DCQ_INSTALL_DEPS=skip
+  export DCQ_INSTALL_NODE_DEPS=skip
+
+  # No SCSS files in the project — only CSS.
+  mkdir -p web/themes/custom/dcq_theme/css
+  cat > web/themes/custom/dcq_theme/css/style.css <<'CSS'
+a { color: red; }
+CSS
+
+  run ddev add-on get "${DIR}"
+  assert_success
+
+  # No SCSS guidance should appear.
+  refute_output --partial "stylelint-config-standard-scss"
+  refute_output --partial "DCQ_STYLELINT_GLOBS"
 }
 
 @test "prettier-fix fails with helpful message when project config is missing" {
@@ -1536,6 +1812,100 @@ SH
   assert_success
 }
 
+@test "stylelint rejects Node.js older than 18" {
+  set -u -o pipefail
+  export DCQ_INSTALL_DEPS=skip
+  export DCQ_INSTALL_NODE_DEPS=skip
+  run ddev add-on get "${DIR}"
+  assert_success
+
+  # Write test scripts to the project root (writable, syncs to container).
+  cat > dcq-node-check-fail.sh <<'SH'
+#!/usr/bin/env bash
+set -u
+NODE_MAJOR=16
+if [ "${NODE_MAJOR:-0}" -lt 18 ]; then
+  echo "Error: Node.js $NODE_MAJOR is too old. Stylelint requires Node.js 18 or later." >&2
+  exit 1
+fi
+SH
+  cat > dcq-node-check-pass.sh <<'SH'
+#!/usr/bin/env bash
+set -u
+NODE_MAJOR=$(node -e 'console.log(process.versions.node.split(".")[0])')
+if [ "${NODE_MAJOR:-0}" -lt 18 ]; then
+  echo "Error: Node.js $NODE_MAJOR is too old." >&2
+  exit 1
+fi
+echo "Node $NODE_MAJOR OK"
+SH
+  chmod +x dcq-node-check-fail.sh dcq-node-check-pass.sh
+
+  run wait_for_container_path "/var/www/html/dcq-node-check-fail.sh"
+  assert_success
+
+  # Simulated Node 16 should trigger the guard.
+  run ddev exec bash /var/www/html/dcq-node-check-fail.sh
+  assert_failure
+  assert_output --partial "too old"
+  assert_output --partial "Node.js 18 or later"
+
+  # Real container Node version should pass.
+  run ddev exec bash /var/www/html/dcq-node-check-pass.sh
+  assert_success
+  assert_output --partial "OK"
+}
+
+@test "installer prompts abort/skip when DDEV nodejs_version is below 18" {
+  set -u -o pipefail
+  export DCQ_INSTALL_DEPS=skip
+
+  # Add nodejs_version: "16" to the main DDEV config (check_nodejs_version
+  # reads .ddev/config.yaml directly via awk, not the DDEV merge files).
+  echo 'nodejs_version: "16"' >> .ddev/config.yaml
+
+  # Phase 3 only fires when core package.json is present on the host.
+  local docroot="${DCQ_TEST_DOCROOT:-web}"
+  mkdir -p "${docroot}/core"
+  echo '{"name": "drupal/core", "devDependencies": {}}' > "${docroot}/core/package.json"
+
+  # Non-interactive mode defaults to skip.
+  run ddev add-on get "${DIR}"
+  assert_success
+  assert_output --partial "Node.js 18 or higher is required"
+  assert_output --partial 'nodejs_version: "16"'
+  assert_output --partial "ddev config --nodejs-version 20"
+  assert_output --partial "Skipping JS toolchain install (Node.js too old)"
+  # PHP tooling message should still appear
+  assert_output --partial "PHP tooling is still available"
+}
+
+@test "installer offers engines.node for package.json without engines" {
+  set -u -o pipefail
+  export DCQ_INSTALL_DEPS=skip
+  # Must be root/install so Phase 3 reaches the maybe_add_engines_node call.
+  export DCQ_INSTALL_NODE_DEPS=root
+
+  # Create a minimal package.json without engines.
+  cat > package.json <<'JSON'
+{
+  "name": "dcq-test-project",
+  "private": true
+}
+JSON
+
+  # Phase 3 needs core package.json to activate.
+  local docroot="${DCQ_TEST_DOCROOT:-web}"
+  mkdir -p "${docroot}/core"
+  echo '{"name": "drupal/core", "devDependencies": {}}' > "${docroot}/core/package.json"
+
+  run ddev add-on get "${DIR}"
+  # Install may fail during npm install (no real deps), but should still
+  # reach the engines check before that.
+  assert_output --partial "engines"
+  assert_output --partial ">=20.0"
+}
+
 @test "remove cleans ddev assets and shims" {
   set -u -o pipefail
   run ddev add-on get "${DIR}"
@@ -1641,7 +2011,19 @@ SH
   "name": "dcq-fail-test",
   "private": true,
   "devDependencies": {
+    "cspell": "^9.2.2",
+    "eslint": "^8.57.1",
+    "eslint-config-airbnb-base": "^15.0.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-import": "^2.32.0",
+    "eslint-plugin-jsdoc": "^61.2.1",
     "eslint-plugin-no-jquery": "^3.1.1",
+    "eslint-plugin-prettier": "^5.5.4",
+    "eslint-plugin-yml": "^1.19.0",
+    "prettier": "^3.6.2",
+    "stylelint": "^16.25.0",
+    "stylelint-config-standard": "^38.0.0",
+    "stylelint-order": "^7.0.0",
     "stylelint-prettier": "^5.0.3",
     "this-package-should-not-exist-dcq-test": "99999.0.0"
   }
@@ -1682,13 +2064,15 @@ JSON
   restart_or_start_ddev
   assert_addon_installed
   ensure_node_toolchain
-  run ddev exec bash -lc $'mkdir -p /var/www/html/web/core/node_modules/.bin\ncat > /var/www/html/web/core/node_modules/.bin/cspell <<\'SH\'\n#!/bin/sh\necho \"core cspell should not be used\" >&2\nexit 99\nSH\nchmod +x /var/www/html/web/core/node_modules/.bin/cspell\nmkdir -p /var/www/html/web/core/node_modules/stylelint/bin\ncat > /var/www/html/web/core/node_modules/stylelint/bin/stylelint.mjs <<\'JS\'\nconsole.error(\"core stylelint should not be used\");\nprocess.exit(99);\nJS\ncat > /var/www/html/web/core/node_modules/.bin/prettier <<\'SH\'\n#!/bin/sh\necho \"core prettier should not be used\" >&2\nexit 99\nSH\nchmod +x /var/www/html/web/core/node_modules/.bin/prettier'
+  run ddev exec bash -lc $'mkdir -p /var/www/html/web/core/node_modules/.bin\ncat > /var/www/html/web/core/node_modules/.bin/cspell <<\'SH\'\n#!/bin/sh\necho \"core cspell should not be used\" >&2\nexit 99\nSH\nchmod +x /var/www/html/web/core/node_modules/.bin/cspell\nmkdir -p /var/www/html/web/core/node_modules/stylelint/bin\ncat > /var/www/html/web/core/node_modules/stylelint/bin/stylelint.mjs <<\'JS\'\nconsole.error(\"core stylelint should not be used\");\nprocess.exit(99);\nJS\ncat > /var/www/html/web/core/node_modules/.bin/prettier <<\'SH\'\n#!/bin/sh\necho \"core prettier should not be used\" >&2\nexit 99\nSH\nchmod +x /var/www/html/web/core/node_modules/.bin/prettier\nmkdir -p /var/www/html/web/core/node_modules/eslint/bin\ncat > /var/www/html/web/core/node_modules/eslint/bin/eslint.js <<\'JS\'\nconsole.error(\"core eslint should not be used\");\nprocess.exit(99);\nJS'
   assert_success
   run ./.ddev/drupal-code-quality/tooling/bin/cspell --version
   assert_success
   run ./.ddev/drupal-code-quality/tooling/bin/stylelint --version
   assert_success
   run ./.ddev/drupal-code-quality/tooling/bin/prettier --version
+  assert_success
+  run ./.ddev/drupal-code-quality/tooling/bin/eslint --version
   assert_success
   assert_file_exist ".vscode/settings.json"
   assert_file_exist ".vscode/extensions.json"
@@ -1925,12 +2309,8 @@ JSON
   assert_not_equal "$before_prettier" "$after_prettier"
   assert_file_exist "dcq-reports/_prettier.patch"
 
-  # Test stylelint-fix --preview shows prompt and patch
-  before_stylelint="$(read_container_file /var/www/html/web/themes/custom/dcq_theme/css/fixable.css)"
-  run_with_prompt_yes "Apply these changes? [y/N]" ./.ddev/drupal-code-quality/tooling/bin/stylelint-fix --preview web/themes/custom/dcq_theme/css/fixable.css
-  assert_success
-  assert_output --partial "Apply these changes? [y/N]"
-  after_stylelint="$(read_container_file /var/www/html/web/themes/custom/dcq_theme/css/fixable.css)"
-  assert_not_equal "$before_stylelint" "$after_stylelint"
-  assert_file_exist "dcq-reports/_stylelint.patch"
+  # Test stylelint-fix --preview exits with error (preview mode removed)
+  run ./.ddev/drupal-code-quality/tooling/bin/stylelint-fix --preview web/themes/custom/dcq_theme/css/fixable.css
+  assert_failure
+  assert_output --partial "--preview has been removed"
 }

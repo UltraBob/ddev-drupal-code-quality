@@ -58,7 +58,13 @@ for tool in "${TOOLS[@]}"; do
     continue
   fi
 
-  "$tool_path" >"$log_file" 2>&1
+  # Use compact formatter for stylelint in checks mode to avoid RangeError
+  # crash when the table formatter tries to render thousands of violations.
+  if [ "$tool" = "stylelint" ]; then
+    "$tool_path" --formatter compact >"$log_file" 2>&1
+  else
+    "$tool_path" >"$log_file" 2>&1
+  fi
   exit_code=$?
   if [ "$exit_code" -eq 0 ]; then
     STATUS["$tool"]=PASS

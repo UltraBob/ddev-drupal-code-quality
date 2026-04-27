@@ -3,6 +3,7 @@
 set -u
 
 source /mnt/ddev_config/commands/helpers/path-map.sh
+source /mnt/ddev_config/commands/helpers/node-toolchain.sh
 
 print_help() {
   cat <<'USAGE'
@@ -59,37 +60,31 @@ fi
 PROJECT_ROOT="/var/www/html"
 DOCROOT="${DCQ_DOCROOT:-web}"
 DOCROOT_PATH="${PROJECT_ROOT}/${DOCROOT}"
-CORE_CSPELL="${DOCROOT_PATH}/core/node_modules/.bin/cspell"
-ROOT_CSPELL="${PROJECT_ROOT}/node_modules/.bin/cspell"
-CSPELL_BIN=""
+TOOLCHAIN_BIN=""
 
 if ! command -v node >/dev/null 2>&1; then
   echo "Node.js is not available in the DDEV web container." >&2
-  echo "Install the Drupal core JS toolchain (${DOCROOT}/core) to run CSpell." >&2
+  echo "Install Node in the DDEV web container to run CSpell." >&2
   exit 127
 fi
 
-if [ -x "$ROOT_CSPELL" ]; then
-  CSPELL_BIN="$ROOT_CSPELL"
-elif [ -x "$CORE_CSPELL" ]; then
-  CSPELL_BIN="$CORE_CSPELL"
-else
-  echo "CSpell is not installed in ${DOCROOT}/core/node_modules or node_modules." >&2
-  echo "Enable corepack and run 'yarn install' in ${DOCROOT}/core, or install cspell in the project root." >&2
+if ! resolve_node_tool ".bin/cspell"; then
+  echo "CSpell is not installed at the project root (${PROJECT_ROOT}/node_modules)." >&2
+  echo "Re-run the DDEV add-on installer and accept Node dependency installation, or install cspell manually in the project root (npm install / yarn install)." >&2
   exit 127
 fi
 
 if [ "$has_help" = true ]; then
-  "$CSPELL_BIN" --help
+  "$TOOLCHAIN_BIN" --help
   exit $?
 fi
 
 if [ "$has_version" = true ]; then
-  "$CSPELL_BIN" --version
+  "$TOOLCHAIN_BIN" --version
   exit $?
 fi
 
-CMD=("$CSPELL_BIN")
+CMD=("$TOOLCHAIN_BIN")
 if [ "$has_config" = false ]; then
   if [ ! -f "${PROJECT_ROOT}/.cspell.json" ]; then
     echo "CSpell config file is missing. Create .cspell.json in the project root (for example by reinstalling the add-on)." >&2

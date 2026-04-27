@@ -1,0 +1,4 @@
+# Drupal Code Quality add-on configuration.
+web_environment:
+  # Default file patterns for ddev stylelint / ddev stylelint-fix (space-separated globs).
+  # - "DCQ_STYLELINT_GLOBS=**/*.css"

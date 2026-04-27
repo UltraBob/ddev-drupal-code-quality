@@ -4,441 +4,103 @@
 set -u
 
 source /mnt/ddev_config/commands/helpers/path-map.sh
-
-print_help() {
-  cat <<'USAGE'
-Usage: ddev stylelint-fix [args]
-
-Applies Stylelint fixes directly to files (matches standard stylelint --fix behavior).
-
-Use --preview to see a patch preview and confirm before applying fixes.
-This generates a patch in dcq-reports/ and prompts for confirmation.
-
-Examples:
-  ddev stylelint-fix                    # Apply fixes directly
-  ddev stylelint-fix --preview          # Preview and confirm before applying
-  ddev stylelint-fix path/to/file.css   # Fix specific file
-USAGE
-}
+source /mnt/ddev_config/commands/helpers/node-toolchain.sh
 
 PROJECT_ROOT="/var/www/html"
-DOCROOT="${DCQ_DOCROOT:-web}"
-DOCROOT_PATH="${PROJECT_ROOT}/${DOCROOT}"
-CORE_STYLELINT="${DOCROOT_PATH}/core/node_modules/stylelint/bin/stylelint.mjs"
-ROOT_STYLELINT="${PROJECT_ROOT}/node_modules/stylelint/bin/stylelint.mjs"
 TOOLCHAIN_BIN=""
 NODE_PATH=""
 
-has_help=false
-has_version=false
-has_positional=false
-has_config=false
-has_ignore_path=false
-seen_double_dash=false
-explicit_paths=false
-preview_mode=false
-clean_args=()
-
-for arg in "$@"; do
-  if [ "$arg" = "--preview" ]; then
-    preview_mode=true
-    continue
-  fi
-  clean_args+=("$arg")
-done
-
-for arg in "${clean_args[@]}"; do
-  if [ "$seen_double_dash" = true ]; then
-    has_positional=true
-    explicit_paths=true
-    break
-  fi
-  case "$arg" in
-    --)
-      seen_double_dash=true
-      ;;
-    -h|--help)
-      has_help=true
-      ;;
-    -V|--version)
-      has_version=true
-      ;;
-    -c|--config|--config=*)
-      has_config=true
-      ;;
-    --ignore-path|--ignore-path=*)
-      has_ignore_path=true
-      ;;
-    -* )
-      ;;
-    *)
-      has_positional=true
-      explicit_paths=true
-      ;;
-  esac
-  if [ "$has_help" = true ] || [ "$has_version" = true ]; then
-    break
-  fi
-done
-
-if [ "$has_help" = true ]; then
-  print_help
-fi
+# --- Toolchain resolution (root only) ---
 
 if ! command -v node >/dev/null 2>&1; then
   echo "Node.js is not available in the DDEV web container." >&2
-  echo "Install the Drupal core JS toolchain (${DOCROOT}/core) to run Stylelint." >&2
   exit 127
 fi
 
-if [ -f "$ROOT_STYLELINT" ]; then
-  TOOLCHAIN_BIN="$ROOT_STYLELINT"
-  NODE_PATH="${PROJECT_ROOT}/node_modules"
-elif [ -f "$CORE_STYLELINT" ]; then
-  TOOLCHAIN_BIN="$CORE_STYLELINT"
-  NODE_PATH="${DOCROOT_PATH}/core/node_modules"
-else
-  echo "Stylelint is not installed in ${DOCROOT}/core/node_modules or node_modules." >&2
-  echo "Enable corepack and run 'yarn install' in ${DOCROOT}/core, or install stylelint in the project root." >&2
+# Stylelint requires Node.js 18+ (Array.prototype.findLastIndex).
+NODE_MAJOR="$(node -e 'console.log(process.versions.node.split(".")[0])')"
+if [ "${NODE_MAJOR:-0}" -lt 18 ]; then
+  echo "Error: Node.js $NODE_MAJOR is too old. Stylelint requires Node.js 18 or later." >&2
+  echo "Update nodejs_version in .ddev/config.yaml (recommended: \"20\") and run \"ddev restart\"." >&2
+  exit 1
+fi
+
+if ! resolve_node_tool "stylelint/bin/stylelint.mjs"; then
+  echo "Stylelint is not installed at the project root (${PROJECT_ROOT}/node_modules)." >&2
+  echo "Re-run the DDEV add-on installer and accept Node dependency installation," >&2
+  echo "or install stylelint manually (npm install / yarn install)." >&2
   exit 127
 fi
 
-if [ "$has_help" = true ]; then
-  node "$TOOLCHAIN_BIN" --help
-  exit $?
-fi
+# --- Argument translation ---
 
-if [ "$has_version" = true ]; then
-  node "$TOOLCHAIN_BIN" --version
-  exit $?
-fi
+args=()
+has_positional=false
+after_double_dash=false
+map_next=false
 
-normalize_path() {
-  local path="$1"
-  path="$(map_path "$path")"
-  if [[ "$path" == /var/www/html/* ]]; then
-    path="${path#/var/www/html/}"
+for arg in "$@"; do
+  if [ "$after_double_dash" = true ]; then
+    args+=("$(map_path "$arg")")
+    has_positional=true
+    continue
   fi
-  if [ "$DOCROOT" != "web" ] && [[ "$path" == web/* ]]; then
-    path="${DOCROOT}/${path#web/}"
-  fi
-  if [[ "$path" == "${DOCROOT}/"* ]]; then
-    echo "$path"
-    return
-  fi
-  if [[ "$path" == modules/* || "$path" == themes/* || "$path" == profiles/* ]]; then
-    echo "${DOCROOT}/$path"
-    return
-  fi
-  echo "$path"
-}
-
-find_stylelint_config() {
-  local path="$1"
-  local dir="$path"
-  if [[ "$dir" == /var/www/html/* ]]; then
-    dir="${dir#/var/www/html/}"
-  fi
-  if [ -f "${PROJECT_ROOT}/${dir}" ]; then
-    dir="$(dirname "$dir")"
-  fi
-  while [ "$dir" != "." ] && [ "$dir" != "/" ]; do
-    for candidate in .stylelintrc .stylelintrc.json .stylelintrc.yaml .stylelintrc.yml .stylelintrc.js; do
-      if [ -f "${PROJECT_ROOT}/${dir}/${candidate}" ]; then
-        echo "${PROJECT_ROOT}/${dir}/${candidate}"
-        return 0
-      fi
-    done
-    dir="$(dirname "$dir")"
-  done
-  return 1
-}
-
-TARGET_PREFIXES=()
-RAW_PATHS=()
-seen_double_dash=false
-args=("${clean_args[@]}")
-arg_count=${#args[@]}
-index=0
-while [ "$index" -lt "$arg_count" ]; do
-  arg="${args[$index]}"
-  if [ "$seen_double_dash" = true ]; then
-    RAW_PATHS+=("$arg")
-    index=$((index + 1))
+  if [ "$map_next" = true ]; then
+    args+=("$(map_path "$arg")")
+    map_next=false
     continue
   fi
   case "$arg" in
+    --preview)
+      echo "Error: --preview has been removed." >&2
+      echo "Use 'ddev stylelint-fix' then 'git diff' to review changes." >&2
+      exit 1
+      ;;
+    -h|--help)
+      cat <<'USAGE'
+Usage: ddev stylelint-fix [args]
+
+Applies Stylelint --fix directly to files. All flags are passed through
+to stylelint. Use 'git diff' afterwards to review changes.
+
+Examples:
+  ddev stylelint-fix                    # Fix all custom code
+  ddev stylelint-fix path/to/file.css   # Fix specific file
+USAGE
+      exec env NODE_PATH="$NODE_PATH" node "$TOOLCHAIN_BIN" --help
+      ;;
+    -V|--version)
+      exec env NODE_PATH="$NODE_PATH" node "$TOOLCHAIN_BIN" --version
+      ;;
     --)
-      seen_double_dash=true
+      args+=("$arg")
+      after_double_dash=true
       ;;
-    -c|--config)
-      index=$((index + 1))
+    -c|--config|--ignore-path)
+      args+=("$arg")
+      map_next=true
       ;;
-    --config=*)
-      ;;
-    --ignore-path)
-      index=$((index + 1))
-      ;;
-    --ignore-path=*)
+    --config=*|--ignore-path=*)
+      flag="${arg%%=*}"
+      value="${arg#*=}"
+      args+=("${flag}=$(map_path "$value")")
       ;;
     -*)
+      args+=("$arg")
       ;;
     *)
-      RAW_PATHS+=("$arg")
+      args+=("$(map_path "$arg")")
+      has_positional=true
       ;;
   esac
-  index=$((index + 1))
 done
 
-if [ "${#RAW_PATHS[@]}" -gt 0 ]; then
-  for raw in "${RAW_PATHS[@]}"; do
-    TARGET_PREFIXES+=("$(normalize_path "$raw")")
-  done
-else
-  TARGET_PREFIXES+=("$DOCROOT")
+# Override with DCQ_STYLELINT_GLOBS (space-separated, stylelint CLI syntax).
+if [ "$has_positional" = false ]; then
+  read -ra _globs <<< "${DCQ_STYLELINT_GLOBS:-**/*.css}"
+  args+=("${_globs[@]}")
 fi
 
-FINAL_ARGS=()
-normalize_config_path() {
-  local path="$1"
-  path="$(map_path "$path")"
-  if [[ "$path" == /var/www/html/* ]]; then
-    path="${path#/var/www/html/}"
-  fi
-  if [ "$DOCROOT" != "web" ] && [[ "$path" == web/* ]]; then
-    path="${DOCROOT}/${path#web/}"
-  fi
-  echo "$path"
-}
-
-normalize_docroot_arg() {
-  local arg="$1"
-  arg="$(map_path "$arg")"
-  if [[ "$arg" == /var/www/html/* ]]; then
-    arg="${arg#/var/www/html/}"
-  fi
-  if [ "$DOCROOT" != "web" ] && [[ "$arg" == web/* ]]; then
-    arg="${DOCROOT}/${arg#web/}"
-  fi
-  if [[ "$arg" == "${DOCROOT}/"* ]]; then
-    arg="${arg#${DOCROOT}/}"
-  elif [ "$arg" = "$DOCROOT" ]; then
-    arg="."
-  fi
-  printf '%s' "$arg"
-}
-
-if [ "$explicit_paths" = true ]; then
-  args=("${clean_args[@]}")
-  arg_count=${#args[@]}
-  index=0
-  seen_double_dash=false
-  while [ "$index" -lt "$arg_count" ]; do
-    arg="${args[$index]}"
-    if [ "$seen_double_dash" = true ]; then
-      arg="$(normalize_docroot_arg "$arg")"
-      FINAL_ARGS+=("$arg")
-      index=$((index + 1))
-      continue
-    fi
-    case "$arg" in
-      --)
-        seen_double_dash=true
-        FINAL_ARGS+=("$arg")
-        ;;
-      -c|--config)
-        next_arg="${args[$((index + 1))]:-}"
-        FINAL_ARGS+=("$arg" "$(normalize_config_path "$next_arg")")
-        index=$((index + 1))
-        ;;
-      --ignore-path)
-        next_arg="${args[$((index + 1))]:-}"
-        FINAL_ARGS+=("$arg" "$(map_path "$next_arg")")
-        index=$((index + 1))
-        ;;
-      --config=*)
-        config_value="${arg#*=}"
-        FINAL_ARGS+=("--config=$(normalize_config_path "$config_value")")
-        ;;
-      --ignore-path=*)
-        ignore_value="${arg#*=}"
-        FINAL_ARGS+=("--ignore-path=$(map_path "$ignore_value")")
-        ;;
-      -*)
-        FINAL_ARGS+=("$arg")
-        ;;
-      *)
-        FINAL_ARGS+=("$(normalize_path "$arg")")
-        ;;
-    esac
-    index=$((index + 1))
-  done
-fi
-
-DEFAULT_FILES=()
-if [ "$explicit_paths" = false ]; then
-  if [ ! -d "$DOCROOT" ]; then
-    echo "Configured docroot '$DOCROOT' does not exist. Nothing to fix." >&2
-    exit 2
-  fi
-  while IFS= read -r file_path; do
-    DEFAULT_FILES+=("$file_path")
-  done < <(find "$DOCROOT" -path '*/node_modules/*' -prune -o -type f \( -name '*.css' -o -name '*.scss' -o -name '*.sass' \) -print)
-  if [ "${#DEFAULT_FILES[@]}" -eq 0 ]; then
-    echo "No CSS/SCSS/Sass files found under ${DOCROOT}. Nothing to fix." >&2
-    exit 2
-  fi
-fi
-
-FILES=()
-if [ "$explicit_paths" = false ]; then
-  FILES=("${DEFAULT_FILES[@]}")
-else
-  FILES=("${FINAL_ARGS[@]}")
-fi
-
-CONFIG_PATH=""
-if [ "$has_config" = false ]; then
-  if [ -f "${PROJECT_ROOT}/.stylelintrc.json" ]; then
-    CONFIG_PATH="${PROJECT_ROOT}/.stylelintrc.json"
-  else
-    for file_path in "${FILES[@]}"; do
-      if [[ "$file_path" == -* ]] || [ "$file_path" = "--" ]; then
-        continue
-      fi
-      if config_candidate="$(find_stylelint_config "$file_path")"; then
-        CONFIG_PATH="$config_candidate"
-        break
-      fi
-    done
-  fi
-  if [ -z "$CONFIG_PATH" ]; then
-    echo "Stylelint config file is missing. Create .stylelintrc.json in the project root (or a nearest config in the target paths), or pass --config." >&2
-    exit 2
-  fi
-  config_dir="$(dirname "$CONFIG_PATH")"
-  if [ -d "${config_dir}/node_modules" ]; then
-    NODE_PATH="${NODE_PATH}:${config_dir}/node_modules"
-  fi
-fi
-IGNORE_PATH_ARGS=()
-if [ "$has_ignore_path" = false ] && [ -f "${PROJECT_ROOT}/.stylelintignore" ]; then
-  IGNORE_PATH_ARGS=(--ignore-path "${PROJECT_ROOT}/.stylelintignore")
-fi
-
-# ============================================================================
-# PREVIEW MODE: Generate patch, show preview, prompt to apply
-# ============================================================================
-if [ "$preview_mode" = true ]; then
-  REPORT_DIR="dcq-reports"
-  mkdir -p "$REPORT_DIR"
-  PATCH_FILE="${REPORT_DIR}/_stylelint.patch"
-
-  tmp_root="$(mktemp -d)"
-  trap 'rm -rf "$tmp_root"' EXIT
-
-  cd "$PROJECT_ROOT"
-  tar -cf - \
-    --exclude=./.git \
-    --exclude=./.trunk \
-    --exclude=./node_modules \
-    --exclude=./vendor \
-    --exclude=./dcq-reports \
-    --exclude=./${DOCROOT}/core/node_modules \
-    --exclude='*/.git' \
-    --exclude='*/.git/*' \
-    . | (cd "$tmp_root" && tar -xf -)
-
-  preview_cmd=(env "NODE_PATH=$NODE_PATH" node "$TOOLCHAIN_BIN")
-  if [ "$has_config" = false ]; then
-    preview_cmd+=(--config "$CONFIG_PATH" --config-basedir "$(dirname "$CONFIG_PATH")")
-  fi
-  preview_cmd+=("${IGNORE_PATH_ARGS[@]}")
-  preview_cmd+=(--fix)
-  
-  (cd "$tmp_root" && "${preview_cmd[@]}" "${FILES[@]}")
-  preview_exit=$?
-
-  if [ "${preview_exit:-0}" -eq 2 ]; then
-    echo "Stylelint preview failed (configuration error)." >&2
-    exit "$preview_exit"
-  fi
-
-  : > "${PATCH_FILE}.raw"
-  for prefix in "${TARGET_PREFIXES[@]}"; do
-    [ -z "$prefix" ] && continue
-    if [ ! -e "$PROJECT_ROOT/$prefix" ] && [ ! -e "$tmp_root/$prefix" ]; then
-      continue
-    fi
-    diff -ruN \
-      --exclude=.git \
-      --exclude='.git/*' \
-      "$PROJECT_ROOT/$prefix" "$tmp_root/$prefix" >> "${PATCH_FILE}.raw" || true
-  done
-
-  sed -E "s/diff -ruN( '--exclude=[^']+')+/diff -ruN/" "${PATCH_FILE}.raw" > "$PATCH_FILE"
-  rm -f "${PATCH_FILE}.raw"
-
-  change_count=$(grep -c '^diff -ruN ' "$PATCH_FILE" || true)
-  if [ "$change_count" -eq 0 ]; then
-    change_count=$(grep -c '^--- ' "$PATCH_FILE" || true)
-  fi
-
-  if [ "$change_count" -eq 0 ]; then
-    echo "No Stylelint fixes to apply. Preview reported no auto-fixable changes." >&2
-    exit 0
-  fi
-
-  echo "Preview: ${change_count} file(s) would change." >&2
-  echo "Patch: ${PATCH_FILE}" >&2
-
-  if [ -t 0 ]; then
-    printf "Apply these changes? [y/N] "
-    read -r reply
-    case "$reply" in
-      y|Y) ;;
-      *) echo "Not applying changes." >&2; exit 0 ;;
-    esac
-  else
-    echo "No TTY available. Not applying changes." >&2
-    exit 0
-  fi
-
-  # Apply fixes
-  cd "$PROJECT_ROOT"
-  fix_cmd=(env "NODE_PATH=$NODE_PATH" node "$TOOLCHAIN_BIN")
-  if [ "$has_config" = false ]; then
-    fix_cmd+=(--config "$CONFIG_PATH" --config-basedir "$(dirname "$CONFIG_PATH")")
-  fi
-  fix_cmd+=("${IGNORE_PATH_ARGS[@]}")
-  fix_cmd+=(--fix)
-  
-  "${fix_cmd[@]}" "${FILES[@]}"
-  fix_exit=$?
-
-  if [ "$fix_exit" -eq 0 ]; then
-    echo "Stylelint fixes applied." >&2
-  else
-    echo "Stylelint fixes applied; some issues may remain (exit ${fix_exit})." >&2
-  fi
-
-  echo "Running Stylelint to report any remaining issues..." >&2
-  ./.ddev/commands/web/stylelint "${clean_args[@]}"
-  check_exit=$?
-  exit "$check_exit"
-fi
-
-# ============================================================================
-# DEFAULT MODE: Apply fixes directly (standard stylelint --fix behavior)
-# ============================================================================
 cd "$PROJECT_ROOT"
 
-fix_cmd=(env "NODE_PATH=$NODE_PATH" node "$TOOLCHAIN_BIN")
-if [ "$has_config" = false ]; then
-  fix_cmd+=(--config "$CONFIG_PATH" --config-basedir "$(dirname "$CONFIG_PATH")")
-fi
-fix_cmd+=("${IGNORE_PATH_ARGS[@]}")
-fix_cmd+=(--fix)
-
-"${fix_cmd[@]}" "${FILES[@]}"
-exit $?
+exec env NODE_PATH="$NODE_PATH" node "$TOOLCHAIN_BIN" --fix "${args[@]}"

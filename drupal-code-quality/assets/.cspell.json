@@ -8,6 +8,7 @@
     "ignorePaths": [
         "web/core",
         "web/*/contrib/**",
+        "web/themes/!(custom)/**",
         "web/libraries/!(custom)/**",
         "web/sites/*/files",
         "vendor",
@@ -33,7 +34,10 @@
         "./gitlab_templates/CHANGELOG.md",
         "./gitlab_templates/docs/jobs/composer.md",
         "./gitlab_templates/assets/internal/composer.json",
-        "./composer.json"
+        "./composer.json",
+        "**/settings.ddev.php",
+        "**/playwright-report/**",
+        "config/sync"
     ],
     "dictionaries": [
         "companies",

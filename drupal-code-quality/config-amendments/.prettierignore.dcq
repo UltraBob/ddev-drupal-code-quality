@@ -3,7 +3,10 @@
 # Keep custom code and site config in scope by excluding dependency/generated trees.
 **/core/**
 **/contrib/**
+**/themes/*/
+!**/themes/custom/
 **/libraries/**
 **/node_modules/**
 vendor/**
 **/sites/*/files/**
+**/playwright-report/**

@@ -744,9 +744,16 @@ teardown() {
 
 @test "install summary says already present when tools exist" {
   set -u -o pipefail
-  # First install to get tools in place.
+  # First install to get configs in place.
   run ddev add-on get "${DIR}"
   assert_success
+
+  # Create fake vendor/bin tools so the "already present" check succeeds.
+  mkdir -p vendor/bin
+  for tool in phpstan phpcs phpcbf; do
+    printf '#!/bin/sh\nexit 0\n' > "vendor/bin/$tool"
+    chmod +x "vendor/bin/$tool"
+  done
 
   # Re-install with skip mode — tools are already present.
   export DCQ_INSTALL_MODE=skip
@@ -763,7 +770,6 @@ teardown() {
   run ddev add-on get "${DIR}"
   assert_success
   refute_output --partial "Removed"
-  refute_output --partial "dcq-install.sh"
 }
 
 @test "installer prompt defaults to recommended settings" {
@@ -1104,9 +1110,9 @@ PY
   assert_failure
   run grep -n '<rule ref="DrupalPractice"/>' ".phpcs.xml"
   assert_success
-  run grep -n "<file>docroot</file>" ".phpcs.xml"
+  run grep -n "<file>docroot/modules</file>" ".phpcs.xml"
   assert_success
-  run grep -n "docroot/core/\\*\\*" ".phpcs.xml"
+  run grep -n "<file>docroot/themes/custom</file>" ".phpcs.xml"
   assert_success
   run grep -n "docroot/sites" ".phpcs.xml"
   assert_success

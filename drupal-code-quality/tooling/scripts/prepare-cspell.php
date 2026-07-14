@@ -153,7 +153,7 @@ $cspell_json['words'] = array_values(array_filter(array_unique(array_merge(
   ['blocklisted'],
   // Add words used in environment variable names.
   // See https://git.drupalcode.org/project/gitlab_templates/-/issues/3572383
-  ['flagwords', 'mkdocs'],
+  ['flagwords', 'mkdocs', 'autorun'],
 ))));
 $quiet ?: print '$cspell_json[\'words\']=' . print_r($cspell_json['words'], TRUE) . PHP_EOL;
 

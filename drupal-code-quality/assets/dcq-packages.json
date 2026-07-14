@@ -1,4 +1,5 @@
 {
+  "#ddev-generated": true,
   "_comment": "Curated npm packages required by DCQ configs. Names only; versions resolve from core at install time. To update: review .eslintrc.json, .eslintrc.jquery.json, .stylelintrc.json for extends/plugins/peer-deps.",
   "packages": [
     "cspell",

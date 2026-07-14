@@ -276,13 +276,20 @@ core = json.load(open(sys.argv[1]))
 dcq = json.load(open(sys.argv[2]))
 core_deps = {**core.get('dependencies', {}), **core.get('devDependencies', {})}
 curated = set(dcq.get('packages', []))
+excluded = set(dcq.get('excluded', {}))
 prefixes = ('eslint-', 'eslint', 'stylelint-', 'stylelint', 'prettier', 'cspell')
 
 missing = sorted(p for p in curated if p not in core_deps)
 new_linting = sorted(
     p for p in core_deps
-    if p not in curated and any(p == x or p.startswith(x + '-') for x in prefixes)
+    if p not in curated and p not in excluded
+    and any(p == x or p.startswith(x + '-') for x in prefixes)
 )
+stale_excluded = sorted(p for p in excluded if p not in core_deps)
+if stale_excluded:
+    print('Excluded packages no longer in core (can be removed from excluded list):')
+    for p in stale_excluded:
+        print(f'  - {p}')
 
 if missing:
     print('Curated packages MISSING from core:')
@@ -292,7 +299,7 @@ if new_linting:
     print('New linting packages in core (not in curated list):')
     for p in new_linting:
         print(f'  + {p}')
-if not missing and not new_linting:
+if not missing and not new_linting and not stale_excluded:
     sys.exit(0)
 sys.exit(1)
 " "$core_pkg_fetched" "${repo_root}/drupal-code-quality/assets/dcq-packages.json" 2>&1) && {

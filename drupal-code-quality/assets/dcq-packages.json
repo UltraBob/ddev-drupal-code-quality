@@ -1,6 +1,6 @@
 {
   "#ddev-generated": true,
-  "_comment": "Curated npm packages required by DCQ configs. Names only; versions resolve from core at install time. To update: review .eslintrc.json, .eslintrc.jquery.json, .stylelintrc.json for extends/plugins/peer-deps.",
+  "_comment": "Curated npm packages required by DCQ configs. Names only; versions resolve from core at install time. To update: review .eslintrc.json, .eslintrc.jquery.json, .stylelintrc.json for extends/plugins/peer-deps. Packages under 'excluded' exist in core's package.json but are deliberately not installed; the upstream drift check skips them.",
   "packages": [
     "cspell",
     "eslint",
@@ -16,5 +16,9 @@
     "stylelint-config-standard",
     "stylelint-order",
     "stylelint-prettier"
-  ]
+  ],
+  "excluded": {
+    "eslint-formatter-gitlab": "GitLab CI code-quality report serializer; no local CLI/IDE use",
+    "stylelint-checkstyle-formatter": "Checkstyle XML report serializer for CI; no local CLI/IDE use"
+  }
 }

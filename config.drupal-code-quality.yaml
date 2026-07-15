@@ -1,3 +1,5 @@
+#ddev-generated
+# Remove the line above if you customize this file, so add-on updates don't overwrite it.
 # Drupal Code Quality add-on configuration.
 web_environment:
   # Default file patterns for ddev stylelint / ddev stylelint-fix (space-separated globs).

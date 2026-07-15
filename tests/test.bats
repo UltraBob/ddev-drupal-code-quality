@@ -1860,9 +1860,23 @@ SH
   set -u -o pipefail
   export DCQ_INSTALL_DEPS=skip
 
-  # Add nodejs_version: "16" to the main DDEV config (check_nodejs_version
+  # Set nodejs_version: "16" in the main DDEV config (check_nodejs_version
   # reads .ddev/config.yaml directly via awk, not the DDEV merge files).
-  echo 'nodejs_version: "16"' >> .ddev/config.yaml
+  # Replace the existing key rather than appending: ddev config already writes
+  # nodejs_version, and DDEV rejects config.yaml with duplicate mapping keys.
+  python3 - <<'PY'
+from pathlib import Path
+
+path = Path(".ddev/config.yaml")
+lines = path.read_text(encoding="utf-8").splitlines()
+for idx, line in enumerate(lines):
+    if line.strip().startswith("nodejs_version:"):
+        lines[idx] = 'nodejs_version: "16"'
+        break
+else:
+    lines.append('nodejs_version: "16"')
+path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+PY
 
   # Phase 3 only fires when core package.json is present on the host.
   local docroot="${DCQ_TEST_DOCROOT:-web}"

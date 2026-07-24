@@ -590,6 +590,8 @@ PHP
 
 maybe_install_missing_root_deps() {
   # Prompt to add missing root devDependencies when root package.json exists.
+  # Returns: 0 = missing deps installed, 1 = install (or dep computation)
+  # failed, 2 = nothing missing, 3 = skipped (non-interactive or declined).
   local ddev_cmd="$1"
   local non_interactive="$2"
   local package_manager="$3"
@@ -598,11 +600,12 @@ maybe_install_missing_root_deps() {
   local missing_node_deps
 
   if ! missing_node_deps="$(find_missing_node_deps "$ddev_cmd")"; then
+    emit 'Failed to compute missing Node dependencies.\n'
     return 1
   fi
 
   if [ -z "$missing_node_deps" ]; then
-    return 1
+    return 2
   fi
 
   # Avoid mapfile (requires bash 4+; macOS ships bash 3.2).
@@ -629,37 +632,34 @@ maybe_install_missing_root_deps() {
     should_add=1
   elif [ "$non_interactive" -eq 1 ]; then
     emit 'Skipping dependency add (non-interactive). Install the missing packages to avoid lint errors.\n'
-    return 1
+    return 3
   elif prompt_yes_no "$prompt_msg" 1; then
     should_add=1
   fi
 
   if [ "$should_add" -eq 1 ]; then
-    deps_cmd=""
-    for dep in "${missing_node_deps_array[@]}"; do
-      deps_cmd+=" $(printf '%q' "$dep")"
-    done
+    # Pass name@range tokens straight through as argv elements; run_command
+    # execs them without a shell reparse, so no escaping (npm rejects a
+    # literal \^ in a version range as an invalid dist-tag).
     if [ "$package_manager" = "npm" ]; then
-      # shellcheck disable=SC2086
-      cmd=( "$ddev_cmd" "npm" "install" "--save-dev" "--package-lock"${deps_cmd} )
+      cmd=( "$ddev_cmd" "npm" "install" "--save-dev" "--package-lock" "${missing_node_deps_array[@]}" )
       if ! run_command "${cmd[@]}"; then
         emit 'npm install --save-dev failed. You can retry manually.\n'
-        emit_dcq_package_list "npm"
+        emit_node_install_command "npm" "$missing_node_deps" 1
         return 1
       fi
       emit 'Node dependencies added (project root).\n'
       cmd=( "$ddev_cmd" "npm" "install" "--package-lock" )
       if ! run_command "${cmd[@]}"; then
         emit 'npm install failed. You can retry manually.\n'
-        emit_dcq_package_list "npm"
+        emit_node_install_command "npm" "$missing_node_deps" 1
         return 1
       fi
     else
-      # shellcheck disable=SC2086
-      cmd=( "$ddev_cmd" "yarn" "add" "-D"${deps_cmd} )
+      cmd=( "$ddev_cmd" "yarn" "add" "-D" "${missing_node_deps_array[@]}" )
       if ! run_command "${cmd[@]}"; then
         emit 'yarn add failed. You can retry manually.\n'
-        emit_dcq_package_list "yarn"
+        emit_node_install_command "yarn" "$missing_node_deps" 1
         return 1
       fi
       emit 'Node dependencies added (project root).\n'
@@ -668,7 +668,7 @@ maybe_install_missing_root_deps() {
   fi
 
   emit 'Skipping missing dependency install. ESLint plugins may be unavailable.\n'
-  return 1
+  return 3
 }
 
 prompt_node_install_action() {
@@ -779,6 +779,8 @@ emit_dcq_package_list() {
   else
     emit '  ddev npm install --save-dev %s\n' "$packages"
   fi
+  emit 'If the install reports dependency conflicts, add the version ranges\n'
+  emit "from Drupal core's package.json (e.g. %s/core/package.json) to each package.\n" "${DCQ_DOCROOT:-web}"
 }
 
 prompt_yes_no() {
@@ -2491,7 +2493,13 @@ if [ "$core_package_json_present" -eq 1 ]; then
         if [ "$root_pm" = "yarn" ]; then
           ensure_root_yarnrc "$app_root"
         fi
-        maybe_install_missing_root_deps "$ddev_cmd" "$non_interactive" "$root_pm" 0 0 || true
+        existing_deps_status=0
+        maybe_install_missing_root_deps "$ddev_cmd" "$non_interactive" "$root_pm" 0 0 || existing_deps_status=$?
+        if [ "$existing_deps_status" -eq 1 ]; then
+          # Surface the failed top-up in the summary instead of letting the
+          # pre-existing node_modules read as "already present".
+          node_deps_failed=1
+        fi
       fi
     fi
     if [ "$node_mode_raw" = "skip" ]; then
@@ -2625,17 +2633,24 @@ if [ "$core_package_json_present" -eq 1 ]; then
       fi
 
       node_install_done=0
+      node_install_failed=0
       if [ "$target" = "root" ]; then
         if [ "$has_root_package_json" -eq 1 ]; then
           root_pm="$(detect_package_manager "$app_root")"
           if [ "$root_pm" = "yarn" ]; then
             ensure_root_yarnrc "$app_root"
           fi
-          if maybe_install_missing_root_deps "$ddev_cmd" "$non_interactive" "$root_pm" "$root_auto_add" "$root_suppress_list"; then
-            node_install_done=1
-          fi
+          # 0 = installed, 1 = failed, 2 = nothing missing, 3 = skipped.
+          # 2 and 3 fall through to the bare install below, which only
+          # materializes dependencies already declared in package.json.
+          deps_status=0
+          maybe_install_missing_root_deps "$ddev_cmd" "$non_interactive" "$root_pm" "$root_auto_add" "$root_suppress_list" || deps_status=$?
+          case "$deps_status" in
+            0) node_install_done=1 ;;
+            1) node_install_failed=1 ;;
+          esac
         fi
-        if [ "$node_install_done" -eq 0 ]; then
+        if [ "$node_install_done" -eq 0 ] && [ "$node_install_failed" -eq 0 ]; then
           if [ -z "${root_pm:-}" ]; then
             root_pm="$(detect_package_manager "$app_root")"
             if [ "$root_pm" = "yarn" ]; then
@@ -2651,13 +2666,18 @@ if [ "$core_package_json_present" -eq 1 ]; then
           if run_command "${cmd[@]}"; then
             node_install_done=1
           else
+            node_install_failed=1
+            # The deps are already declared in package.json here, so the
+            # retry is a plain install — no package list needed.
             emit 'JS dependency install failed. You can retry manually:\n'
             emit '  ddev %s install\n' "${root_pm:-npm}"
-            emit_dcq_package_list "${root_pm:-npm}"
           fi
         fi
         if [ "$node_install_done" -eq 1 ]; then
           emit 'Node toolchain installed (project root).\n'
+        elif [ "$node_install_failed" -eq 1 ]; then
+          node_deps_failed=1
+          emit 'Node toolchain install FAILED (project root). See errors above; the summary includes retry instructions.\n'
         fi
       fi
     fi
@@ -2855,6 +2875,7 @@ print_install_summary() {
   local configs_count="$4"
   local has_scss="$5"
   local pkg_mgr="${6:-npm}"
+  local node_missing_deps="${7:-}"
 
   emit '\n'
   emit '===============================================================\n'
@@ -2879,6 +2900,8 @@ print_install_summary() {
     emit '  - Node toolchain (ESLint, Prettier, Stylelint)\n'
   elif [ "$node_status" = "present" ]; then
     emit '  - Node toolchain: already present (skipped)\n'
+  elif [ "$node_status" = "failed" ]; then
+    emit '  - Node toolchain: FAILED (see warning below)\n'
   else
     emit '  - Node toolchain: NOT installed\n'
   fi
@@ -2903,9 +2926,24 @@ print_install_summary() {
     step_num=$((step_num + 1))
   fi
 
-  if [ "$node_status" != "root" ] && [ "$node_status" != "present" ]; then
+  if [ "$node_status" = "failed" ]; then
+    emit '  %s. FIX: Node tooling failed to install. Resolve the %s issue\n' "$step_num" "$pkg_mgr"
+    emit '     (see error output above), then run:\n'
+    if [ -n "$node_missing_deps" ]; then
+      emit_node_install_command "$pkg_mgr" "$node_missing_deps" 1
+    else
+      # No versioned list means the deps were already declared and a plain
+      # install failed; the retry is the same plain install.
+      emit '     ddev %s install\n' "$pkg_mgr"
+    fi
+    step_num=$((step_num + 1))
+  elif [ "$node_status" != "root" ] && [ "$node_status" != "present" ]; then
     emit '  %s. Install Node tools:\n' "$step_num"
-    emit_dcq_package_list "$pkg_mgr"
+    if [ -n "$node_missing_deps" ]; then
+      emit_node_install_command "$pkg_mgr" "$node_missing_deps" 1
+    else
+      emit_dcq_package_list "$pkg_mgr"
+    fi
     step_num=$((step_num + 1))
   fi
 
@@ -2977,7 +3015,9 @@ if [ "$php_deps_summary" = "skipped" ]; then
 fi
 
 node_summary="skipped"
-if [ -n "${node_target_choice:-}" ] && [ "$node_target_choice" = "root" ]; then
+if [ "${node_deps_failed:-0}" -eq 1 ]; then
+  node_summary="failed"
+elif [ -n "${node_target_choice:-}" ] && [ "$node_target_choice" = "root" ]; then
   node_summary="root"
 fi
 # Check if Node toolchain is actually present regardless of what happened in this run.
@@ -3010,4 +3050,4 @@ if [ "$scss_detected" = "false" ] && detect_scss_files "$app_root"; then
   fi
 fi
 
-print_install_summary "$php_deps_summary" "$node_summary" "$ide_summary" "$configs_copied" "$scss_detected" "${root_pm:-npm}"
+print_install_summary "$php_deps_summary" "$node_summary" "$ide_summary" "$configs_copied" "$scss_detected" "${root_pm:-npm}" "${missing_node_deps:-}"

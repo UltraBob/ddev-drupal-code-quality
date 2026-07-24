@@ -2008,6 +2008,89 @@ JSON
 }
 
 # bats test_tags=node
+@test "node install adds missing deps using core version constraints" {
+  set -u -o pipefail
+  export DCQ_INSTALL_DEPS=skip
+  export DCQ_INSTALL_NODE_DEPS=root
+  mkdir -p web/core
+  write_stub_package_json "web/core/package.json"
+
+  # Root package.json declares no devDependencies, so every curated package
+  # is missing and the versioned `npm install --save-dev name@range` path
+  # runs. The semver ranges (^) must reach npm unescaped for this to work.
+  cat > package.json <<'JSON'
+{
+  "name": "dcq-test",
+  "private": true,
+  "engines": {
+    "node": ">= 20.0"
+  }
+}
+JSON
+
+  run ddev add-on get "${DIR}"
+  assert_success
+  assert_output --partial "Node dependencies added (project root)."
+  assert_output --partial "Node toolchain installed (project root)."
+  run grep -F '"eslint": "^8.57.1"' package.json
+  assert_success
+  assert_container_file_exist "/var/www/html/node_modules/eslint-plugin-yml/package.json"
+  assert_container_file_exist "/var/www/html/node_modules/stylelint-prettier/package.json"
+}
+
+# bats test_tags=node
+@test "failed node dep add reports FAILED instead of success" {
+  set -u -o pipefail
+  export DCQ_INSTALL_DEPS=skip
+  export DCQ_INSTALL_NODE_DEPS=root
+  mkdir -p web/core
+
+  # Core pins eslint to a version that cannot resolve; the root package.json
+  # has everything else, so the versioned dep add installs only eslint and
+  # fails. The installer must finish but report the failure prominently
+  # instead of falling back to a bare `npm install` and claiming success.
+  cat > web/core/package.json <<'JSON'
+{
+  "name": "drupal/core",
+  "devDependencies": {
+    "eslint": "99999.0.0"
+  }
+}
+JSON
+  cat > package.json <<'JSON'
+{
+  "name": "dcq-test",
+  "private": true,
+  "engines": {
+    "node": ">= 20.0"
+  },
+  "devDependencies": {
+    "cspell": "^9.2.2",
+    "eslint-config-airbnb-base": "^15.0.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-import": "^2.32.0",
+    "eslint-plugin-jsdoc": "^61.2.1",
+    "eslint-plugin-no-jquery": "^3.1.1",
+    "eslint-plugin-prettier": "^5.5.4",
+    "eslint-plugin-yml": "^1.19.0",
+    "prettier": "^3.6.2",
+    "stylelint": "^16.25.0",
+    "stylelint-config-standard": "^38.0.0",
+    "stylelint-order": "^7.0.0",
+    "stylelint-prettier": "^5.0.3"
+  }
+}
+JSON
+
+  run bash -lc "ddev add-on get \"${DIR}\" 2>&1"
+  assert_success
+  assert_output --partial "npm install --save-dev failed. You can retry manually."
+  assert_output --partial "Node toolchain install FAILED (project root)."
+  assert_output --partial "Node toolchain: FAILED"
+  refute_output --partial "Node toolchain installed (project root)."
+}
+
+# bats test_tags=node
 @test "node install failure does not crash the installer" {
   set -u -o pipefail
   export DCQ_INSTALL_DEPS=skip
@@ -2048,6 +2131,9 @@ JSON
   assert_success
   assert_output --partial "JS dependency install failed."
   assert_output --partial "You can retry manually"
+  assert_output --partial "Node toolchain install FAILED (project root)."
+  assert_output --partial "Node toolchain: FAILED"
+  refute_output --partial "Node toolchain installed (project root)."
 }
 
 # bats test_tags=full

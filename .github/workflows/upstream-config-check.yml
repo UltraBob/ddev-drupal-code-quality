@@ -177,12 +177,13 @@ jobs:
           The upstream config check found drift and applied it to the vendored assets on this branch.
 
           > [!IMPORTANT]
-          > **Close this pull request and reopen it before reviewing.**
+          > **Press "Approve and run workflows" below before reviewing.**
           >
-          > It was opened by `GITHUB_TOKEN`, and GitHub does not emit `pull_request`
-          > events for token-authored pull requests, so the required checks
-          > (`maintenance-checker`, `tests (stable)`, `tests (HEAD)`) never start.
-          > Reopening it counts as a human action and starts all three normally.
+          > This pull request was opened by `GITHUB_TOKEN`, so its `pull_request`
+          > runs are created but held in an `action_required` state rather than
+          > starting on their own. Approving them starts `maintenance-checker`,
+          > `tests (stable)` and `tests (HEAD)`. Closing and reopening the pull
+          > request also works, but approving is one click.
           MD
             # Warn whenever anything at all needs a human, not just patch
             # conflicts: curated package drift, a missing local file, a fetch

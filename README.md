@@ -136,6 +136,13 @@ manually.
 The template points PHP tooling at `.ddev/drupal-code-quality/tooling/bin` and JS tooling at local
 `node_modules`. Override the paths if you prefer a different location.
 
+Note that VS Code does not install the recommended extensions automatically.
+The first time you open the workspace after install, VS Code shows a
+notification that this workspace has extension recommendations — click
+**Show Recommendations** and install the listed extensions so the IDE
+integration works. If you dismissed the notification, open the Extensions view
+and filter by `@recommended` to find them.
+
 ## Requirements
 
 - DDEV project with Drupal core in the configured docroot (default `web/`).

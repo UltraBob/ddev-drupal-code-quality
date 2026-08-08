@@ -2865,6 +2865,11 @@ if [ -f "$ide_settings_template" ] || [ -f "$ide_extensions_template" ]; then
         printf 'WRITE: %s\n' "$ide_target_extensions"
       fi
     fi
+
+    emit 'NOTE: VS Code does not install recommended extensions automatically.\n'
+    emit '      When it shows the workspace recommendations notification, click\n'
+    emit '      "Show Recommendations" and install them (or open the Extensions\n'
+    emit '      view and filter by @recommended).\n'
   fi
 fi
 
@@ -2952,6 +2957,10 @@ print_install_summary() {
 
   if [ "$ide_status" = "skip" ]; then
     emit '  %s. Setup VS Code: see .ddev/drupal-code-quality/ide-settings/vscode/README.md\n' "$step_num"
+  else
+    emit '  %s. Install the recommended VS Code extensions when prompted\n' "$step_num"
+    emit '     (Extensions view, filter by @recommended); they are not installed\n'
+    emit '     automatically.\n'
   fi
 
   local scss_install_cmd

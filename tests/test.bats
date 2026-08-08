@@ -618,6 +618,52 @@ JS
 a { color: RED; }
 CSS
 
+  # Non-standard layout fixture: custom code outside modules/custom that
+  # PHPStan must still analyse (broad scan scope, issue #41).
+  local common_dir="web/modules/common/dcq_common"
+  mkdir -p "${common_dir}"
+  cat > "${common_dir}/dcq_common.info.yml" <<'YAML'
+name: DCQ Common
+type: module
+description: 'Fixture module outside modules/custom.'
+core_version_requirement: ^11
+package: Testing
+YAML
+  cat > "${common_dir}/dcq_common.module" <<'PHP'
+<?php
+
+/**
+ * @file
+ * Fixture module kept outside modules/custom.
+ */
+
+function dcq_common_fixture() {
+  if ($undefined_common_var) {
+    return $undefined_common_var;
+  }
+  return NULL;
+}
+PHP
+
+  # Drupal CMS generated-theme fixture: site templates generate a starter
+  # theme directly under themes/ (blank in the official base template); bad
+  # code here should NOT be flagged by PHPStan or PHPCS.
+  local blank_dir="web/themes/blank"
+  mkdir -p "${blank_dir}"
+  cat > "${blank_dir}/blank.info.yml" <<'YAML'
+name: Blank
+type: theme
+description: 'A completely blank theme.'
+core_version_requirement: ^11
+YAML
+  cat > "${blank_dir}/blank.theme" <<'PHP'
+<?php
+function blank_bad($x){
+  // TODO: This should NOT be flagged — generated CMS starter theme.
+  if($undefined_blank_var){return $undefined_blank_var;}
+}
+PHP
+
   # Clean fixture: valid custom code that should pass all checks.
   local clean_dir="web/modules/custom/dcq_clean"
   mkdir -p "${clean_dir}"
@@ -1156,7 +1202,9 @@ PY
   assert_success
   run grep -n "<file>docroot/modules</file>" ".phpcs.xml"
   assert_success
-  run grep -n "<file>docroot/themes/custom</file>" ".phpcs.xml"
+  run grep -n "<file>docroot/themes</file>" ".phpcs.xml"
+  assert_success
+  run grep -n "docroot/themes/blank" ".phpcs.xml"
   assert_success
   run grep -n "docroot/sites" ".phpcs.xml"
   assert_success
@@ -1164,9 +1212,19 @@ PY
   assert_failure
 
   # Verify PHPStan config uses custom docroot
-  run grep -q "docroot/modules/custom" phpstan.neon
+  run grep -q -- "- docroot/modules$" phpstan.neon
   assert_success
-  run grep -q "docroot/sites" phpstan.neon
+  run grep -q -- "- docroot/profiles$" phpstan.neon
+  assert_success
+  run grep -q "docroot/modules/contrib/\*" phpstan.neon
+  assert_success
+  run grep -q "docroot/themes/contrib/\*" phpstan.neon
+  assert_success
+  run grep -q "docroot/profiles/contrib/\*" phpstan.neon
+  assert_success
+  run grep -q "docroot/themes/blank/\*" phpstan.neon
+  assert_success
+  run grep -q -- "- docroot/sites$" phpstan.neon
   assert_success
   run grep -q "docroot/sites/\*/files/\*" phpstan.neon
   assert_success
@@ -1679,19 +1737,37 @@ JS
   run grep -q "paths:" phpstan.neon
   assert_success
 
-  # Check for expected default paths
-  run grep -q "web/modules/custom" phpstan.neon
+  # Check for expected default paths (broad parents, anchored so the
+  # contrib exclude entries below don't satisfy these greps).
+  run grep -q -- "- web/modules$" phpstan.neon
   assert_success
-  run grep -q "web/themes/custom" phpstan.neon
+  run grep -q -- "- web/themes$" phpstan.neon
   assert_success
-  run grep -q "web/sites" phpstan.neon
+  run grep -q -- "- web/profiles$" phpstan.neon
+  assert_success
+  run grep -q -- "- web/sites$" phpstan.neon
   assert_success
 
   # Check for excludePaths
   run grep -q "excludePaths:" phpstan.neon
   assert_success
+  run grep -q "web/modules/contrib/\*" phpstan.neon
+  assert_success
+  run grep -q "web/themes/contrib/\*" phpstan.neon
+  assert_success
+  run grep -q "web/themes/blank/\*" phpstan.neon
+  assert_success
+  run grep -q "web/profiles/contrib/\*" phpstan.neon
+  assert_success
   run grep -q "web/sites/\*/files/\*" phpstan.neon
   assert_success
+
+  # PHPStan errors on nonexistent paths entries, so the installer must
+  # pre-create every scanned directory even on projects that lack them.
+  for dir in web/modules web/themes web/profiles web/sites; do
+    run test -d "$dir"
+    assert_success
+  done
 }
 
 @test "phpstan excludes nested files directory descendants" {
@@ -2254,6 +2330,10 @@ JSON
   assert_success
   run wait_for_container_path "/var/www/html/web/modules/contrib/dcq_fake/dcq_fake.module"
   assert_success
+  run wait_for_container_path "/var/www/html/web/modules/common/dcq_common/dcq_common.module"
+  assert_success
+  run wait_for_container_path "/var/www/html/web/themes/blank/blank.theme"
+  assert_success
   run wait_for_container_path "/var/www/html/web/modules/custom/dcq_clean/dcq_clean.module"
   assert_success
 
@@ -2290,6 +2370,14 @@ JSON
   run ./.ddev/drupal-code-quality/tooling/bin/phpstan web/modules/custom/dcq_test/dcq_test.module
   assert_failure
   assert_output --partial "undefined"
+
+  # PHPStan default run covers custom code outside modules/custom (broad
+  # scan scope) while excluding contrib and the generated CMS starter theme.
+  run ./.ddev/drupal-code-quality/tooling/bin/phpstan
+  assert_failure
+  assert_output --partial "dcq_common.module"
+  refute_output --partial "dcq_fake.module"
+  refute_output --partial "blank.theme"
 
   # ESLint detects rule violations in check mode
   run ./.ddev/drupal-code-quality/tooling/bin/eslint web/themes/custom/dcq_theme/js/fixable.js
@@ -2334,10 +2422,12 @@ JSON
   # Detection accuracy: exclusion paths (contrib not flagged)
   # -----------------------------------------------------------
 
-  # PHPCS default run should NOT include contrib fixtures
+  # PHPCS default run should NOT include contrib fixtures or the generated
+  # CMS starter theme.
   run ./.ddev/drupal-code-quality/tooling/bin/phpcs
   assert_failure
   refute_output --partial "dcq_fake.module"
+  refute_output --partial "blank.theme"
 
   # ESLint default run should NOT include contrib fixtures
   run ./.ddev/drupal-code-quality/tooling/bin/eslint

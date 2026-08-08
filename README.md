@@ -196,13 +196,33 @@ and filter by `@recommended` to find them.
     single source of truth for Prettier scope.
 - PHPCS / PHPCBF default scope:
   - When a project `.phpcs.xml` is installed by the add-on, `ddev phpcs` and
-    `ddev phpcbf` with no path default to scanning the configured docroot.
-  - The generated ruleset excludes `__DOCROOT__/core/**`, `**/contrib/**`,
-    `**/node_modules/**`, and `__DOCROOT__/sites/*/files/**`.
+    `ddev phpcbf` with no path default to scanning `modules`, `themes`,
+    `profiles`, and `sites` under the docroot (the same scope as PHPStan).
+  - The generated ruleset excludes `**/contrib/**`, `**/node_modules/**`,
+    `__DOCROOT__/themes/blank/**` (the starter theme Drupal CMS site
+    templates generate directly under `themes/`), and
+    `__DOCROOT__/sites/*/files/**`.
   - You can still pass explicit paths to narrow runs.
 - PHP parallel lint scope:
   - `ddev php-parallel-lint` remains wrapper-scoped because the tool does not
     provide an equivalent project config file for default target paths.
+- PHPStan default scope:
+  - The installed `phpstan.neon` analyses `modules`, `themes`, `profiles`, and
+    `sites` under the docroot, excluding `contrib` subtrees and
+    `themes/blank` (the starter theme Drupal CMS site templates generate
+    directly under `themes/`). The broad parent directories are deliberate:
+    projects that keep custom code outside `modules/custom` (for example
+    `modules/common/`) are still analysed instead of being silently skipped.
+  - Contrib is excluded with `analyseAndScan`, so calls into contrib code
+    still type-check (phpstan-drupal resolves contrib classes on demand via
+    Drupal's autoloader) without scanning the contrib tree.
+  - This intentionally deviates from the GitLab CI template `paths` values:
+    the templates target contrib repos where the project root is the module
+    under test, while this add-on targets site projects whose custom code is
+    the target. Template parity applies to the rules, not the scan scope.
+  - First adoption on an existing project may surface previously-unseen
+    findings. Run `ddev phpstan --generate-baseline` once to capture existing
+    debt so only new regressions fail (see PHPStan baseline below).
 - PHPStan baseline:
   - Generate a baseline with `ddev phpstan --generate-baseline`.
   - This writes `phpstan-baseline.neon` at the project root and updates

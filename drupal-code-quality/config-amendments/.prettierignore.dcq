@@ -10,3 +10,7 @@
 vendor/**
 **/sites/*/files/**
 **/playwright-report/**
+
+# Drupal .inc files are PHP, but prettier infers the HTML parser from the
+# extension. PHP is covered by phpcs/phpcbf, which lists inc in its extensions.
+*.inc

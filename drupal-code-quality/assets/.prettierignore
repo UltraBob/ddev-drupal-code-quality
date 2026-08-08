@@ -2,6 +2,3 @@
 # Default ignore list used by Drupal GitLab CI templates (include.drupalci.main.yml).
 # CI creates this file when missing; we vendor it here to keep local runs in parity.
 *.yml
-# Drupal .inc files are PHP, but prettier parses as HTML by default.
-# PHP files should be checked by phpcs/phpcbf instead.
-*.inc

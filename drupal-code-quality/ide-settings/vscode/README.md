@@ -14,6 +14,11 @@ installed by this add-on.
 
 ## Recommended extensions
 
+VS Code does not install recommended extensions automatically. When it shows
+the "this workspace has extension recommendations" notification, click
+**Show Recommendations** and install them. If the notification was dismissed,
+open the Extensions view and filter by `@recommended`.
+
 See `extensions.json` for the extension IDs. JS-focused extensions (ESLint,
 Stylelint, Prettier, CSpell) use local `node_modules` paths. The installer uses
 the Node toolchain choice (prompt or `DCQ_INSTALL_NODE_DEPS`) to configure those

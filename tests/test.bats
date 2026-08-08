@@ -664,6 +664,16 @@ function blank_bad($x){
 }
 PHP
 
+  # Uploaded-files exclusion probe: PHPStan must not scan descendants of
+  # sites/*/files. The file is valid PHP, so only the --debug per-file
+  # listing can prove whether it was analysed.
+  mkdir -p web/sites/default/files/php/twig/test-subdir
+  cat > web/sites/default/files/php/twig/test-subdir/should-not-scan.php <<'PHP'
+<?php
+
+final class DcqPhpstanExcludeProbe {}
+PHP
+
   # Clean fixture: valid custom code that should pass all checks.
   local clean_dir="web/modules/custom/dcq_clean"
   mkdir -p "${clean_dir}"
@@ -1770,29 +1780,6 @@ JS
   done
 }
 
-@test "phpstan excludes nested files directory descendants" {
-  set -u -o pipefail
-  run ddev add-on get "${DIR}"
-  assert_success
-
-  mkdir -p web/sites/default/files/php/twig/test-subdir
-  cat > web/sites/default/files/php/twig/test-subdir/should-not-scan.php <<'PHP'
-<?php
-
-final class DcqPhpstanExcludeProbe {}
-PHP
-
-  run ddev phpstan analyse --debug -c phpstan.neon web/sites
-  assert_failure
-
-  case "$output" in
-    *"test-subdir/should-not-scan.php"*)
-      echo "Expected phpstan excludePaths to skip files descendants under web/sites/*/files."
-      return 1
-      ;;
-  esac
-}
-
 @test "phpstan fails with helpful message when project config is missing" {
   set -u -o pipefail
   export DCQ_INSTALL_DEPS=skip
@@ -2334,6 +2321,8 @@ JSON
   assert_success
   run wait_for_container_path "/var/www/html/web/themes/blank/blank.theme"
   assert_success
+  run wait_for_container_path "/var/www/html/web/sites/default/files/php/twig/test-subdir/should-not-scan.php"
+  assert_success
   run wait_for_container_path "/var/www/html/web/modules/custom/dcq_clean/dcq_clean.module"
   assert_success
 
@@ -2378,6 +2367,18 @@ JSON
   assert_output --partial "dcq_common.module"
   refute_output --partial "dcq_fake.module"
   refute_output --partial "blank.theme"
+
+  # PHPStan --debug lists every analysed file, proving sites/*/files
+  # descendants are excluded while sites files outside files/ are analysed.
+  # The probe file is valid PHP, so error output alone can't distinguish
+  # "excluded" from "analysed and clean".
+  run ./.ddev/drupal-code-quality/tooling/bin/phpstan analyse --debug -c phpstan.neon web/sites
+  if [ "$status" -ne 0 ] && [ "$status" -ne 1 ]; then
+    echo "Expected PHPStan --debug on web/sites to exit 0 or 1, got $status"
+    return 1
+  fi
+  assert_output --partial "sites/default/settings.php"
+  refute_output --partial "should-not-scan.php"
 
   # ESLint detects rule violations in check mode
   run ./.ddev/drupal-code-quality/tooling/bin/eslint web/themes/custom/dcq_theme/js/fixable.js

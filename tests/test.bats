@@ -1091,6 +1091,50 @@ PY
   assert_output "/var/www/html/web/index.php"
 }
 
+@test "ddev-run locates ddev when invoked with a minimal GUI PATH" {
+  set -u -o pipefail
+  run ddev add-on get "${DIR}"
+  assert_success
+  assert_file_exist ".ddev/drupal-code-quality/tooling/bin/ddev-run"
+
+  # Sandbox PATH holding only the utilities ddev-run itself needs — no ddev.
+  # This mimics the minimal launchd/systemd PATH that GUI-launched IDEs get.
+  sandbox_bin="${TESTDIR}/sandbox-bin"
+  mkdir -p "$sandbox_bin"
+  for util in bash dirname basename; do
+    ln -s "$(command -v "$util")" "$sandbox_bin/$util"
+  done
+
+  # Stub ddev in a fake install dir standing in for e.g. /opt/homebrew/bin.
+  candidate_bin="${TESTDIR}/fake-install-bin"
+  mkdir -p "$candidate_bin"
+  printf '#!/usr/bin/env bash\necho "candidate-ddev $*"\n' > "${candidate_bin}/ddev"
+  chmod +x "${candidate_bin}/ddev"
+
+  # Minimal PATH: the shim falls back to probing the candidate dirs.
+  run env PATH="$sandbox_bin" DCQ_DDEV_DIRS="${TESTDIR}/no-such-dir:${candidate_bin}" \
+    "${TESTDIR}/.ddev/drupal-code-quality/tooling/bin/phpstan" --version
+  assert_success
+  assert_output --partial "candidate-ddev phpstan --version"
+
+  # ddev already on PATH: unchanged behavior, candidates are not probed.
+  path_bin="${TESTDIR}/path-bin"
+  mkdir -p "$path_bin"
+  printf '#!/usr/bin/env bash\necho "path-ddev $*"\n' > "${path_bin}/ddev"
+  chmod +x "${path_bin}/ddev"
+  run env PATH="${path_bin}:${sandbox_bin}" DCQ_DDEV_DIRS="$candidate_bin" \
+    "${TESTDIR}/.ddev/drupal-code-quality/tooling/bin/phpstan" --version
+  assert_success
+  assert_output --partial "path-ddev phpstan --version"
+
+  # No ddev anywhere: exit 127 with actionable guidance.
+  run env PATH="$sandbox_bin" DCQ_DDEV_DIRS="${TESTDIR}/no-such-dir" \
+    "${TESTDIR}/.ddev/drupal-code-quality/tooling/bin/phpstan" --version
+  assert_failure
+  [ "$status" -eq 127 ]
+  assert_output --partial "cannot locate the 'ddev' binary"
+}
+
 @test "install from directory with non-web docroot" {
   set -u -o pipefail
   mkdir -p docroot

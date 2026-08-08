@@ -258,6 +258,11 @@ done
 # Compare curated dcq-packages.json against core's package.json to detect:
 # - Curated packages that core dropped (we depend on something core no longer ships)
 # - New eslint/stylelint/prettier/cspell packages in core we might want to adopt
+# - Excluded packages no longer present in core (candidates for removal from the
+#   excluded list)
+# Any of the three reports DRIFT DETECTED and counts toward "changed". None of
+# them can be auto-applied, so they always land in the issue rather than the
+# pull request.
 printf "\n"
 printf "${BOLD}%-40s${RESET} " "dcq-packages.json vs core"
 total=$((total + 1))

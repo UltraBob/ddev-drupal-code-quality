@@ -4,16 +4,18 @@
 
   <rule ref="DrupalPractice"/>
 
-  <!-- Scan custom code directories. Modules and profiles use the broad parent
-       directory so non-standard layouts (modules outside custom/) are not missed.
-       Themes use themes/custom/ specifically to exclude core/CMS themes like
-       blank/ that sit outside contrib/. -->
+  <!-- Scan custom code directories. All four use the broad parent directory
+       so non-standard layouts (modules outside custom/) are not missed.
+       contrib/ subtrees are excluded below, as is themes/blank/: Drupal CMS
+       site templates generate a starter theme directly under themes/ (named
+       blank in the official base template). -->
   <file>__DOCROOT__/modules</file>
-  <file>__DOCROOT__/themes/custom</file>
+  <file>__DOCROOT__/themes</file>
   <file>__DOCROOT__/profiles</file>
   <file>__DOCROOT__/sites</file>
 
   <exclude-pattern>**/contrib/**</exclude-pattern>
+  <exclude-pattern>__DOCROOT__/themes/blank/**</exclude-pattern>
   <exclude-pattern>**/node_modules/**</exclude-pattern>
   <exclude-pattern>__DOCROOT__/sites/*/files/**</exclude-pattern>
   <exclude-pattern>__DOCROOT__/sites/*/settings.ddev.php</exclude-pattern>

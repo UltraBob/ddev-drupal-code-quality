@@ -1306,10 +1306,14 @@ ensure_phpstan_paths() {
   local app_root="$1"
   local docroot="${DCQ_DOCROOT:-web}"
 
-  # Create standard Drupal directories that PHPStan config expects
+  # Create standard Drupal directories that the PHPStan and PHPCS configs
+  # expect: both error on nonexistent scan entries (modules, themes, profiles,
+  # sites). modules/custom and themes/custom are created via their parents as
+  # conventional layout hints.
   local paths=(
     "${docroot}/modules/custom"
     "${docroot}/themes/custom"
+    "${docroot}/profiles"
     "${docroot}/sites"
   )
 

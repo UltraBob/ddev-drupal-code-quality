@@ -2,13 +2,29 @@
 # DCQ defaults for local development
 # This file contains scope and exclusion paths that will be merged into phpstan.neon
 # during installation. The __DOCROOT__ placeholder is replaced with the actual docroot.
+# Note: only content below the parameters: line survives the merge, so keep
+# user-facing comments inside the parameters block.
 parameters:
+    # Scan the broad parent directories (not just */custom) so custom code in
+    # non-standard layouts (e.g. modules/common/) is analysed instead of being
+    # silently skipped. Contrib is excluded with analyseAndScan (not analyse):
+    # phpstan-drupal resolves contrib classes on demand via Drupal's
+    # autoloader, so calls into contrib still type-check without scanning the
+    # contrib tree. The trailing /* is deliberate — excludePaths uses fnmatch
+    # where * crosses /, so the exclusion is recursive.
     paths:
-        - __DOCROOT__/modules/custom
-        - __DOCROOT__/themes/custom
+        - __DOCROOT__/modules
+        - __DOCROOT__/themes
+        - __DOCROOT__/profiles
         - __DOCROOT__/sites
     excludePaths:
         analyseAndScan:
+            - __DOCROOT__/modules/contrib/*
+            - __DOCROOT__/themes/contrib/*
+            # Drupal CMS site templates generate a starter theme directly
+            # under themes/ (named blank in the official base template).
+            - __DOCROOT__/themes/blank/*
+            - __DOCROOT__/profiles/contrib/*
             - __DOCROOT__/sites/*/files/*
             - __DOCROOT__/sites/*/settings.ddev.php
             - __DOCROOT__/sites/*/default.settings.php

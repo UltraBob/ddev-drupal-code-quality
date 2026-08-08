@@ -1908,7 +1908,7 @@ if [ -z "$app_root" ]; then
   app_root="$(cd "$cwd/.." && pwd)"
 fi
 
-dcq_docroot="${DDEV_DOCROOT}"
+dcq_docroot="${DDEV_DOCROOT-web}"
 DCQ_DOCROOT="$dcq_docroot"
 DOCROOT_CONTAINER="/var/www/html/${DCQ_DOCROOT}"
 DOCROOT_COREDIR="${DOCROOT_CONTAINER}/core"

@@ -18,6 +18,31 @@ fi
 
 cd "$repo_root"
 
+# IDEs launched from the Dock/Spotlight (macOS launchd) or a desktop session
+# (Linux systemd) inherit a minimal PATH that omits Homebrew and other common
+# install dirs, so ddev cannot be assumed resolvable. PATH lookup stays the
+# happy path; otherwise probe known install locations for the ddev binary.
+# DCQ_DDEV_DIRS is a test hook (colon-separated), not a supported setting.
+if ! command -v ddev >/dev/null 2>&1; then
+  if [ -n "${DCQ_DDEV_DIRS:-}" ]; then
+    IFS=':' read -r -a candidates <<< "$DCQ_DDEV_DIRS"
+  else
+    candidates=(/opt/homebrew/bin /usr/local/bin "${HOME:-}/.ddev/bin" /opt/ddev/bin)
+  fi
+  for candidate in "${candidates[@]}"; do
+    if [ -n "$candidate" ] && [ -x "$candidate/ddev" ]; then
+      PATH="$candidate:$PATH"
+      break
+    fi
+  done
+fi
+
+if ! command -v ddev >/dev/null 2>&1; then
+  echo "ddev-run: cannot locate the 'ddev' binary on PATH or in common install dirs." >&2
+  echo "Add ddev's directory to your IDE's PATH, or install ddev to a standard location." >&2
+  exit 127
+fi
+
 # The wrapper passes its own path as $1 so we can derive the tool name.
 tool_name="${1:-$0}"
 if [ "$tool_name" != "$0" ]; then

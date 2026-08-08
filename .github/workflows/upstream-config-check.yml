@@ -8,80 +8,413 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
+  pull-requests: write
   issues: write
+  actions: write
+
+concurrency:
+  group: upstream-config-check
+  cancel-in-progress: false
+
+env:
+  SYNC_BRANCH: automation/upstream-config-sync
+  SYNC_LABEL: upstream-sync
 
 jobs:
   check-upstream:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      # Pinned to a commit rather than a mutable tag, matching maintenance-check.yml.
+      # This job holds contents/pull-requests/issues/actions write, so a re-pointed
+      # tag would run with all of it.
+      #
+      # ref: always sync the default branch, whatever ref the run was dispatched
+      # from. Without it, a manual dispatch from a topic branch would build the
+      # sync branch on top of that branch's commits while opening the pull request
+      # against the default branch, dragging unrelated work in.
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.repository.default_branch }}
 
-      - name: Check upstream configs
+      - name: Ensure the drift label exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create "$SYNC_LABEL" \
+            --color 0075ca \
+            --description 'Automated upstream config drift detection' \
+            2>/dev/null || true
+
+      - name: Apply upstream config updates
         id: sync
         run: |
-          output=$(./scripts/sync-upstream-configs.sh 2>&1) || exit_code=$?
+          set +e
+          output=$(./scripts/sync-upstream-configs.sh --update 2>&1)
+          exit_code=$?
+          set -e
+
           echo "$output"
-          # Save output for issue body (escape for GH Actions)
+
+          # The output embeds file contents fetched from upstream URLs. Use a
+          # random heredoc delimiter so upstream content cannot close the block
+          # early and inject arbitrary variables into the job environment.
+          delimiter="$(openssl rand -hex 16)"
           {
-            echo "SYNC_OUTPUT<<SYNC_EOF"
+            echo "SYNC_OUTPUT<<${delimiter}"
             echo "$output"
-            echo "SYNC_EOF"
+            echo "${delimiter}"
           } >> "$GITHUB_ENV"
-          echo "exit_code=${exit_code:-0}" >> "$GITHUB_OUTPUT"
 
-      - name: Create or update issue on changes
-        if: steps.sync.outputs.exit_code == '1'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const title = 'Upstream config changes detected';
-            const label = 'upstream-sync';
-            const body = `The weekly upstream config check found changes.\n\n\`\`\`\n${process.env.SYNC_OUTPUT}\n\`\`\`\n\nRun \`./scripts/sync-upstream-configs.sh --update\` locally to apply, then \`DCQ_FULL_TESTS=1 bats --jobs 4 ./tests/test.bats\` to validate.`;
+          echo "exit_code=${exit_code}" >> "$GITHUB_OUTPUT"
 
-            // Find existing open issue
-            const issues = await github.rest.issues.listForRepo({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              state: 'open',
-              labels: label,
-            });
+          # With --update the script exits 0 whether or not it wrote anything,
+          # so the exit code cannot tell us if there was drift. Ask git instead.
+          if git diff --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
 
-            if (issues.data.length > 0) {
-              // Update existing issue
-              await github.rest.issues.update({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: issues.data[0].number,
-                body: body,
-              });
-              console.log(`Updated issue #${issues.data[0].number}`);
-            } else {
-              // Ensure label exists
-              try {
-                await github.rest.issues.getLabel({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  name: label,
-                });
-              } catch {
-                await github.rest.issues.createLabel({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  name: label,
-                  color: '0075ca',
-                  description: 'Automated upstream config drift detection',
-                });
-              }
+          # git alone is not enough. The script reports three kinds of drift it
+          # never writes to disk, each bumping its "changed" counter without
+          # touching the working tree:
+          #   - a manifest entry whose local file is missing
+          #   - curated package drift against core, which has no --update path
+          #   - a transform patch conflict, which counts and then skips the file
+          # Its own summary counters are the only signal, and "changed" minus
+          # "updated" is the unapplied remainder. Note the third category also
+          # shows up in `conflicts` below, so the two signals deliberately overlap.
+          #
+          # `|| true` on the grep pipelines below: grep exits 1 when it matches
+          # nothing, which is normal here. Harmless under this job's shell
+          # (unspecified, so `bash -e` without pipefail, where a pipeline takes
+          # its last command's status), but adding `shell: bash` anywhere would
+          # enable pipefail and abort the step mid-way on ordinary runs. The
+          # values are unaffected: tail prints nothing and awk prints 0 already.
+          #
+          # tail -1 is load-bearing: upstream diff content could contain a forged
+          # "Summary:" line, and the script's real one is always printed last.
+          summary=$(printf '%s\n' "$output" | grep -E '^Summary:' | tail -1 || true)
+          drift=$(printf '%s' "$summary" | sed -n 's/.*, \([0-9]\{1,\}\) changed.*/\1/p')
+          applied=$(printf '%s' "$summary" | sed -n 's/.*, \([0-9]\{1,\}\) updated.*/\1/p')
+          unapplied=$(( ${drift:-0} - ${applied:-0} ))
+          [ "$unapplied" -lt 0 ] && unapplied=0
 
-              // Create new issue
-              const issue = await github.rest.issues.create({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                title: title,
-                body: body,
-                labels: [label],
-              });
-              console.log(`Created issue #${issue.data.number}`);
-            }
+          echo "unapplied=${unapplied}" >> "$GITHUB_OUTPUT"
+          echo "Reported drift: ${drift:-0}, applied: ${applied:-0}, unapplied: ${unapplied}"
+
+          # Read this off the summary line only. Scanning the whole output would
+          # also match the phrase appearing inside a fetched upstream diff.
+          conflicts=false
+          if printf '%s' "$summary" | grep -q 'patch conflict'; then
+            conflicts=true
+          fi
+          echo "conflicts=${conflicts}" >> "$GITHUB_OUTPUT"
+
+          # One explicit signal for "a human must look at this". Anything that is
+          # not a clean run has to reach a surface: the worst outcome for a drift
+          # detector is a green run that reported nothing. In --update mode the
+          # script exits 0 on a clean pass. Exit 2 is a complete run that hit
+          # fetch errors - it skips the failed entry and still prints its
+          # summary - whereas any other nonzero code, or a missing summary line,
+          # means it aborted before finishing.
+          attention=false
+          if [ "$exit_code" -ne 0 ]; then attention=true; fi
+          if [ "$unapplied" -gt 0 ]; then attention=true; fi
+          if [ -z "$summary" ]; then attention=true; fi
+          if [ "$conflicts" = 'true' ]; then attention=true; fi
+
+          echo "attention=${attention}" >> "$GITHUB_OUTPUT"
+          echo "Needs human attention: ${attention}"
+
+          # Both report bodies fence this output. Pick a fence longer than the
+          # longest backtick run in it so upstream content can never close the
+          # block early; a fixed width can always be beaten. Computed once here
+          # rather than repeated in each consuming step.
+          run_len=$(printf '%s\n' "$output" | grep -o '`\{1,\}' | awk '{ if (length($0) > m) m = length($0) } END { print m + 0 }' || true)
+          fence_len=$(( run_len < 3 ? 3 : run_len + 1 ))
+          fence=$(printf '%*s' "$fence_len" '' | tr ' ' '`')
+          echo "fence=${fence}" >> "$GITHUB_OUTPUT"
+
+      - name: Push the sync branch
+        id: push
+        if: steps.sync.outputs.changed == 'true'
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+          git checkout -B "$SYNC_BRANCH"
+          git add -A
+          git commit -m "Sync vendored configs with upstream" \
+                     -m "Applied automatically by the upstream config check. The pull request body carries the full comparison report."
+
+          # This branch is owned by the automation and is rebuilt from the
+          # default branch on every run, so replacing it wholesale is intended.
+          git push --force origin "$SYNC_BRANCH"
+
+      - name: Open or update the pull request
+        id: pr
+        if: steps.sync.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ATTENTION: ${{ steps.sync.outputs.attention }}
+          FENCE: ${{ steps.sync.outputs.fence }}
+        run: |
+          # Never trust GITHUB_REF_NAME for the base. On workflow_dispatch it is
+          # whatever ref the invoker picked, which would silently retarget the
+          # pull request. Ask the repository what its default branch actually is.
+          #
+          # Deliberately a live query rather than the github.event.repository
+          # expression used for the checkout ref. An empty value is survivable
+          # there (checkout falls back to the triggering ref) but not here, where
+          # it would break `gh pr create` outright.
+          base_branch=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')
+
+          {
+            cat <<'MD'
+          The upstream config check found drift and applied it to the vendored assets on this branch.
+
+          > [!IMPORTANT]
+          > **Close this pull request and reopen it before reviewing.**
+          >
+          > It was opened by `GITHUB_TOKEN`, and GitHub does not emit `pull_request`
+          > events for token-authored pull requests, so the required checks
+          > (`maintenance-checker`, `tests (stable)`, `tests (HEAD)`) never start.
+          > Reopening it counts as a human action and starts all three normally.
+          MD
+            # Warn whenever anything at all needs a human, not just patch
+            # conflicts: curated package drift, a missing local file, a fetch
+            # failure and an aborted script all leave work outside this branch,
+            # and a reviewer reading only the pull request would never know.
+            # Driven by the single attention signal rather than a re-derived
+            # copy, because that signal is exactly what decides whether the
+            # companion issue this warning points at gets filed at all.
+            if [ "$ATTENTION" = 'true' ]; then
+              cat <<'MD'
+
+          > [!WARNING]
+          > Some drift could not be applied automatically, so this pull request is
+          > incomplete. Check the open `upstream-sync` issue for the remainder - it is
+          > filed by a later step of the same run, so its absence means that step failed.
+          MD
+            fi
+            printf '\n%s\n%s\n%s\n\n' "$FENCE" "$SYNC_OUTPUT" "$FENCE"
+            cat <<'MD'
+          ## Validation
+
+          The test suite is also dispatched against this branch by a later step of this
+          run, which gives an early signal without waiting for the reopen. Those runs
+          report in the Actions tab rather than as checks below:
+          MD
+            printf '\n<https://github.com/%s/actions/workflows/tests.yml?query=branch%%3A%s>\n\n' \
+              "$GITHUB_REPOSITORY" "$SYNC_BRANCH"
+            cat <<'MD'
+          To validate locally, including the full Drupal install test:
+
+          ```bash
+          MD
+            printf 'git fetch origin %s && git checkout %s\n' "$SYNC_BRANCH" "$SYNC_BRANCH"
+            cat <<'MD'
+          DCQ_FULL_TESTS=1 bats --jobs 4 ./tests/test.bats
+          ```
+          MD
+          } > pr-body.md
+
+          # Match on base as well as head. A pull request left pointing at the
+          # wrong base would otherwise be found by head alone and only have its
+          # body edited, since `gh pr edit` cannot retarget an existing base.
+          existing=$(gh pr list \
+            --head "$SYNC_BRANCH" \
+            --base "$base_branch" \
+            --state open \
+            --json number,isCrossRepository \
+            --jq '[.[] | select(.isCrossRepository == false)] | .[0].number // empty')
+
+          if [ -n "$existing" ]; then
+            gh pr edit "$existing" --body-file pr-body.md
+            echo "Updated pull request #${existing}"
+          elif gh pr create \
+            --base "$base_branch" \
+            --head "$SYNC_BRANCH" \
+            --title 'Sync vendored configs with upstream' \
+            --body-file pr-body.md \
+            --label "$SYNC_LABEL"; then
+            echo 'Opened a new pull request.'
+          else
+            # gh pr create is not an upsert. If a pull request already exists for
+            # this branch - typically one a maintainer closed while leaving the
+            # branch behind - creating fails, so try to adopt that one rather
+            # than losing the report. If nothing adoptable is found, or it
+            # cannot be reopened, the step fails loudly below.
+            echo 'Create failed; looking for an existing pull request on this branch.' >&2
+
+            # Match base here too. Adopting a pull request that targets a
+            # different base would rewrite its body while leaving it pointed
+            # somewhere stale, and `gh pr edit` cannot retarget a base - the
+            # same trap the primary lookup above avoids.
+            #
+            # Exclude merged pull requests: they cannot be reopened, so adopting
+            # one would leave the run claiming success with nothing open.
+            prior=$(gh pr list \
+              --head "$SYNC_BRANCH" \
+              --base "$base_branch" \
+              --state all \
+              --limit 100 \
+              --json number,state,isCrossRepository \
+              --jq '[.[] | select(.isCrossRepository == false and .state != "MERGED")]
+                    | .[0].number // empty')
+
+            if [ -z "$prior" ]; then
+              # Surface a wrong-base pull request rather than quietly adopting it.
+              mismatched=$(gh pr list \
+                --head "$SYNC_BRANCH" \
+                --state all \
+                --limit 100 \
+                --json number,state,baseRefName,isCrossRepository \
+                --jq '[.[] | select(.isCrossRepository == false and .state != "MERGED")]
+                      | .[0] | select(. != null) | "#\(.number) -> \(.baseRefName)"')
+
+              if [ -n "$mismatched" ]; then
+                echo "A pull request for this branch exists but targets a different base: ${mismatched}" >&2
+                echo "Expected base ${base_branch}. Retarget or close it; refusing to rewrite it." >&2
+              else
+                echo 'No existing pull request found either; giving up.' >&2
+              fi
+              exit 1
+            fi
+
+            gh pr reopen "$prior" 2>/dev/null || true
+            gh pr edit "$prior" --body-file pr-body.md
+
+            # Editing a closed pull request succeeds, so confirm it is actually
+            # open rather than reporting success over a body nobody will see.
+            state=$(gh pr view "$prior" --json state --jq '.state')
+            if [ "$state" != 'OPEN' ]; then
+              echo "Pull request #${prior} is ${state} and could not be reopened." >&2
+              echo 'Close it out or delete the branch so a fresh one can be created.' >&2
+              exit 1
+            fi
+
+            echo "Adopted pull request #${prior}"
+          fi
+
+      # Two halves, both load-bearing:
+      #
+      # !cancelled() replaces the implicit success() that a plain `if:` gets, so
+      # a failed push or pull request step cannot skip this step - the very
+      # outcome it exists to report.
+      #
+      # `|| failure()` covers the rest: attention is computed before push and
+      # pull request run, so a clean sync whose pull request then fails leaves
+      # attention false. Naming any status function suppresses the implicit
+      # success(), so without `|| failure()` the condition would simply evaluate
+      # false and skip the step - and that drift would reach no surface at all.
+      #
+      # Ordered ahead of the test dispatch so a transient dispatch failure
+      # cannot suppress it either.
+      - name: Report drift that could not be applied
+        if: ${{ !cancelled() && (steps.sync.outputs.attention == 'true' || failure()) }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HAS_CONFLICTS: ${{ steps.sync.outputs.conflicts }}
+          EXIT_CODE: ${{ steps.sync.outputs.exit_code }}
+          CHANGED: ${{ steps.sync.outputs.changed }}
+          UNAPPLIED: ${{ steps.sync.outputs.unapplied }}
+          FENCE: ${{ steps.sync.outputs.fence }}
+          PUSH_OUTCOME: ${{ steps.push.outcome }}
+          PR_OUTCOME: ${{ steps.pr.outcome }}
+        run: |
+          {
+            cat <<'MD'
+          The upstream config check could not complete automatically.
+
+          MD
+            if [ -z "$EXIT_CODE" ]; then
+              # failure() brings us here even if the job died before the sync
+              # step ran, in which case every output is an empty string and the
+              # bullets below would render as nonsense.
+              echo '- The run failed before the sync step completed, so there is no drift'
+              echo '  report to show. Check the job log for the step that failed.'
+            elif [ "$EXIT_CODE" = '2' ]; then
+              echo '- One or more upstream files could not be fetched.'
+            elif [ "$EXIT_CODE" != '0' ]; then
+              printf -- '- The sync script exited %s. In --update mode it should always exit 0,\n' "$EXIT_CODE"
+              echo '  so it aborted partway through. The log below is likely truncated.'
+            fi
+            if [ "$HAS_CONFLICTS" = 'true' ]; then
+              echo '- One or more transforms hit a patch conflict and were left unapplied.'
+            fi
+            if [ "${UNAPPLIED:-0}" -gt 0 ]; then
+              printf -- '- %s drift item(s) were reported but not written to disk. That covers a\n' "$UNAPPLIED"
+              echo '  manifest entry whose local file is missing, curated package drift against'
+              echo '  core, and any patch conflict above - the sync script cannot apply these'
+              echo '  automatically, so this count overlaps the patch-conflict line when both occur.'
+            fi
+            if [ "$PUSH_OUTCOME" = 'failure' ]; then
+              echo '- Pushing the sync branch failed, so no pull request exists. The applied'
+              echo '  drift is not published anywhere; re-run once the cause is cleared.'
+            fi
+            if [ "$PR_OUTCOME" = 'failure' ]; then
+              # shellcheck disable=SC2016  # the backticks are literal markdown
+              printf -- '- The sync branch `%s` was pushed, but opening or\n' "$SYNC_BRANCH"
+              echo '  updating its pull request failed. The applied drift is on that branch and'
+              echo '  is currently unreviewed - open a pull request for it by hand, or re-run.'
+            fi
+            # Only claim a pull request exists if the step that opens one succeeded.
+            if [ "$CHANGED" = 'true' ] && [ "$PR_OUTCOME" = 'success' ]; then
+              echo '- Drift that *could* be applied was opened as a pull request; this issue covers only the remainder.'
+            fi
+            printf '\n%s\n%s\n%s\n\n' "$FENCE" "$SYNC_OUTPUT" "$FENCE"
+            cat <<'MD'
+          Run `./scripts/sync-upstream-configs.sh --update` locally to investigate, then
+          `DCQ_FULL_TESTS=1 bats --jobs 4 ./tests/test.bats` to validate.
+          MD
+          } > issue-body.md
+
+          # Match the title too. The label is not owned by this workflow, so any
+          # hand-labelled issue would otherwise be found first and overwritten.
+          # --limit, because the title filter runs client side: with the default
+          # page size the canonical issue could fall outside the results and a
+          # duplicate would be created alongside it.
+          existing=$(gh issue list \
+            --label "$SYNC_LABEL" \
+            --state open \
+            --limit 100 \
+            --json number,title \
+            --jq '[.[] | select(.title == "Upstream config check needs attention")] | .[0].number // empty')
+
+          if [ -n "$existing" ]; then
+            gh issue edit "$existing" --body-file issue-body.md
+            echo "Updated issue #${existing}"
+          else
+            gh issue create \
+              --title 'Upstream config check needs attention' \
+              --body-file issue-body.md \
+              --label "$SYNC_LABEL"
+          fi
+
+      - name: Dispatch the test suite against the sync branch
+        if: steps.sync.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run tests.yml --ref "$SYNC_BRANCH"
+
+      # The reporting step above has already run, so the drift should be
+      # recorded in an issue - check that step's outcome if not. Redden the run
+      # regardless: in --update mode the script should always exit 0, so any
+      # other code is a genuine failure and should look like one in the Actions
+      # tab rather than passing quietly with an issue off to one side.
+      - name: Fail the run when the sync script did not complete
+        if: ${{ !cancelled() && steps.sync.outputs.exit_code != '0' }}
+        run: |
+          echo "sync-upstream-configs.sh exited ${EXIT_CODE}." >&2
+          if [ "$EXIT_CODE" = '2' ]; then
+            echo 'Exit 2 means one or more upstream files could not be fetched.' >&2
+          else
+            echo 'In --update mode it should exit 0, so it aborted partway through.' >&2
+          fi
+          exit 1
+        env:
+          EXIT_CODE: ${{ steps.sync.outputs.exit_code }}

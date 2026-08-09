@@ -900,8 +900,8 @@ PY
   write_minimal_composer_json "composer.json"
 
   # Add SCSS files so the SCSS detection path is exercised.
-  # Node install is declined in this test, so the SCSS prompt won't appear
-  # (it requires node_mode != skip), but summary guidance should.
+  # There is no web/core/package.json here, so the Node phase (and with it
+  # the SCSS prompt) never runs; only the summary guidance should appear.
   mkdir -p web/themes/custom/dcq_theme/src/sass
   cat > web/themes/custom/dcq_theme/src/sass/style.scss <<'SCSS'
 $color: red;
@@ -1570,8 +1570,9 @@ SCSS
   run ddev add-on get "${DIR}"
   assert_success
 
-  # Non-interactive install with SCSS files should print guidance,
-  # not silently configure SCSS support.
+  # With no core package.json the Node phase (and SCSS auto-setup) cannot
+  # run, so the install must still surface the gap with manual guidance
+  # instead of staying silent.
   assert_output --partial "SCSS"
   assert_output --partial "stylelint-config-standard-scss"
   assert_output --partial "DCQ_STYLELINT_GLOBS"
@@ -1603,10 +1604,21 @@ SCSS
 $color: red;
 SCSS
 
-  # Both conditions: stylelintrc references scss AND DDEV config has scss globs.
+  # All three conditions: stylelintrc references scss, DDEV config has scss
+  # globs, and the config package is declared in package.json.
   cat > .stylelintrc.json <<'JSON'
 {
   "extends": ["stylelint-config-standard-scss"]
+}
+JSON
+  cat > package.json <<'JSON'
+{
+  "name": "dcq-test",
+  "private": true,
+  "devDependencies": {
+    "stylelint": "^16.25.0",
+    "stylelint-config-standard-scss": "^16.0.0"
+  }
 }
 JSON
   cat > .ddev/config.drupal-code-quality.yaml <<'YAML'
@@ -1668,6 +1680,119 @@ CSS
   # No SCSS guidance should appear.
   refute_output --partial "stylelint-config-standard-scss"
   refute_output --partial "DCQ_STYLELINT_GLOBS"
+}
+
+@test "non-interactive install enables SCSS globs even when node deps are skipped" {
+  set -u -o pipefail
+  export DCQ_INSTALL_DEPS=skip
+  export DCQ_INSTALL_NODE_DEPS=skip
+
+  # A core package.json lets the Node phase (and SCSS detection) run even
+  # though the toolchain install itself is skipped.
+  mkdir -p web/core
+  write_stub_package_json "web/core/package.json"
+
+  mkdir -p web/themes/custom/dcq_theme/src/sass
+  cat > web/themes/custom/dcq_theme/src/sass/style.scss <<'SCSS'
+$color: red;
+SCSS
+
+  # Pre-existing customized add-on config: the globs write must merge into
+  # it, not overwrite it.
+  mkdir -p .ddev
+  cat > .ddev/config.drupal-code-quality.yaml <<'YAML'
+# Drupal Code Quality add-on configuration.
+web_environment:
+  - "DCQ_ESLINT_QUIET=0"
+YAML
+
+  run ddev add-on get "${DIR}"
+  assert_success
+
+  # The recommended default (DCQ_SCSS_SUPPORT=install) applies: scan globs
+  # are written, and since the config package could not be installed the
+  # summary lists the remaining manual steps.
+  assert_output --partial "enabling Stylelint SCSS support"
+  assert_output --partial "SCSS Setup (complete these steps to finish)"
+  assert_file_exist ".ddev/config.drupal-code-quality.yaml"
+  run cat .ddev/config.drupal-code-quality.yaml
+  assert_success
+  assert_output --partial 'DCQ_STYLELINT_GLOBS=**/*.css **/*.scss'
+  # Custom entries survive the SCSS globs update.
+  assert_output --partial 'DCQ_ESLINT_QUIET=0'
+}
+
+@test "DCQ_SCSS_SUPPORT=skip leaves stylelint CSS-only" {
+  set -u -o pipefail
+  export DCQ_INSTALL_DEPS=skip
+  export DCQ_INSTALL_NODE_DEPS=skip
+  export DCQ_SCSS_SUPPORT=skip
+
+  mkdir -p web/core
+  write_stub_package_json "web/core/package.json"
+  # A real root package.json makes the "package was not added" assertions
+  # below meaningful rather than true by construction.
+  write_stub_package_json "package.json"
+
+  mkdir -p web/themes/custom/dcq_theme/src/sass
+  cat > web/themes/custom/dcq_theme/src/sass/style.scss <<'SCSS'
+$color: red;
+SCSS
+
+  run ddev add-on get "${DIR}"
+  assert_success
+
+  assert_output --partial "skipping SCSS setup (DCQ_SCSS_SUPPORT=skip)"
+  assert_output --partial "SCSS support was not installed."
+  # The dependency must not have been added to the project manifest.
+  run cat package.json
+  assert_success
+  refute_output --partial "stylelint-config-standard-scss"
+  # Guard against a vacuous pass: the config file must exist and be readable
+  # before asserting it lacks the SCSS globs.
+  assert_file_exist ".ddev/config.drupal-code-quality.yaml"
+  run cat .ddev/config.drupal-code-quality.yaml
+  assert_success
+  assert_output --partial "DCQ_STYLELINT_GLOBS"
+  refute_output --partial '**/*.scss'
+  # Skip must leave the stylelint config and dependencies untouched too.
+  assert_file_exist ".stylelintrc.json"
+  run cat .stylelintrc.json
+  assert_success
+  assert_output --partial '"stylelint-config-standard"'
+  refute_output --partial "stylelint-config-standard-scss"
+  assert_file_not_exist "node_modules/stylelint-config-standard-scss"
+}
+
+# bats test_tags=node
+@test "non-interactive install configures SCSS support end to end" {
+  set -u -o pipefail
+  export DCQ_INSTALL_DEPS=skip
+  export DCQ_INSTALL_NODE_DEPS=install
+  mkdir -p web/core
+  write_stub_package_json "web/core/package.json"
+  write_stub_package_json "package.json"
+  write_stub_package_lock "package-lock.json"
+
+  mkdir -p web/themes/custom/dcq_theme/src/sass
+  cat > web/themes/custom/dcq_theme/src/sass/style.scss <<'SCSS'
+$color: red;
+SCSS
+
+  run ddev add-on get "${DIR}"
+  assert_success
+
+  # Full automation: package installed, extends swapped, globs written.
+  assert_output --partial "enabling Stylelint SCSS support"
+  assert_output --partial "Updated .stylelintrc.json to extend stylelint-config-standard-scss."
+  assert_output --partial "SCSS support configured:"
+  refute_output --partial "complete these steps to finish"
+  assert_container_file_exist "/var/www/html/node_modules/stylelint-config-standard-scss/package.json"
+  run cat .stylelintrc.json
+  assert_output --partial '"stylelint-config-standard-scss"'
+  refute_output --partial '"stylelint-config-standard",'
+  run cat .ddev/config.drupal-code-quality.yaml
+  assert_output --partial 'DCQ_STYLELINT_GLOBS=**/*.css **/*.scss'
 }
 
 @test "prettier-fix fails with helpful message when project config is missing" {

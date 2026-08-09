@@ -253,6 +253,18 @@ and filter by `@recommended` to find them.
   exists), `install`/`true` to auto-install in the project root, `skip`/`false`
   to skip, or unset to prompt (default: install in the project root). The
   installer selects npm/yarn based on existing lockfiles.
+- `DCQ_SCSS_SUPPORT`: `install`/`true` to configure Stylelint SCSS support when
+  `.scss`/`.sass` files are detected (adds `stylelint-config-standard-scss` to
+  the Node toolchain install, switches the `.stylelintrc.json` `extends` entry
+  to it when the shipped config can be updated automatically, and sets
+  `DCQ_STYLELINT_GLOBS` to include `**/*.scss` in
+  `.ddev/config.drupal-code-quality.yaml`), `skip`/`false` to leave Stylelint
+  CSS-only, or unset to prompt when interactive. Recommended-settings and
+  non-interactive installs default to `install`, so SCSS projects get SCSS
+  linting without declining the recommended path. If the config package cannot
+  be installed (for example when Node tooling is skipped) or `.stylelintrc.json`
+  has a custom `extends` list, the install summary lists the remaining manual
+  steps.
 - `DCQ_INSTALL_GITIGNORE`: `add`/`true` to add `dcq-reports/` to `.gitignore`
   without prompting, `skip`/`false` to skip, or unset to prompt when interactive
   (default: yes).

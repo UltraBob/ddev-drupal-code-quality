@@ -12,6 +12,7 @@
 # - DCQ_NONINTERACTIVE / DDEV_NONINTERACTIVE: disable prompts
 # - DCQ_INSTALL_DEPS: install|skip (PHP dev tools)
 # - DCQ_INSTALL_NODE_DEPS: root|install|skip (JS tooling)
+# - DCQ_SCSS_SUPPORT: install|skip (Stylelint SCSS support when .scss files are detected)
 # - DCQ_INSTALL_GITIGNORE: add|skip (dcq-reports entry)
 # - DCQ_INSTALL_IDE_SETTINGS: merge|overwrite|skip (IDE settings)
 # - DCQ_VERBOSE: 1|true (enable debug WRITE output, default: disabled)
@@ -597,11 +598,23 @@ maybe_install_missing_root_deps() {
   local package_manager="$3"
   local auto_add="${4:-0}"
   local suppress_list="${5:-0}"
+  local extra_deps="${6:-}"
   local missing_node_deps
 
   if ! missing_node_deps="$(find_missing_node_deps "$ddev_cmd")"; then
     emit 'Failed to compute missing Node dependencies.\n'
     return 1
+  fi
+
+  # Callers can request packages beyond the curated/core-derived set
+  # (e.g. stylelint-config-standard-scss for SCSS support).
+  if [ -n "$extra_deps" ]; then
+    if [ -n "$missing_node_deps" ]; then
+      missing_node_deps="${missing_node_deps}
+${extra_deps}"
+    else
+      missing_node_deps="$extra_deps"
+    fi
   fi
 
   if [ -z "$missing_node_deps" ]; then
@@ -842,6 +855,7 @@ print_recommended_settings_summary() {
   emit '  - If a copied config file already exists, the installer will create a backup and then replace the file.\n'
   emit '  - Install missing PHP tooling via drupal/core-dev, including PHPStan, PHPCS, PHPCBF, and Drupal coding standards.\n'
   emit '  - Install Node tooling in the project root, including ESLint, Stylelint, Prettier, and CSpell dependencies.\n'
+  emit '  - If SCSS files are detected, configure Stylelint SCSS support (stylelint-config-standard-scss plus SCSS scan globs).\n'
   emit '  - Set phpstan.neon level to 3 as a practical local default.\n'
   emit '  - Merge DCQ VS Code/Codium settings into .vscode/settings.json and extension recommendations into .vscode/extensions.json.\n'
   emit "  - Add 'dcq-reports/' to .gitignore so generated check logs and patch previews are not committed.\n"
@@ -885,6 +899,38 @@ prompt_ide_settings_mode() {
     s|skip|manual) PROMPT_IDE_MODE_RESULT="skip" ;;
     *) PROMPT_IDE_MODE_RESULT="skip" ;;
   esac
+}
+
+update_stylelint_scss_extends() {
+  # Point the project stylelint config at the SCSS-capable shared config by
+  # swapping the exact "stylelint-config-standard" extends entry. Returns 1
+  # when the file is missing or uses a custom extends list we should not touch.
+  local config_path="$1"
+  local tmp
+
+  if [ ! -f "$config_path" ]; then
+    return 1
+  fi
+  if grep -q '"stylelint-config-standard-scss"' "$config_path"; then
+    return 0
+  fi
+  if ! grep -q '"stylelint-config-standard"' "$config_path"; then
+    return 1
+  fi
+
+  tmp="$(mktemp "${TMPDIR:-/tmp}/dcq-stylelintrc-XXXXXX")"
+  if ! sed 's/"stylelint-config-standard"/"stylelint-config-standard-scss"/' "$config_path" >"$tmp"; then
+    rm -f "$tmp"
+    return 1
+  fi
+  # Explicit failure check: this function is used in && conditions, where
+  # errexit is suppressed and a failed write must not report success.
+  if ! cat "$tmp" >"$config_path"; then
+    rm -f "$tmp"
+    return 1
+  fi
+  rm -f "$tmp"
+  return 0
 }
 
 set_phpstan_level() {
@@ -1865,6 +1911,101 @@ detect_scss_files() {
     -o -type f \( -name '*.scss' -o -name '*.sass' \) -print -quit 2>/dev/null | grep -q .
 }
 
+write_scss_globs_config() {
+  # Add or update the DCQ_STYLELINT_GLOBS entry in the add-on config file
+  # without discarding other web_environment entries or comments.
+  local config_path="$1"
+  local glob_line='  - "DCQ_STYLELINT_GLOBS=**/*.css **/*.scss"'
+  local tmp
+
+  if [ ! -f "$config_path" ]; then
+    {
+      printf '# Drupal Code Quality add-on configuration.\n'
+      printf 'web_environment:\n'
+      printf '%s\n' "$glob_line"
+    } > "$config_path"
+    return 0
+  fi
+
+  tmp="$(mktemp "${TMPDIR:-/tmp}/dcq-config-XXXXXX")"
+  if grep -q '^[[:space:]]*-[[:space:]]*["'\'']\{0,1\}DCQ_STYLELINT_GLOBS=' "$config_path"; then
+    # Replace the existing (uncommented) entry in place.
+    sed 's|^[[:space:]]*-[[:space:]]*["'\'']\{0,1\}DCQ_STYLELINT_GLOBS=.*|  - "DCQ_STYLELINT_GLOBS=**/*.css **/*.scss"|' \
+      "$config_path" > "$tmp"
+  elif grep -q '^web_environment:' "$config_path"; then
+    # Insert the entry under the existing web_environment key.
+    awk -v glob="$glob_line" '{ print; if (!done && $0 ~ /^web_environment:/) { print glob; done = 1 } }' \
+      "$config_path" > "$tmp"
+  else
+    cat "$config_path" > "$tmp"
+    # Guard against a file with no trailing newline before appending.
+    if [ -n "$(tail -c 1 "$tmp" 2>/dev/null)" ]; then
+      printf '\n' >> "$tmp"
+    fi
+    printf 'web_environment:\n%s\n' "$glob_line" >> "$tmp"
+  fi
+
+  # The file now carries a project-specific setting; drop the #ddev-generated
+  # marker (and its explainer line) so add-on updates do not overwrite it.
+  # Delete every exact marker line so a malformed header cannot leave one.
+  if grep -q '^#ddev-generated$' "$tmp"; then
+    sed -e '/^#ddev-generated$/d' -e '/^# Remove the line above if you customize/d' "$tmp" > "${tmp}.2"
+    mv "${tmp}.2" "$tmp"
+  fi
+
+  if ! cat "$tmp" > "$config_path"; then
+    rm -f "$tmp"
+    return 1
+  fi
+  rm -f "$tmp"
+  return 0
+}
+
+scss_config_package_spec() {
+  # Choose a stylelint-config-standard-scss version compatible with the
+  # project's stylelint major: latest resolves to a peer of stylelint ^17,
+  # which conflicts with the stylelint 16 that Drupal core currently pins.
+  # From v17 the config package version tracks the stylelint major; earlier
+  # stylelint majors map to fixed config majors (16.x -> ^16, 15.x -> ^11).
+  local app_root="$1"
+  local range=""
+  local major=""
+  local pkg
+  local candidate
+
+  for pkg in "${app_root%/}/package.json" "${app_root%/}/${DCQ_DOCROOT:-web}/core/package.json"; do
+    if [ -f "$pkg" ]; then
+      # A "stylelint" key can also be a scripts entry whose value is a shell
+      # command; only accept values that look like a semver range.
+      while IFS= read -r candidate; do
+        case "$candidate" in
+          [0-9^~\>\<=]*)
+            range="$candidate"
+            break
+            ;;
+        esac
+      done <<DCQEOF
+$(sed -n 's/.*"stylelint"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$pkg")
+DCQEOF
+      if [ -n "$range" ]; then
+        break
+      fi
+    fi
+  done
+  major="$(printf '%s' "$range" | sed -n 's/^[^0-9]*\([0-9][0-9]*\).*/\1/p')"
+
+  if [ -n "$major" ] && [ "$major" -ge 17 ]; then
+    printf 'stylelint-config-standard-scss@^%s' "$major"
+  elif [ "$major" = "16" ]; then
+    printf 'stylelint-config-standard-scss@^16'
+  elif [ "$major" = "15" ]; then
+    printf 'stylelint-config-standard-scss@^11'
+  else
+    # Unknown stylelint version; let the package manager resolve latest.
+    printf 'stylelint-config-standard-scss'
+  fi
+}
+
 run_command() {
   # Echo and execute a command (simple transparency for users).
   # In interactive installs we route output through a small sanitizer to drop
@@ -1996,6 +2137,7 @@ if [ "$non_interactive" -eq 1 ] || [ "$recommended_mode" -eq 1 ]; then
   set_default_env "DCQ_INSTALL_MODE" "replace"
   set_default_env "DCQ_INSTALL_DEPS" "install"
   set_default_env "DCQ_INSTALL_NODE_DEPS" "root"
+  set_default_env "DCQ_SCSS_SUPPORT" "install"
   set_default_env "DCQ_PHPSTAN_LEVEL" "3"
   set_default_env "DCQ_INSTALL_IDE_SETTINGS" "merge"
   set_default_env "DCQ_INSTALL_GITIGNORE" "add"
@@ -2482,6 +2624,88 @@ if [ "$core_package_json_present" -eq 1 ]; then
     fi
   fi
 
+  # Detect SCSS files before the Node phase so the setup decision exists in
+  # time for the dependency install, and independent of DCQ_INSTALL_NODE_DEPS
+  # so DCQ_SCSS_SUPPORT still applies when the toolchain install is skipped.
+  scss_install_scss="false"
+  if detect_scss_files "$app_root"; then
+    # Check if SCSS support is already fully configured.
+    # Both conditions must be true: a stylelint config references scss AND
+    # the DDEV env var includes scss globs.
+    scss_has_config=false
+    scss_has_globs=false
+    scss_has_package=false
+    # Match live Stylelint config filenames only; backup files such as
+    # .stylelintrc.json.bak or .stylelintrc.json.old must not count as
+    # live configuration.
+    if find "$app_root" -maxdepth 4 \
+         -type d \( -name node_modules -o -name vendor -o -name .git -o -name .ddev \) -prune \
+         -o -type f \( -name '.stylelintrc' -o -name '.stylelintrc.json' \
+           -o -name '.stylelintrc.yaml' -o -name '.stylelintrc.yml' \
+           -o -name '.stylelintrc.js' -o -name '.stylelintrc.cjs' -o -name '.stylelintrc.mjs' \
+           -o -name 'stylelint.config.js' -o -name 'stylelint.config.cjs' \
+           -o -name 'stylelint.config.mjs' -o -name 'stylelint.config.ts' \) \
+         -print0 2>/dev/null \
+       | xargs -0 grep -lq 'scss' 2>/dev/null; then
+      scss_has_config=true
+    fi
+    # Only an uncommented list entry counts: a commented-out example glob
+    # line must not read as active SCSS configuration.
+    if grep -rlq '^[[:space:]]*-[[:space:]]*["'\'']\{0,1\}DCQ_STYLELINT_GLOBS=.*scss' "${app_root%/}/.ddev/"*.yaml 2>/dev/null; then
+      scss_has_globs=true
+    fi
+    # A config that extends the SCSS package without declaring it leaves
+    # stylelint broken; treat that as not configured so the dependency is
+    # topped up (the extends swap is a no-op on already-SCSS configs).
+    if grep -q '"stylelint-config-standard-scss"' "${app_root%/}/package.json" 2>/dev/null; then
+      scss_has_package=true
+    fi
+    scss_already_configured=false
+    if [ "$scss_has_config" = true ] && [ "$scss_has_globs" = true ] && [ "$scss_has_package" = true ]; then
+      scss_already_configured=true
+    fi
+
+    # DCQ_SCSS_SUPPORT is set by the user, or defaulted to "install" in
+    # recommended/non-interactive mode; unset means prompt interactively.
+    scss_support_mode="$(string_lower "${DCQ_SCSS_SUPPORT:-}")"
+    case "$scss_support_mode" in
+      1|true|yes|on) scss_support_mode="install" ;;
+      0|false|no|off) scss_support_mode="skip" ;;
+      ""|install|skip) : ;;
+      *)
+        emit 'Unknown DCQ_SCSS_SUPPORT value "%s"; skipping SCSS setup.\n' "$scss_support_mode"
+        scss_support_mode="skip"
+        ;;
+    esac
+
+    if [ "$scss_already_configured" = true ]; then
+      scss_detected="configured"
+      emit 'SCSS files detected — SCSS support appears to be configured already.\n'
+    elif [ "$scss_support_mode" = "skip" ]; then
+      scss_detected="declined"
+      emit 'SCSS files detected; skipping SCSS setup (DCQ_SCSS_SUPPORT=skip).\n'
+    elif [ "$scss_support_mode" = "install" ]; then
+      scss_install_scss="true"
+      scss_detected="pending"
+      emit 'SCSS files detected — enabling Stylelint SCSS support.\n'
+    elif [ "$non_interactive" -eq 0 ] && [ "${PROMPT_AVAILABLE:-0}" -eq 1 ]; then
+      emit '\nYour project contains SCSS files, but Stylelint is currently configured\n'
+      emit 'to check CSS only. Would you like to set up SCSS support? [Y/n] '
+      scss_answer=""
+      if IFS= read -r -u "$PROMPT_IN_FD" scss_answer; then
+        scss_answer="$(printf '%s' "$scss_answer" | tr -d '\r\n')"
+      fi
+      if [ -z "$scss_answer" ] || [ "$scss_answer" = "y" ] || [ "$scss_answer" = "Y" ]; then
+        scss_install_scss="true"
+        scss_detected="pending"
+      else
+        scss_detected="declined"
+      fi
+    else
+      scss_detected="true"
+    fi
+  fi
+
   if [ "$node_mode_raw" != "skip" ] || [ "$skip_due_to_existing_toolchain" -eq 1 ]; then
     ddev_cmd="${DDEV_EXECUTABLE:-ddev}"
     root_package_json="${app_root%/}/package.json"
@@ -2497,8 +2721,15 @@ if [ "$core_package_json_present" -eq 1 ]; then
         if [ "$root_pm" = "yarn" ]; then
           ensure_root_yarnrc "$app_root"
         fi
+        # Include the SCSS config package in the top-up when SCSS support
+        # was enabled and the package is not declared yet.
+        scss_extra_dep=""
+        if [ "$scss_install_scss" = "true" ] \
+          && ! grep -q '"stylelint-config-standard-scss"' "${app_root%/}/package.json" 2>/dev/null; then
+          scss_extra_dep="$(scss_config_package_spec "$app_root")"
+        fi
         existing_deps_status=0
-        maybe_install_missing_root_deps "$ddev_cmd" "$non_interactive" "$root_pm" 0 0 || existing_deps_status=$?
+        maybe_install_missing_root_deps "$ddev_cmd" "$non_interactive" "$root_pm" 0 0 "$scss_extra_dep" || existing_deps_status=$?
         if [ "$existing_deps_status" -eq 1 ]; then
           # Surface the failed top-up in the summary instead of letting the
           # pre-existing node_modules read as "already present".
@@ -2542,49 +2773,6 @@ if [ "$core_package_json_present" -eq 1 ]; then
         missing_node_deps=""
       fi
     fi
-    # Detect SCSS files before Node install so we can offer to set up support.
-    scss_install_scss="false"
-    if detect_scss_files "$app_root"; then
-      # Check if SCSS support is already fully configured.
-      # Both conditions must be true: a stylelint config references scss AND
-      # the DDEV env var includes scss globs.
-      scss_has_config=false
-      scss_has_globs=false
-      if find "$app_root" -maxdepth 4 \
-           -type d \( -name node_modules -o -name vendor -o -name .git -o -name .ddev \) -prune \
-           -o -name '.stylelintrc*' -type f -print0 2>/dev/null \
-         | xargs -0 grep -lq 'scss' 2>/dev/null; then
-        scss_has_config=true
-      fi
-      if grep -rlq 'DCQ_STYLELINT_GLOBS.*scss' "${app_root%/}/.ddev/"*.yaml 2>/dev/null; then
-        scss_has_globs=true
-      fi
-      scss_already_configured=false
-      if [ "$scss_has_config" = true ] && [ "$scss_has_globs" = true ]; then
-        scss_already_configured=true
-      fi
-
-      if [ "$scss_already_configured" = true ]; then
-        scss_detected="configured"
-        emit 'SCSS files detected — SCSS support appears to be configured already.\n'
-      elif [ "$non_interactive" -eq 0 ] && [ "$recommended_mode" -eq 0 ] && [ "${PROMPT_AVAILABLE:-0}" -eq 1 ]; then
-        emit '\nYour project contains SCSS files, but Stylelint is currently configured\n'
-        emit 'to check CSS only. Would you like to set up SCSS support? [Y/n] '
-        scss_answer=""
-        if IFS= read -r -u "$PROMPT_IN_FD" scss_answer; then
-          scss_answer="$(printf '%s' "$scss_answer" | tr -d '\r\n')"
-        fi
-        if [ -z "$scss_answer" ] || [ "$scss_answer" = "y" ] || [ "$scss_answer" = "Y" ]; then
-          scss_install_scss="true"
-          scss_detected="pending"
-        else
-          scss_detected="declined"
-        fi
-      else
-        scss_detected="true"
-      fi
-    fi
-
     if [ "$node_mode" != "skip" ]; then
       emit 'Preparing JS toolchain install.\n'
       if ! command_available "$ddev_cmd"; then
@@ -2647,8 +2835,15 @@ if [ "$core_package_json_present" -eq 1 ]; then
           # 0 = installed, 1 = failed, 2 = nothing missing, 3 = skipped.
           # 2 and 3 fall through to the bare install below, which only
           # materializes dependencies already declared in package.json.
+          # SCSS support needs a config package that is not in the curated
+          # list (it is not a core dependency), so pass it as an extra dep.
+          scss_extra_dep=""
+          if [ "$scss_install_scss" = "true" ] \
+            && ! grep -q '"stylelint-config-standard-scss"' "${app_root%/}/package.json" 2>/dev/null; then
+            scss_extra_dep="$(scss_config_package_spec "$app_root")"
+          fi
           deps_status=0
-          maybe_install_missing_root_deps "$ddev_cmd" "$non_interactive" "$root_pm" "$root_auto_add" "$root_suppress_list" || deps_status=$?
+          maybe_install_missing_root_deps "$ddev_cmd" "$non_interactive" "$root_pm" "$root_auto_add" "$root_suppress_list" "$scss_extra_dep" || deps_status=$?
           case "$deps_status" in
             0) node_install_done=1 ;;
             1) node_install_failed=1 ;;
@@ -2688,24 +2883,43 @@ if [ "$core_package_json_present" -eq 1 ]; then
   fi
 fi
 
-# If user accepted SCSS support, write the SCSS globs to the add-on config.
-# The package install command and config change are shown in the summary
-# so the user can see them all together and handle version conflicts.
+# If SCSS support was accepted (prompt or DCQ_SCSS_SUPPORT), write the SCSS
+# globs to the add-on config and finish the setup automatically when the
+# config package made it into the toolchain install above. Any remaining
+# manual steps are shown in the install summary.
 if [ "$scss_install_scss" = "true" ]; then
   dcq_config="${app_root%/}/.ddev/config.drupal-code-quality.yaml"
-  cat > "$dcq_config" <<'DCQYAML'
-# Drupal Code Quality add-on configuration.
-web_environment:
-  - "DCQ_STYLELINT_GLOBS=**/*.css **/*.scss"
-DCQYAML
+  write_scss_globs_config "$dcq_config"
   emit 'Updated .ddev/config.drupal-code-quality.yaml with SCSS globs.\n'
-  emit 'Note: there are manual steps to complete after install — look for the\n'
-  emit 'SCSS instructions in the install summary at the end.\n'
-  if [ "${PROMPT_AVAILABLE:-0}" -eq 1 ]; then
-    emit 'Press Enter to continue...'
-    IFS= read -r -u "$PROMPT_IN_FD" _ || true
+
+  # Check the container view: host node_modules can lag behind on synced
+  # (mutagen) setups right after an in-container npm/yarn install.
+  scss_pkg_ready=0
+  if command_available "$ddev_cmd" \
+    && "$ddev_cmd" exec test -d /var/www/html/node_modules/stylelint-config-standard-scss >/dev/null 2>&1; then
+    scss_pkg_ready=1
+  elif [ -d "${app_root%/}/node_modules/stylelint-config-standard-scss" ]; then
+    scss_pkg_ready=1
   fi
+  # A stray module without a package.json declaration would break the next
+  # clean install; require the declaration before reporting success.
+  if [ "$scss_pkg_ready" -eq 1 ] \
+    && ! grep -q '"stylelint-config-standard-scss"' "${app_root%/}/package.json" 2>/dev/null; then
+    scss_pkg_ready=0
+  fi
+
   scss_detected="accepted"
+  if [ "$scss_pkg_ready" -eq 1 ] && update_stylelint_scss_extends "${app_root%/}/.stylelintrc.json"; then
+    scss_detected="installed"
+    emit 'Updated .stylelintrc.json to extend stylelint-config-standard-scss.\n'
+  else
+    emit 'Note: there are manual steps to complete after install — look for the\n'
+    emit 'SCSS instructions in the install summary at the end.\n'
+    if [ "${PROMPT_AVAILABLE:-0}" -eq 1 ]; then
+      emit 'Press Enter to continue...'
+      IFS= read -r -u "$PROMPT_IN_FD" _ || true
+    fi
+  fi
 fi
 
 emit '\n==> Optional: .gitignore update\n'
@@ -2968,19 +3182,31 @@ print_install_summary() {
   fi
 
   local scss_install_cmd
+  local scss_pkg_spec
+  # Pin the config package to the project's stylelint major; the latest
+  # release requires stylelint 17 and conflicts with core's stylelint 16.
+  scss_pkg_spec="$(scss_config_package_spec "${app_root:-.}")"
   if [ "$pkg_mgr" = "yarn" ]; then
-    scss_install_cmd="ddev yarn add --dev stylelint-config-standard-scss"
+    scss_install_cmd="ddev yarn add --dev \"${scss_pkg_spec}\""
   else
-    scss_install_cmd="ddev npm install --save-dev stylelint-config-standard-scss"
+    scss_install_cmd="ddev npm install --save-dev \"${scss_pkg_spec}\""
   fi
 
-  if [ "$has_scss" = "accepted" ]; then
+  if [ "$has_scss" = "installed" ]; then
+    emit '\n'
+    emit 'SCSS support configured:\n'
+    emit '  - stylelint-config-standard-scss installed\n'
+    emit '  - .stylelintrc.json now extends stylelint-config-standard-scss\n'
+    emit '  - SCSS scan globs set in .ddev/config.drupal-code-quality.yaml\n'
+    emit '  Run "ddev restart" to apply the new scan globs.\n'
+  elif [ "$has_scss" = "accepted" ]; then
     emit '\n'
     emit 'SCSS Setup (complete these steps to finish):\n'
-    emit '  a. Install the SCSS config package:\n'
+    emit '  a. Install the SCSS config package (skip if already installed):\n'
     emit '       %s\n' "$scss_install_cmd"
-    emit '  b. Update .stylelintrc.json — replace "stylelint-config-standard" with\n'
-    emit '     "stylelint-config-standard-scss" in the "extends" array.\n'
+    emit '  b. Update .stylelintrc.json — ensure "stylelint-config-standard-scss"\n'
+    emit '     is in the "extends" array (replacing "stylelint-config-standard"\n'
+    emit '     if present).\n'
     emit '  c. Run: ddev restart\n'
     emit '  (SCSS scan globs have already been configured in\n'
     emit '   .ddev/config.drupal-code-quality.yaml)\n'
@@ -3044,19 +3270,30 @@ configs_copied="${copy_changed:-0}"
 
 # Detect SCSS if not already done during Node deps phase (e.g. Node was skipped).
 if [ "$scss_detected" = "false" ] && detect_scss_files "$app_root"; then
-  # Check if SCSS support is already fully configured (both config and globs).
+  # Check if SCSS support is already fully configured, using the same rules
+  # as the main check: live config filenames only, uncommented glob entries
+  # only, and the config package declared in package.json.
   scss_has_config=false
   scss_has_globs=false
+  scss_has_package=false
   if find "$app_root" -maxdepth 4 \
        -type d \( -name node_modules -o -name vendor -o -name .git -o -name .ddev \) -prune \
-       -o -name '.stylelintrc*' -type f -print0 2>/dev/null \
+       -o -type f \( -name '.stylelintrc' -o -name '.stylelintrc.json' \
+         -o -name '.stylelintrc.yaml' -o -name '.stylelintrc.yml' \
+         -o -name '.stylelintrc.js' -o -name '.stylelintrc.cjs' -o -name '.stylelintrc.mjs' \
+           -o -name 'stylelint.config.js' -o -name 'stylelint.config.cjs' \
+           -o -name 'stylelint.config.mjs' -o -name 'stylelint.config.ts' \) \
+       -print0 2>/dev/null \
      | xargs -0 grep -lq 'scss' 2>/dev/null; then
     scss_has_config=true
   fi
-  if grep -rlq 'DCQ_STYLELINT_GLOBS.*scss' "${app_root%/}/.ddev/"*.yaml 2>/dev/null; then
+  if grep -rlq '^[[:space:]]*-[[:space:]]*["'\'']\{0,1\}DCQ_STYLELINT_GLOBS=.*scss' "${app_root%/}/.ddev/"*.yaml 2>/dev/null; then
     scss_has_globs=true
   fi
-  if [ "$scss_has_config" = true ] && [ "$scss_has_globs" = true ]; then
+  if grep -q '"stylelint-config-standard-scss"' "${app_root%/}/package.json" 2>/dev/null; then
+    scss_has_package=true
+  fi
+  if [ "$scss_has_config" = true ] && [ "$scss_has_globs" = true ] && [ "$scss_has_package" = true ]; then
     scss_detected="configured"
   else
     scss_detected="true"

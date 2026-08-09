@@ -124,7 +124,7 @@ IDE tool paths or tools that require a local binary path:
 
 ## Fix commands
 
-`ddev eslint-fix`, `ddev prettier-fix`, and `ddev stylelint-fix` apply formatting changes directly, matching the behavior of their underlying tools (`eslint --fix`, `prettier --write`, `stylelint --fix`). All three commands support an optional `--preview` flag that builds a patch preview (saved to `dcq-reports/`), displays it, and prompts `Apply these changes? [y/N]` before applying. Use `--preview` when you want to review changes before committing them.
+`ddev eslint-fix`, `ddev prettier-fix`, and `ddev stylelint-fix` apply formatting changes directly, matching the behavior of their underlying tools (`eslint --fix`, `prettier --write`, `stylelint --fix`). `ddev eslint-fix` and `ddev prettier-fix` support an optional `--preview` flag that builds a patch (saved to `dcq-reports/`), reports how many files would change, and prompts `Apply these changes? [y/N]` before applying. `ddev stylelint-fix` applies fixes directly; use `git diff` afterwards to review changes.
 
 ## IDE settings (VS Code/Codium)
 
@@ -156,7 +156,7 @@ and filter by `@recommended` to find them.
 
 - Reports:
   - `dcq-reports/` is created at the project root when running `checks`
-    or the `*-fix` commands (logs + patch previews).
+    or the fix commands that support `--preview` (logs + patch files).
   - Add `dcq-reports/` to `.gitignore` if you do not want to track it.
 - ESLint toolchain: Node tooling is installed at the project root only
   (see `docs/decisions/node-deps-root-only-2026-01-22.md`). All wrappers resolve

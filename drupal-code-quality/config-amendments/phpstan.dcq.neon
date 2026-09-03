@@ -25,6 +25,9 @@ parameters:
             # under themes/ (named blank in the official base template).
             - __DOCROOT__/themes/blank/*
             - __DOCROOT__/profiles/contrib/*
+            # npm packages vendored under custom themes/modules ship PHP
+            # helpers (e.g. flatted) that are not project code.
+            - __DOCROOT__/*/node_modules/*
             - __DOCROOT__/sites/*/files/*
             - __DOCROOT__/sites/*/settings.ddev.php
             - __DOCROOT__/sites/*/default.settings.php

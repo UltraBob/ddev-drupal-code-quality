@@ -68,8 +68,8 @@ if [ "$has_help" = true ]; then
   print_help
 fi
 
-PROJECT_ROOT="/var/www/html"
-DOCROOT="${DCQ_DOCROOT:-web}"
+PROJECT_ROOT="$COMPOSER_ROOT"
+DOCROOT="$COMPOSER_DOCROOT"
 DOCROOT_PATH="${PROJECT_ROOT}/${DOCROOT}"
 TOOLCHAIN_BIN=""
 
@@ -91,8 +91,8 @@ UPDATED_WORDS_FILE="${REPORT_DIR}/_cspell_updated_project_words.txt"
 : > "$UPDATED_WORDS_FILE"
 
 if ! resolve_node_tool ".bin/cspell"; then
-  echo "CSpell is not installed at the project root (${PROJECT_ROOT}/node_modules)." >&2
-  echo "Re-run the DDEV add-on installer and accept Node dependency installation, or install cspell manually in the project root (npm install / yarn install)." >&2
+  echo "CSpell is not installed at the Composer root (${PROJECT_ROOT}/node_modules)." >&2
+  echo "Re-run the DDEV add-on installer and accept Node dependency installation, or install cspell manually in the Composer root (npm install / yarn install)." >&2
   exit 127
 fi
 
@@ -110,7 +110,7 @@ PROJECT_DICTIONARY="${PROJECT_ROOT}/.cspell-project-words.txt"
 CMD=("$TOOLCHAIN_BIN")
 if [ "$has_config" = false ]; then
   if [ ! -f "${PROJECT_ROOT}/.cspell.json" ]; then
-    echo "CSpell config file is missing. Create .cspell.json in the project root (for example by reinstalling the add-on)." >&2
+    echo "CSpell config file is missing. Create .cspell.json in the Composer root (for example by reinstalling the add-on)." >&2
     exit 2
   fi
   CMD+=(-c "${PROJECT_ROOT}/.cspell.json")
@@ -122,8 +122,8 @@ fi
 normalize_path() {
   local path="$1"
   path="$(map_path "$path")"
-  if [[ "$path" == /var/www/html/* ]]; then
-    path="${path#/var/www/html/}"
+  if [[ "$path" == "${PROJECT_ROOT}/"* ]]; then
+    path="${path#${PROJECT_ROOT}/}"
   fi
   if [ "$DOCROOT" != "web" ] && [[ "$path" == web/* ]]; then
     path="${DOCROOT}/${path#web/}"
@@ -179,6 +179,8 @@ done
 if [ "$explicit_paths" = false ]; then
   POSITIONAL_ARGS=(".")
 fi
+
+cd "$PROJECT_ROOT"
 
 if [ "$explicit_paths" = false ]; then
   # Collect unrecognized words for review without failing the run.

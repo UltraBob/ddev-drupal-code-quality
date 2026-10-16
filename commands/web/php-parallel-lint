@@ -2,6 +2,9 @@
 #ddev-generated
 set -u
 
+source /mnt/ddev_config/commands/helpers/path-map.sh
+cd "$COMPOSER_ROOT"
+
 print_help() {
   cat <<'USAGE'
 Usage: ddev php-parallel-lint [args]
@@ -38,12 +41,8 @@ if [ -z "$LINT_BIN" ]; then
   exit 127
 fi
 
-DOCROOT="$(cat /mnt/ddev_config/.dcq-docroot 2>/dev/null || true)"
-DOCROOT="${DOCROOT#/}"
-DOCROOT="${DOCROOT%/}"
-if [ -z "$DOCROOT" ]; then
-  DOCROOT="web"
-fi
+DOCROOT="${DCQ_DOCROOT#${DCQ_COMPOSER_ROOT}/}"
+if [ "$DOCROOT" = "$DCQ_DOCROOT" ]; then DOCROOT="web"; fi
 
 DEFAULT_FILES=()
 for candidate in "${DOCROOT}/modules/custom" "${DOCROOT}/themes/custom" "${DOCROOT}/profiles/custom" "${DOCROOT}/sites"; do
@@ -65,5 +64,9 @@ if [ "$#" -eq 0 ]; then
   exit $?
 fi
 
-"$LINT_BIN" "$@"
+lint_args=()
+for arg in "$@"; do
+  lint_args+=("$(map_composer_path "$arg")")
+done
+"$LINT_BIN" "${lint_args[@]}"
 exit $?

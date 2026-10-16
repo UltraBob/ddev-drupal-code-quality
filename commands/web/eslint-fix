@@ -85,16 +85,17 @@ if [ "$has_help" = true ]; then
   print_help
 fi
 
-PROJECT_ROOT="/var/www/html"
-DOCROOT="${DCQ_DOCROOT:-web}"
+PROJECT_ROOT="$COMPOSER_ROOT"
+DOCROOT="$COMPOSER_DOCROOT"
 DOCROOT_PATH="${PROJECT_ROOT}/${DOCROOT}"
+cd "$PROJECT_ROOT"
 TOOLCHAIN_BIN=""
 NODE_PATH=""
 RESOLVE_PLUGINS_DIR=""
 
 if ! resolve_node_tool "eslint/bin/eslint.js"; then
-  echo "ESLint is not installed at the project root (${PROJECT_ROOT}/node_modules)." >&2
-  echo "Re-run the DDEV add-on installer and accept Node dependency installation, or install eslint manually in the project root (npm install / yarn install)." >&2
+  echo "ESLint is not installed at the Composer root (${PROJECT_ROOT}/node_modules)." >&2
+  echo "Re-run the DDEV add-on installer and accept Node dependency installation, or install eslint manually in the Composer root (npm install / yarn install)." >&2
   exit 127
 fi
 RESOLVE_PLUGINS_DIR="$NODE_PATH"
@@ -113,8 +114,8 @@ normalize_path() {
   local path="$1"
   # Normalize paths into repo-relative paths for matching target prefixes.
   path="$(map_path "$path")"
-  if [[ "$path" == /var/www/html/* ]]; then
-    path="${path#/var/www/html/}"
+  if [[ "$path" == "${PROJECT_ROOT}/"* ]]; then
+    path="${path#${PROJECT_ROOT}/}"
   fi
   if [ "$DOCROOT" != "web" ] && [[ "$path" == web/* ]]; then
     path="${DOCROOT}/${path#web/}"
@@ -188,7 +189,7 @@ elif [ -f "${PROJECT_ROOT}/.eslintrc.json" ]; then
 fi
 if [ "$has_config" = false ] && [ "$ESLINT_CONFIG_MODE" != "nearest" ]; then
   if [ -z "$FIXED_CONFIG" ]; then
-    echo "ESLint config file is missing. Create .eslintrc.passing.json (or .eslintrc.json) in the project root, or pass --config." >&2
+    echo "ESLint config file is missing. Create .eslintrc.passing.json (or .eslintrc.json) in the Composer root, or pass --config." >&2
     exit 2
   fi
   CMD_BASE+=(--config="$FIXED_CONFIG")
@@ -242,8 +243,8 @@ FINAL_ARGS=()
 normalize_config_path() {
   local path="$1"
   path="$(map_path "$path")"
-  if [[ "$path" == /var/www/html/* ]]; then
-    path="${path#/var/www/html/}"
+  if [[ "$path" == "${PROJECT_ROOT}/"* ]]; then
+    path="${path#${PROJECT_ROOT}/}"
   fi
   if [ "$DOCROOT" != "web" ] && [[ "$path" == web/* ]]; then
     path="${DOCROOT}/${path#web/}"
@@ -258,8 +259,8 @@ normalize_config_path() {
 normalize_docroot_arg() {
   local arg="$1"
   arg="$(map_path "$arg")"
-  if [[ "$arg" == /var/www/html/* ]]; then
-    arg="${arg#/var/www/html/}"
+  if [[ "$arg" == "${PROJECT_ROOT}/"* ]]; then
+    arg="${arg#${PROJECT_ROOT}/}"
   fi
   if [ "$DOCROOT" != "web" ] && [[ "$arg" == web/* ]]; then
     arg="${DOCROOT}/${arg#web/}"

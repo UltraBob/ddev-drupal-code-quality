@@ -4,7 +4,7 @@
 # Phases:
 # 1) Copy Drupal.org GitLab CI template default configs and shims into the project (with conflict handling).
 # 2) Offer to install PHP tooling via ddev composer (core-dev).
-# 3) Offer to install JS tooling (project root) using the detected package manager.
+# 3) Offer to install JS tooling (Composer root) using the detected package manager.
 # 4) Offer to install VS Code/Codium settings/extensions (merge/overwrite/skip).
 #
 # Key env vars (see README for full list):
@@ -32,12 +32,12 @@ truthy() {
   return 1
 }
 
-detect_docroot() {
+detect_composer_root() {
   local config_path="$1"
   local value=""
 
   if [ -f "$config_path" ]; then
-    value="$(awk -F: '/^[[:space:]]*docroot:/ {
+    value="$(awk -F: '/^[[:space:]]*composer_root:/ {
       val=$2
       sub(/^[[:space:]]+/, "", val)
       sub(/[[:space:]]+$/, "", val)
@@ -51,7 +51,7 @@ detect_docroot() {
   value="${value#/}"
   value="${value%/}"
   if [ -z "$value" ]; then
-    value="web"
+    value="."
   fi
   printf '%s' "$value"
 }
@@ -158,7 +158,7 @@ prompt_nodejs_version_action() {
 }
 
 maybe_add_engines_node() {
-  # Offer to add engines.node to an existing package.json that lacks it.
+  # Offer to add engines.node to a Composer-root package.json that lacks it.
   # Skipped in non-interactive mode unless the field is missing and we just
   # created the file (create_root_package_json already handles new files).
   local app_root="$1"
@@ -187,7 +187,7 @@ maybe_add_engines_node() {
   local ddev_cmd="${DDEV_EXECUTABLE:-ddev}"
   local php_add_engines
   php_add_engines=$(cat <<'PHPCODE'
-$path = "/var/www/html/package.json";
+$path = "__NODE_PROJECT_ROOT__/package.json";
 $data = json_decode(file_get_contents($path), true);
 if (!is_array($data) || isset($data["engines"])) { exit(1); }
 $data["engines"] = ["node" => ">=20.0"];
@@ -199,7 +199,7 @@ PHPCODE
   if command_available "$ddev_cmd" && \
      "$ddev_cmd" exec bash -lc "php -r 'eval(base64_decode(\"${php_payload}\"));'" >/dev/null 2>&1; then
     # Sync the container file back to the host.
-    "$ddev_cmd" exec cat /var/www/html/package.json > "$pkg" 2>/dev/null || true
+    "$ddev_cmd" exec cat "${NODE_PROJECT_ROOT}/package.json" > "$pkg" 2>/dev/null || true
     emit 'Added "engines": {"node": ">=20.0"} to package.json.\n'
   else
     emit 'Could not update package.json automatically. Add manually:\n'
@@ -280,12 +280,12 @@ prompt_choice() {
 }
 
 create_root_package_json() {
-  # Create a minimal project-root package.json with only the packages DCQ needs.
+  # Create a minimal Composer-root package.json with only the packages DCQ needs.
   # Reads curated package names from dcq-packages.json; resolves versions and
   # engines.node from core's package.json.
   local ddev_cmd="$1"
   local app_root="$2"
-  local container_package_json="/var/www/html/package.json"
+  local container_package_json="${NODE_PROJECT_ROOT}/package.json"
   local php_code
   local php_payload
   local output
@@ -345,6 +345,7 @@ echo json_encode($out, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . PHP_EOL;
 PHP
   )
   php_code="${php_code//__DOCROOT_COREDIR__/${DOCROOT_COREDIR}}"
+  php_code="${php_code//__NODE_PROJECT_ROOT__/${NODE_PROJECT_ROOT}}"
   php_payload="$(printf '%s' "$php_code" | base64 | tr -d '\n')"
 
   # Use bash -lc so the php -r argument stays quoted; ddev exec can reparse
@@ -353,7 +354,7 @@ PHP
   status=$?
 
   if [ "$status" -ne 0 ] || [ -z "$output" ]; then
-    printf 'Unable to create project package.json from core.\n' >&2
+    printf 'Unable to create Composer-root package.json from core.\n' >&2
     printf 'Helper status: %s\n' "$status" >&2
     if [ -n "$output" ]; then
       printf '%s\n' "$output" >&2
@@ -364,7 +365,7 @@ PHP
   fi
 
   if ! printf '%s' "$output" | grep -q '^{'; then
-    printf 'Unable to create project package.json from core (invalid output).\n' >&2
+    printf 'Unable to create Composer-root package.json from core (invalid output).\n' >&2
     printf '%s\n' "$output" >&2
     return 1
   fi
@@ -381,12 +382,12 @@ PHP
     fi
   fi
 
-  emit 'Created package.json with DCQ dependencies (versions from Drupal core); review and customize as needed.\n'
+  emit 'Created Composer-root package.json with DCQ dependencies (versions from Drupal core); review and customize as needed.\n'
   return 0
 }
 
 find_missing_node_deps() {
-  # Determine missing JS tooling deps by comparing root package.json to the
+  # Determine missing JS tooling deps by comparing Composer-root package.json to the
   # curated list in dcq-packages.json (versions from core). Config files are
   # also scanned as a safety net for user-added plugins not in the curated list.
   local ddev_cmd="$1"
@@ -396,7 +397,7 @@ find_missing_node_deps() {
   local status
 
   php_code=$(cat <<'PHP'
-$rootPath = "/var/www/html/package.json";
+$rootPath = "__NODE_PROJECT_ROOT__/package.json";
 $corePath = "__DOCROOT_COREDIR__/package.json";
 $assetsRoot = "/var/www/html/.ddev/drupal-code-quality/assets";
 $dcqPath = $assetsRoot . "/dcq-packages.json";
@@ -575,6 +576,7 @@ foreach ($missing as $name => $version) {
 PHP
   )
   php_code="${php_code//__DOCROOT_COREDIR__/${DOCROOT_COREDIR}}"
+  php_code="${php_code//__NODE_PROJECT_ROOT__/${NODE_PROJECT_ROOT}}"
   php_payload="$(printf '%s' "$php_code" | base64 | tr -d '\n')"
 
   # Use bash -lc so the php -r argument stays quoted; ddev exec can reparse
@@ -590,7 +592,7 @@ PHP
 }
 
 maybe_install_missing_root_deps() {
-  # Prompt to add missing root devDependencies when root package.json exists.
+  # Prompt to add missing Composer-root devDependencies when its package.json exists.
   # Returns: 0 = missing deps installed, 1 = install (or dep computation)
   # failed, 2 = nothing missing, 3 = skipped (non-interactive or declined).
   local ddev_cmd="$1"
@@ -635,9 +637,9 @@ ${extra_deps}"
   fi
 
   if [ "$package_manager" = "npm" ]; then
-    prompt_msg="Add missing dependencies with 'npm install --save-dev' in the project root? This updates package.json and package-lock.json."
+    prompt_msg="Add missing dependencies with 'npm install --save-dev' in the Composer root? This updates package.json and package-lock.json."
   else
-    prompt_msg="Add missing dependencies with 'yarn add -D' in the project root? This updates package.json and yarn.lock."
+    prompt_msg="Add missing dependencies with 'yarn add -D' in the Composer root? This updates package.json and yarn.lock."
   fi
 
   should_add=0
@@ -655,27 +657,27 @@ ${extra_deps}"
     # execs them without a shell reparse, so no escaping (npm rejects a
     # literal \^ in a version range as an invalid dist-tag).
     if [ "$package_manager" = "npm" ]; then
-      cmd=( "$ddev_cmd" "npm" "install" "--save-dev" "--package-lock" "${missing_node_deps_array[@]}" )
+      cmd=( "$ddev_cmd" "exec" "--dir" "$NODE_PROJECT_ROOT" "npm" "install" "--save-dev" "--package-lock" "${missing_node_deps_array[@]}" )
       if ! run_command "${cmd[@]}"; then
         emit 'npm install --save-dev failed. You can retry manually.\n'
         emit_node_install_command "npm" "$missing_node_deps" 1
         return 1
       fi
-      emit 'Node dependencies added (project root).\n'
-      cmd=( "$ddev_cmd" "npm" "install" "--package-lock" )
+      emit 'Node dependencies added (Composer root).\n'
+      cmd=( "$ddev_cmd" "exec" "--dir" "$NODE_PROJECT_ROOT" "npm" "install" "--package-lock" )
       if ! run_command "${cmd[@]}"; then
         emit 'npm install failed. You can retry manually.\n'
         emit_node_install_command "npm" "$missing_node_deps" 1
         return 1
       fi
     else
-      cmd=( "$ddev_cmd" "yarn" "add" "-D" "${missing_node_deps_array[@]}" )
+      cmd=( "$ddev_cmd" "exec" "--dir" "$NODE_PROJECT_ROOT" "yarn" "add" "-D" "${missing_node_deps_array[@]}" )
       if ! run_command "${cmd[@]}"; then
         emit 'yarn add failed. You can retry manually.\n'
         emit_node_install_command "yarn" "$missing_node_deps" 1
         return 1
       fi
-      emit 'Node dependencies added (project root).\n'
+      emit 'Node dependencies added (Composer root).\n'
     fi
     return 0
   fi
@@ -697,7 +699,7 @@ prompt_node_install_action() {
   fi
 
   if [ "$has_root" -eq 0 ]; then
-    emit 'No project package.json found.\n'
+    emit 'No Composer-root package.json found.\n'
   fi
 
   if [ -n "$missing_deps" ]; then
@@ -710,7 +712,7 @@ prompt_node_install_action() {
 
   emit 'ESLint, Prettier, and Stylelint require several packages to function properly.\n'
   emit '\n'
-  emit '[i]nstall in the project root, [s]kip (default: install): '
+  emit '[i]nstall in the Composer root, [s]kip (default: install): '
   if ! IFS= read -r -u "$PROMPT_IN_FD" choice; then
     choice=""
   fi
@@ -747,20 +749,20 @@ emit_node_install_command() {
 
   if [ -n "$deps_cmd" ]; then
     if [ "$package_manager" = "npm" ]; then
-      cmd="ddev npm install --save-dev${deps_cmd}"
+      cmd="ddev exec --dir ${NODE_PROJECT_ROOT} npm install --save-dev${deps_cmd}"
     else
-      cmd="ddev yarn add -D${deps_cmd}"
+      cmd="ddev exec --dir ${NODE_PROJECT_ROOT} yarn add -D${deps_cmd}"
     fi
   else
     if [ "$package_manager" = "npm" ]; then
-      cmd="ddev npm install"
+      cmd="ddev exec --dir ${NODE_PROJECT_ROOT} npm install"
     else
-      cmd="ddev yarn install"
+      cmd="ddev exec --dir ${NODE_PROJECT_ROOT} yarn install"
     fi
   fi
 
   if [ "$has_root" -eq 0 ]; then
-    emit 'No project package.json found. The install requires one at the project root.\n'
+    emit 'No Composer-root package.json found. The install requires one at the Composer root.\n'
   fi
   emit 'Run:\n  %s\n' "$cmd"
 }
@@ -788,9 +790,9 @@ emit_dcq_package_list() {
   emit '  %s\n' "$packages"
   emit '\nTo install manually:\n'
   if [ "$package_manager" = "yarn" ]; then
-    emit '  ddev yarn add -D %s\n' "$packages"
+    emit '  ddev exec --dir %s yarn add -D %s\n' "$NODE_PROJECT_ROOT" "$packages"
   else
-    emit '  ddev npm install --save-dev %s\n' "$packages"
+    emit '  ddev exec --dir %s npm install --save-dev %s\n' "$NODE_PROJECT_ROOT" "$packages"
   fi
   emit 'If the install reports dependency conflicts, add the version ranges\n'
   emit "from Drupal core's package.json (e.g. %s/core/package.json) to each package.\n" "${DCQ_DOCROOT:-web}"
@@ -1108,15 +1110,22 @@ rewrite_docroot_config() {
   local source="$1"
   local target="$2"
   local tmp
+  local docroot="${DCQ_COMPOSER_DOCROOT:-web}"
 
-  if [ "${DCQ_DOCROOT:-web}" = "web" ]; then
+  case "$source" in
+    */assets/.phpcs.xml)
+      docroot="${DCQ_COMPOSER_DOCROOT:-web}"
+      ;;
+  esac
+
+  if [ "$docroot" = "web" ]; then
     return 0
   fi
 
   case "$source" in
     */assets/.cspell.json|*/assets/.phpcs.xml)
       tmp="$(mktemp "${TMPDIR:-/tmp}/dcq-docroot-XXXXXX")"
-      sed "s|web/|${DCQ_DOCROOT}/|g" "$target" >"$tmp"
+      sed "s|web/|${docroot}/|g" "$target" >"$tmp"
       mv "$tmp" "$target"
       ;;
   esac
@@ -1127,7 +1136,7 @@ merge_phpstan_config() {
   local phpstan_source="$1"
   local phpstan_dcq_source="$2"
   local target="$3"
-  local docroot="${DCQ_DOCROOT:-web}"
+  local docroot="${DCQ_COMPOSER_DOCROOT:-web}"
   local tmp
 
   if [ ! -f "$phpstan_dcq_source" ]; then
@@ -1292,10 +1301,10 @@ expand_cspell_config() {
   local ddev_approot="${DDEV_APPROOT:-$app_root}"
   local prepare_script="${ddev_approot}/.ddev/drupal-code-quality/tooling/scripts/prepare-cspell.php"
   local cspell_config="${app_root%/}/.cspell.json"
-  local docroot="${DCQ_DOCROOT:-web}"
+  local docroot="${DCQ_COMPOSER_DOCROOT:-web}"
   local ddev_cmd="${DDEV_EXECUTABLE:-ddev}"
-  local container_cspell="/var/www/html/.cspell.json"
-  local container_core_cspell_dir="/var/www/html/${docroot}/core/misc/cspell"
+  local container_cspell="${NODE_PROJECT_ROOT}/.cspell.json"
+  local container_core_cspell_dir="${NODE_PROJECT_ROOT}/${docroot}/core/misc/cspell"
   local container_prepare_script="/mnt/ddev_config/drupal-code-quality/tooling/scripts/prepare-cspell.php"
 
 
@@ -1331,7 +1340,7 @@ expand_cspell_config() {
   fi
 
   local output
-  if output=$("$ddev_cmd" exec bash -lc "cd /var/www/html && export _WEB_ROOT='${docroot}' _CSPELL_DICTIONARY='.cspell-project-words.txt' && php '${container_prepare_script}'" 2>&1); then
+  if output=$("$ddev_cmd" exec bash -lc "cd '${NODE_PROJECT_ROOT}' && export _WEB_ROOT='${docroot}' _CSPELL_DICTIONARY='.cspell-project-words.txt' && php '${container_prepare_script}'" 2>&1); then
     if echo "$output" | grep -q "Writing json"; then
       emit 'Successfully expanded .cspell.json\n'
     else
@@ -1350,7 +1359,7 @@ expand_cspell_config() {
 
 ensure_phpstan_paths() {
   local app_root="$1"
-  local docroot="${DCQ_DOCROOT:-web}"
+  local docroot="${2:-${DCQ_COMPOSER_DOCROOT:-web}}"
 
   # Create standard Drupal directories that the PHPStan and PHPCS configs
   # expect: both error on nonexistent scan entries (modules, themes, profiles,
@@ -1462,8 +1471,8 @@ detect_package_manager() {
 
 ensure_root_yarnrc() {
   local app_root="$1"
-  if [ -f "${app_root%/}/${DCQ_DOCROOT}/core/.yarnrc.yml" ] && [ ! -f "${app_root%/}/.yarnrc.yml" ]; then
-    cp "${app_root%/}/${DCQ_DOCROOT}/core/.yarnrc.yml" "${app_root%/}/.yarnrc.yml"
+  if [ -f "${app_root%/}/${DCQ_COMPOSER_DOCROOT}/core/.yarnrc.yml" ] && [ ! -f "${app_root%/}/.yarnrc.yml" ]; then
+    cp "${app_root%/}/${DCQ_COMPOSER_DOCROOT}/core/.yarnrc.yml" "${app_root%/}/.yarnrc.yml"
     emit 'WRITE: %s\n' "${app_root%/}/.yarnrc.yml"
   fi
 }
@@ -1973,7 +1982,7 @@ scss_config_package_spec() {
   local pkg
   local candidate
 
-  for pkg in "${app_root%/}/package.json" "${app_root%/}/${DCQ_DOCROOT:-web}/core/package.json"; do
+  for pkg in "${app_root%/}/package.json" "${app_root%/}/${DCQ_COMPOSER_DOCROOT:-web}/core/package.json"; do
     if [ -f "$pkg" ]; then
       # A "stylelint" key can also be a scripts entry whose value is a shell
       # command; only accept values that look like a semver range.
@@ -2029,8 +2038,8 @@ ensure_composer_plugin_blocked() {
   # Preseed Composer plugin policy to avoid interactive trust prompts when
   # users accept recommended installer settings.
   local ddev_cmd="$1"
-  local app_root="$2"
-  local composer_json="${app_root%/}/composer.json"
+  local composer_root="$2"
+  local composer_json="${composer_root%/}/composer.json"
   local plugin_name="tbachert/spi"
   local plugin_key="allow-plugins.${plugin_name}"
   local cmd
@@ -2079,8 +2088,42 @@ if [ -z "$app_root" ]; then
   app_root="$(cd "$cwd/.." && pwd)"
 fi
 
-dcq_docroot="$(detect_docroot "${app_root%/}/.ddev/config.yaml")"
+dcq_docroot="${DDEV_DOCROOT-web}"
+dcq_docroot="${dcq_docroot#/}"
+dcq_docroot="${dcq_docroot%/}"
 DCQ_DOCROOT="$dcq_docroot"
+dcq_composer_root="${DDEV_COMPOSER_ROOT:-}"
+if [ -z "$dcq_composer_root" ]; then
+  dcq_composer_root="$(detect_composer_root "${app_root%/}/.ddev/config.yaml")"
+fi
+if [ "$dcq_composer_root" = "/var/www/html" ] || [ "$dcq_composer_root" = "$app_root" ]; then
+  dcq_composer_root="."
+elif [[ "$dcq_composer_root" == "/var/www/html/"* ]]; then
+  dcq_composer_root="${dcq_composer_root#/var/www/html/}"
+elif [[ "$dcq_composer_root" == "${app_root%/}/"* ]]; then
+  dcq_composer_root="${dcq_composer_root#${app_root%/}/}"
+fi
+dcq_composer_root="${dcq_composer_root#/}"
+dcq_composer_root="${dcq_composer_root%/}"
+if [ -z "$dcq_composer_root" ]; then
+  dcq_composer_root="."
+fi
+DCQ_COMPOSER_ROOT="$dcq_composer_root"
+if [ "$DCQ_COMPOSER_ROOT" = "." ]; then
+  composer_root="$app_root"
+  DCQ_COMPOSER_DOCROOT="$DCQ_DOCROOT"
+else
+  composer_root="${app_root%/}/${DCQ_COMPOSER_ROOT}"
+  DCQ_COMPOSER_DOCROOT="${DCQ_DOCROOT#${DCQ_COMPOSER_ROOT}/}"
+fi
+NODE_PROJECT_ROOT="/var/www/html"
+if [ "$DCQ_COMPOSER_ROOT" != "." ]; then
+  NODE_PROJECT_ROOT="/var/www/html/${DCQ_COMPOSER_ROOT}"
+fi
+if [ "$DCQ_COMPOSER_DOCROOT" = "$DCQ_DOCROOT" ]; then
+  printf 'Configured docroot %s is not inside composer_root %s.\n' "$DCQ_DOCROOT" "$DCQ_COMPOSER_ROOT" >&2
+  exit 1
+fi
 DOCROOT_CONTAINER="/var/www/html/${DCQ_DOCROOT}"
 DOCROOT_COREDIR="${DOCROOT_CONTAINER}/core"
 docroot_file="${app_root%/}/.ddev/.dcq-docroot"
@@ -2092,6 +2135,16 @@ if [ -f "$docroot_file" ]; then
 else
   printf '%s\n' "$DCQ_DOCROOT" >"$docroot_file"
   emit_copy 'WRITE: %s\n' "$docroot_file"
+fi
+composer_root_file="${app_root%/}/.ddev/.dcq-composer-root"
+if [ -f "$composer_root_file" ]; then
+  if ! grep -Fxq "$DCQ_COMPOSER_ROOT" "$composer_root_file"; then
+    printf '%s\n' "$DCQ_COMPOSER_ROOT" >"$composer_root_file"
+    emit_copy 'WRITE: %s\n' "$composer_root_file"
+  fi
+else
+  printf '%s\n' "$DCQ_COMPOSER_ROOT" >"$composer_root_file"
+  emit_copy 'WRITE: %s\n' "$composer_root_file"
 fi
 
 
@@ -2167,7 +2220,7 @@ esac
 
 emit '\n==> Phase 1: PHP tooling dependencies\n'
 php_deps_failed=0
-vendor_bin="${app_root%/}/vendor/bin"
+vendor_bin="${composer_root%/}/vendor/bin"
 missing_tools=()
 for tool in phpstan phpcs phpcbf; do
   if [ ! -e "${vendor_bin}/${tool}" ]; then
@@ -2178,7 +2231,7 @@ done
 if [ "${#missing_tools[@]}" -eq 0 ]; then
   emit 'PHP dev tools already present (phpstan, phpcs, phpcbf). No action needed.\n'
 elif [ "${#missing_tools[@]}" -gt 0 ]; then
-  composer_json="${app_root%/}/composer.json"
+  composer_json="${composer_root%/}/composer.json"
   has_core_dev=0
   if [ -f "$composer_json" ] && grep -q '"drupal/core-dev"' "$composer_json"; then
     has_core_dev=1
@@ -2246,9 +2299,9 @@ elif [ "${#missing_tools[@]}" -gt 0 ]; then
       composer_succeeded=0
       while true; do
         if (
-          cd "$app_root"
+          cd "$composer_root"
           if [ "$recommended_mode" -eq 1 ]; then
-            ensure_composer_plugin_blocked "$ddev_cmd" "$app_root"
+            ensure_composer_plugin_blocked "$ddev_cmd" "$composer_root"
           fi
           run_command "${cmd[@]}"
         ); then
@@ -2349,7 +2402,7 @@ while IFS= read -r -d '' source; do
     target="${shim_dir%/}/${rel#tooling/bin/}"
     is_shim=1
   elif [[ "$rel" == assets/* ]]; then
-    target="${app_root%/}/${rel#assets/}"
+    target="${composer_root%/}/${rel#assets/}"
   else
     continue
   fi
@@ -2360,11 +2413,15 @@ while IFS= read -r -d '' source; do
     strip_generated_header "$source" "$tmp"
     rewrite_docroot_config "$source" "$tmp"
   fi
-  target_rel="${target#${app_root%/}/}"
-  is_root_config=0
-  if [ "$is_shim" -eq 0 ] && [ "$(dirname "$target")" = "${app_root%/}" ]; then
-    is_root_config=1
-  fi
+    target_rel="${target#${app_root%/}/}"
+    config_root="$app_root"
+    if [ "$composer_root" != "$app_root" ]; then
+      config_root="$composer_root"
+    fi
+    is_root_config=0
+    if [ "$is_shim" -eq 0 ] && [ "$(dirname "$target")" = "${config_root%/}" ]; then
+      is_root_config=1
+    fi
   is_ddev_file=0
   if [ "$is_shim" -eq 0 ] && [[ "$target_rel" == .ddev/* ]]; then
     is_ddev_file=1
@@ -2476,15 +2533,15 @@ while IFS= read -r -d '' source; do
   rm -f "$tmp"
 
   # Merge phpstan.dcq.neon into phpstan.neon if this is the phpstan config
-  if [ "$target" = "${app_root%/}/phpstan.neon" ]; then
+  if [ "$target" = "${composer_root%/}/phpstan.neon" ]; then
     phpstan_dcq_source="${addon_root}/config-amendments/phpstan.dcq.neon"
     merge_phpstan_config "$source" "$phpstan_dcq_source" "$target"
-    ensure_phpstan_paths "$app_root"
+    ensure_phpstan_paths "$composer_root" "$DCQ_COMPOSER_DOCROOT"
     phpstan_updated=1
   fi
 
   # Merge .phpcs.dcq.xml into .phpcs.xml if this is the phpcs config
-  if [ "$target" = "${app_root%/}/.phpcs.xml" ]; then
+  if [ "$target" = "${composer_root%/}/.phpcs.xml" ]; then
     phpcs_dcq_source="${addon_root}/config-amendments/.phpcs.dcq.xml"
     merge_phpcs_config "$source" "$phpcs_dcq_source" "$target"
   fi
@@ -2505,19 +2562,19 @@ done < <(find "$addon_root" -type f -print0)
 
 # Append DCQ scope defaults to the project prettier ignore file.
 append_unique_lines_from_file \
-  "${app_root%/}/.prettierignore" \
+  "${composer_root%/}/.prettierignore" \
   "${addon_root}/config-amendments/.prettierignore.dcq"
 
 # Merge stylelint DCQ amendments (runs post-loop so it applies even when the
 # base config was unchanged and skipped by the copy loop).
-if [ -f "${app_root%/}/.stylelintrc.json" ]; then
+if [ -f "${composer_root%/}/.stylelintrc.json" ]; then
   stylelint_dcq_source="${addon_root}/config-amendments/.stylelintrc.dcq.json"
-  merge_stylelint_config "$stylelint_dcq_source" "${app_root%/}/.stylelintrc.json"
+  merge_stylelint_config "$stylelint_dcq_source" "${composer_root%/}/.stylelintrc.json"
 fi
 
 # Clean up dcq-packages.json from project root if left by a prior install.
-if [ -f "${app_root%/}/dcq-packages.json" ]; then
-  rm -f "${app_root%/}/dcq-packages.json"
+if [ -f "${composer_root%/}/dcq-packages.json" ]; then
+  rm -f "${composer_root%/}/dcq-packages.json"
 fi
 
 if [ "$copy_changed" -eq 0 ] && [ "$copy_skipped" -eq 0 ]; then
@@ -2545,17 +2602,17 @@ if [ $((phase2_changed_shims + phase2_skipped_shims)) -gt 0 ]; then
 fi
 
 if [ "$phpstan_updated" -eq 1 ]; then
-  prompt_phpstan_level "$app_root"
+  prompt_phpstan_level "$composer_root"
 fi
 
-project_cspell_words="${app_root%/}/.cspell-project-words.txt"
+project_cspell_words="${composer_root%/}/.cspell-project-words.txt"
 if [ ! -f "$project_cspell_words" ]; then
   printf '# Project-specific CSpell words (managed via ddev cspell-suggest).\n' > "$project_cspell_words"
   emit_copy 'WRITE: %s\n' "$project_cspell_words"
 fi
 
 # Expand CSpell configuration with project-specific settings
-expand_cspell_config "$app_root"
+expand_cspell_config "$composer_root"
 
 scss_detected="false"
 scss_install_scss="false"
@@ -2602,7 +2659,7 @@ fi
 if [ "$core_package_json_present" -eq 1 ]; then
   node_mode_raw="$(string_lower "${DCQ_INSTALL_NODE_DEPS:-}")"
   node_toolchain_existing=0
-  if node_toolchain_present "$app_root"; then
+  if node_toolchain_present "$composer_root"; then
     node_toolchain_existing=1
   fi
   skip_due_to_existing_toolchain=0
@@ -2613,11 +2670,11 @@ if [ "$core_package_json_present" -eq 1 ]; then
 
   # Detect legacy core-only installs that need migration to project root.
   if [ -z "$node_mode_raw" ] && [ "$node_toolchain_existing" -eq 0 ]; then
-    core_dir="${DCQ_DOCROOT}/core"
-    legacy_core_nm="${app_root}/${core_dir}/node_modules"
+    core_dir="${DCQ_COMPOSER_DOCROOT}/core"
+    legacy_core_nm="${composer_root}/${core_dir}/node_modules"
     if [ -e "${legacy_core_nm}/.bin/eslint" ] || \
        [ -e "${legacy_core_nm}/eslint/bin/eslint.js" ]; then
-      emit 'Legacy core-only Node toolchain detected. The add-on now requires tooling at the project root.\n'
+       emit 'Legacy core-only Node toolchain detected. The add-on now requires tooling at the Composer root.\n'
       if [ "$non_interactive" -eq 1 ]; then
         node_mode_raw="root"
       fi
@@ -2628,7 +2685,7 @@ if [ "$core_package_json_present" -eq 1 ]; then
   # time for the dependency install, and independent of DCQ_INSTALL_NODE_DEPS
   # so DCQ_SCSS_SUPPORT still applies when the toolchain install is skipped.
   scss_install_scss="false"
-  if detect_scss_files "$app_root"; then
+  if detect_scss_files "$composer_root"; then
     # Check if SCSS support is already fully configured.
     # Both conditions must be true: a stylelint config references scss AND
     # the DDEV env var includes scss globs.
@@ -2638,7 +2695,7 @@ if [ "$core_package_json_present" -eq 1 ]; then
     # Match live Stylelint config filenames only; backup files such as
     # .stylelintrc.json.bak or .stylelintrc.json.old must not count as
     # live configuration.
-    if find "$app_root" -maxdepth 4 \
+    if find "$composer_root" -maxdepth 4 \
          -type d \( -name node_modules -o -name vendor -o -name .git -o -name .ddev \) -prune \
          -o -type f \( -name '.stylelintrc' -o -name '.stylelintrc.json' \
            -o -name '.stylelintrc.yaml' -o -name '.stylelintrc.yml' \
@@ -2657,7 +2714,7 @@ if [ "$core_package_json_present" -eq 1 ]; then
     # A config that extends the SCSS package without declaring it leaves
     # stylelint broken; treat that as not configured so the dependency is
     # topped up (the extends swap is a no-op on already-SCSS configs).
-    if grep -q '"stylelint-config-standard-scss"' "${app_root%/}/package.json" 2>/dev/null; then
+    if grep -q '"stylelint-config-standard-scss"' "${composer_root%/}/package.json" 2>/dev/null; then
       scss_has_package=true
     fi
     scss_already_configured=false
@@ -2708,7 +2765,7 @@ if [ "$core_package_json_present" -eq 1 ]; then
 
   if [ "$node_mode_raw" != "skip" ] || [ "$skip_due_to_existing_toolchain" -eq 1 ]; then
     ddev_cmd="${DDEV_EXECUTABLE:-ddev}"
-    root_package_json="${app_root%/}/package.json"
+    root_package_json="${composer_root%/}/package.json"
     has_root_package_json=0
     if [ -f "$root_package_json" ]; then
       has_root_package_json=1
@@ -2717,16 +2774,16 @@ if [ "$core_package_json_present" -eq 1 ]; then
       if ! command_available "$ddev_cmd"; then
         emit 'ddev executable not found in PATH; skipping Node dependency check.\n'
       else
-        root_pm="$(detect_package_manager "$app_root")"
+        root_pm="$(detect_package_manager "$composer_root")"
         if [ "$root_pm" = "yarn" ]; then
-          ensure_root_yarnrc "$app_root"
+          ensure_root_yarnrc "$composer_root"
         fi
         # Include the SCSS config package in the top-up when SCSS support
         # was enabled and the package is not declared yet.
         scss_extra_dep=""
         if [ "$scss_install_scss" = "true" ] \
-          && ! grep -q '"stylelint-config-standard-scss"' "${app_root%/}/package.json" 2>/dev/null; then
-          scss_extra_dep="$(scss_config_package_spec "$app_root")"
+          && ! grep -q '"stylelint-config-standard-scss"' "${composer_root%/}/package.json" 2>/dev/null; then
+          scss_extra_dep="$(scss_config_package_spec "$composer_root")"
         fi
         existing_deps_status=0
         maybe_install_missing_root_deps "$ddev_cmd" "$non_interactive" "$root_pm" 0 0 "$scss_extra_dep" || existing_deps_status=$?
@@ -2786,7 +2843,7 @@ if [ "$core_package_json_present" -eq 1 ]; then
       elif [ "$node_mode" = "root" ]; then
         target="$node_mode"
       elif [ "$node_mode" = "prompt" ]; then
-        root_pm="$(detect_package_manager "$app_root")"
+        root_pm="$(detect_package_manager "$composer_root")"
         prompt_node_install_action "$has_root_package_json" "$missing_node_deps"
         node_action="${NODE_INSTALL_ACTION:-install}"
         # Defensively normalize the prompt result to avoid silent fall-through.
@@ -2807,8 +2864,8 @@ if [ "$core_package_json_present" -eq 1 ]; then
       fi
 
       if [ "$target" = "root" ] && [ "$has_root_package_json" -eq 0 ]; then
-        if ! create_root_package_json "$ddev_cmd" "$app_root"; then
-          emit 'Failed to create a project-root package.json; skipping Node toolchain install.\n'
+        if ! create_root_package_json "$ddev_cmd" "$composer_root"; then
+          emit 'Failed to create a Composer-root package.json; skipping Node toolchain install.\n'
           target="skip"
         else
           has_root_package_json=1
@@ -2821,16 +2878,16 @@ if [ "$core_package_json_present" -eq 1 ]; then
 
       # Offer to add engines.node to existing package.json before installing.
       if [ "$target" = "root" ] && [ "$has_root_package_json" -eq 1 ]; then
-        maybe_add_engines_node "$app_root" "$non_interactive"
+        maybe_add_engines_node "$composer_root" "$non_interactive"
       fi
 
       node_install_done=0
       node_install_failed=0
       if [ "$target" = "root" ]; then
         if [ "$has_root_package_json" -eq 1 ]; then
-          root_pm="$(detect_package_manager "$app_root")"
+          root_pm="$(detect_package_manager "$composer_root")"
           if [ "$root_pm" = "yarn" ]; then
-            ensure_root_yarnrc "$app_root"
+            ensure_root_yarnrc "$composer_root"
           fi
           # 0 = installed, 1 = failed, 2 = nothing missing, 3 = skipped.
           # 2 and 3 fall through to the bare install below, which only
@@ -2839,8 +2896,8 @@ if [ "$core_package_json_present" -eq 1 ]; then
           # list (it is not a core dependency), so pass it as an extra dep.
           scss_extra_dep=""
           if [ "$scss_install_scss" = "true" ] \
-            && ! grep -q '"stylelint-config-standard-scss"' "${app_root%/}/package.json" 2>/dev/null; then
-            scss_extra_dep="$(scss_config_package_spec "$app_root")"
+            && ! grep -q '"stylelint-config-standard-scss"' "${composer_root%/}/package.json" 2>/dev/null; then
+            scss_extra_dep="$(scss_config_package_spec "$composer_root")"
           fi
           deps_status=0
           maybe_install_missing_root_deps "$ddev_cmd" "$non_interactive" "$root_pm" "$root_auto_add" "$root_suppress_list" "$scss_extra_dep" || deps_status=$?
@@ -2851,16 +2908,16 @@ if [ "$core_package_json_present" -eq 1 ]; then
         fi
         if [ "$node_install_done" -eq 0 ] && [ "$node_install_failed" -eq 0 ]; then
           if [ -z "${root_pm:-}" ]; then
-            root_pm="$(detect_package_manager "$app_root")"
+            root_pm="$(detect_package_manager "$composer_root")"
             if [ "$root_pm" = "yarn" ]; then
-              ensure_root_yarnrc "$app_root"
+              ensure_root_yarnrc "$composer_root"
             fi
           fi
-          emit 'Installing JS deps in project root using %s (this may take several minutes).\n' "${root_pm:-npm}"
+          emit 'Installing JS deps in Composer root using %s (this may take several minutes).\n' "${root_pm:-npm}"
           if [ "${root_pm:-npm}" = "npm" ]; then
-            cmd=( "$ddev_cmd" "npm" "install" )
+            cmd=( "$ddev_cmd" "exec" "--dir" "$NODE_PROJECT_ROOT" "npm" "install" )
           else
-            cmd=( "$ddev_cmd" "yarn" "install" )
+            cmd=( "$ddev_cmd" "exec" "--dir" "$NODE_PROJECT_ROOT" "yarn" "install" )
           fi
           if run_command "${cmd[@]}"; then
             node_install_done=1
@@ -2869,14 +2926,14 @@ if [ "$core_package_json_present" -eq 1 ]; then
             # The deps are already declared in package.json here, so the
             # retry is a plain install — no package list needed.
             emit 'JS dependency install failed. You can retry manually:\n'
-            emit '  ddev %s install\n' "${root_pm:-npm}"
+            emit '  ddev exec --dir %s %s install\n' "$NODE_PROJECT_ROOT" "${root_pm:-npm}"
           fi
         fi
         if [ "$node_install_done" -eq 1 ]; then
-          emit 'Node toolchain installed (project root).\n'
+          emit 'Node toolchain installed (Composer root).\n'
         elif [ "$node_install_failed" -eq 1 ]; then
           node_deps_failed=1
-          emit 'Node toolchain install FAILED (project root). See errors above; the summary includes retry instructions.\n'
+          emit 'Node toolchain install FAILED (Composer root). See errors above; the summary includes retry instructions.\n'
         fi
       fi
     fi
@@ -2896,20 +2953,20 @@ if [ "$scss_install_scss" = "true" ]; then
   # (mutagen) setups right after an in-container npm/yarn install.
   scss_pkg_ready=0
   if command_available "$ddev_cmd" \
-    && "$ddev_cmd" exec test -d /var/www/html/node_modules/stylelint-config-standard-scss >/dev/null 2>&1; then
+    && "$ddev_cmd" exec test -d "${NODE_PROJECT_ROOT}/node_modules/stylelint-config-standard-scss" >/dev/null 2>&1; then
     scss_pkg_ready=1
-  elif [ -d "${app_root%/}/node_modules/stylelint-config-standard-scss" ]; then
+  elif [ -d "${composer_root%/}/node_modules/stylelint-config-standard-scss" ]; then
     scss_pkg_ready=1
   fi
   # A stray module without a package.json declaration would break the next
   # clean install; require the declaration before reporting success.
   if [ "$scss_pkg_ready" -eq 1 ] \
-    && ! grep -q '"stylelint-config-standard-scss"' "${app_root%/}/package.json" 2>/dev/null; then
+    && ! grep -q '"stylelint-config-standard-scss"' "${composer_root%/}/package.json" 2>/dev/null; then
     scss_pkg_ready=0
   fi
 
   scss_detected="accepted"
-  if [ "$scss_pkg_ready" -eq 1 ] && update_stylelint_scss_extends "${app_root%/}/.stylelintrc.json"; then
+  if [ "$scss_pkg_ready" -eq 1 ] && update_stylelint_scss_extends "${composer_root%/}/.stylelintrc.json"; then
     scss_detected="installed"
     emit 'Updated .stylelintrc.json to extend stylelint-config-standard-scss.\n'
   else
@@ -2970,7 +3027,7 @@ if [ -f "$ide_settings_template" ] || [ -f "$ide_extensions_template" ]; then
       ide_node_mode=""
       ide_node_mode_raw="$(string_lower "${DCQ_INSTALL_NODE_DEPS:-}")"
       has_root_node_modules=0
-      if [ -d "${app_root%/}/node_modules" ]; then
+      if [ -d "${composer_root%/}/node_modules" ]; then
         has_root_node_modules=1
       fi
 
@@ -2988,11 +3045,11 @@ if [ -f "$ide_settings_template" ] || [ -f "$ide_extensions_template" ]; then
 
       # Re-check for node_modules after installation (may have been installed in Phase 3)
       if [ "$has_root_node_modules" -eq 0 ]; then
-        if [ -d "${app_root%/}/node_modules" ]; then
+        if [ -d "${composer_root%/}/node_modules" ]; then
           has_root_node_modules=1
         elif command_available "${DDEV_EXECUTABLE:-ddev}"; then
           ddev_cmd="${DDEV_EXECUTABLE:-ddev}"
-          if "$ddev_cmd" exec test -d "/var/www/html/node_modules" >/dev/null 2>&1; then
+          if "$ddev_cmd" exec test -d "${NODE_PROJECT_ROOT}/node_modules" >/dev/null 2>&1; then
             has_root_node_modules=1
           fi
         fi
@@ -3007,9 +3064,15 @@ if [ -f "$ide_settings_template" ] || [ -f "$ide_extensions_template" ]; then
       eslint_resolve_plugins=""
       eslint_quiet="$(resolve_eslint_quiet_setting "$app_root")"
       if [ "$ide_node_mode" = "root" ] && [ "$has_root_node_modules" -eq 1 ]; then
-        js_modules="./node_modules"
-        eslint_node_path="node_modules"
-        eslint_resolve_plugins="."
+        if [ "$DCQ_COMPOSER_ROOT" = "." ]; then
+          js_modules="./node_modules"
+          eslint_node_path="node_modules"
+          eslint_resolve_plugins="."
+        else
+          js_modules="./${DCQ_COMPOSER_ROOT}/node_modules"
+          eslint_node_path="${DCQ_COMPOSER_ROOT}/node_modules"
+          eslint_resolve_plugins="${DCQ_COMPOSER_ROOT}"
+        fi
         ide_js_paths_set=1
       fi
 
@@ -3157,7 +3220,7 @@ print_install_summary() {
     else
       # No versioned list means the deps were already declared and a plain
       # install failed; the retry is the same plain install.
-      emit '     ddev %s install\n' "$pkg_mgr"
+      emit '     ddev exec --dir %s %s install\n' "$NODE_PROJECT_ROOT" "$pkg_mgr"
     fi
     step_num=$((step_num + 1))
   elif [ "$node_status" != "root" ] && [ "$node_status" != "present" ]; then
@@ -3185,11 +3248,11 @@ print_install_summary() {
   local scss_pkg_spec
   # Pin the config package to the project's stylelint major; the latest
   # release requires stylelint 17 and conflicts with core's stylelint 16.
-  scss_pkg_spec="$(scss_config_package_spec "${app_root:-.}")"
+  scss_pkg_spec="$(scss_config_package_spec "${composer_root:-.}")"
   if [ "$pkg_mgr" = "yarn" ]; then
-    scss_install_cmd="ddev yarn add --dev \"${scss_pkg_spec}\""
+    scss_install_cmd="ddev exec --dir ${NODE_PROJECT_ROOT} yarn add --dev \"${scss_pkg_spec}\""
   else
-    scss_install_cmd="ddev npm install --save-dev \"${scss_pkg_spec}\""
+    scss_install_cmd="ddev exec --dir ${NODE_PROJECT_ROOT} npm install --save-dev \"${scss_pkg_spec}\""
   fi
 
   if [ "$has_scss" = "installed" ]; then
@@ -3260,7 +3323,7 @@ elif [ -n "${node_target_choice:-}" ] && [ "$node_target_choice" = "root" ]; the
   node_summary="root"
 fi
 # Check if Node toolchain is actually present regardless of what happened in this run.
-if [ "$node_summary" = "skipped" ] && node_toolchain_present "$app_root"; then
+if [ "$node_summary" = "skipped" ] && node_toolchain_present "$composer_root"; then
   node_summary="present"
 fi
 
@@ -3269,7 +3332,7 @@ ide_summary="${ide_mode:-skip}"
 configs_copied="${copy_changed:-0}"
 
 # Detect SCSS if not already done during Node deps phase (e.g. Node was skipped).
-if [ "$scss_detected" = "false" ] && detect_scss_files "$app_root"; then
+if [ "$scss_detected" = "false" ] && detect_scss_files "$composer_root"; then
   # Check if SCSS support is already fully configured, using the same rules
   # as the main check: live config filenames only, uncommented glob entries
   # only, and the config package declared in package.json.
@@ -3290,7 +3353,7 @@ if [ "$scss_detected" = "false" ] && detect_scss_files "$app_root"; then
   if grep -rlq '^[[:space:]]*-[[:space:]]*["'\'']\{0,1\}DCQ_STYLELINT_GLOBS=.*scss' "${app_root%/}/.ddev/"*.yaml 2>/dev/null; then
     scss_has_globs=true
   fi
-  if grep -q '"stylelint-config-standard-scss"' "${app_root%/}/package.json" 2>/dev/null; then
+  if grep -q '"stylelint-config-standard-scss"' "${composer_root%/}/package.json" 2>/dev/null; then
     scss_has_package=true
   fi
   if [ "$scss_has_config" = true ] && [ "$scss_has_globs" = true ] && [ "$scss_has_package" = true ]; then

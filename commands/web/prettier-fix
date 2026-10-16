@@ -22,9 +22,10 @@ Examples:
 USAGE
 }
 
-PROJECT_ROOT="/var/www/html"
-DOCROOT="${DCQ_DOCROOT:-web}"
+PROJECT_ROOT="$COMPOSER_ROOT"
+DOCROOT="$COMPOSER_DOCROOT"
 DOCROOT_PATH="${PROJECT_ROOT}/${DOCROOT}"
+cd "$PROJECT_ROOT"
 TOOLCHAIN_BIN=""
 NODE_PATH=""
 
@@ -87,8 +88,8 @@ if ! command -v node >/dev/null 2>&1; then
 fi
 
 if ! resolve_node_tool "prettier/bin/prettier.cjs"; then
-  echo "Prettier is not installed at the project root (${PROJECT_ROOT}/node_modules)." >&2
-  echo "Re-run the DDEV add-on installer and accept Node dependency installation, or install prettier manually in the project root (npm install / yarn install)." >&2
+  echo "Prettier is not installed at the Composer root (${PROJECT_ROOT}/node_modules)." >&2
+  echo "Re-run the DDEV add-on installer and accept Node dependency installation, or install prettier manually in the Composer root (npm install / yarn install)." >&2
   exit 127
 fi
 
@@ -105,8 +106,8 @@ fi
 normalize_path() {
   local path="$1"
   path="$(map_path "$path")"
-  if [[ "$path" == /var/www/html/* ]]; then
-    path="${path#/var/www/html/}"
+  if [[ "$path" == "${PROJECT_ROOT}/"* ]]; then
+    path="${path#${PROJECT_ROOT}/}"
   fi
   if [ "$DOCROOT" != "web" ] && [[ "$path" == web/* ]]; then
     path="${DOCROOT}/${path#web/}"
@@ -165,8 +166,8 @@ FINAL_ARGS=()
 normalize_config_path() {
   local path="$1"
   path="$(map_path "$path")"
-  if [[ "$path" == /var/www/html/* ]]; then
-    path="${path#/var/www/html/}"
+  if [[ "$path" == "${PROJECT_ROOT}/"* ]]; then
+    path="${path#${PROJECT_ROOT}/}"
   fi
   if [ "$DOCROOT" != "web" ] && [[ "$path" == web/* ]]; then
     path="${DOCROOT}/${path#web/}"
@@ -177,8 +178,8 @@ normalize_config_path() {
 normalize_docroot_arg() {
   local arg="$1"
   arg="$(map_path "$arg")"
-  if [[ "$arg" == /var/www/html/* ]]; then
-    arg="${arg#/var/www/html/}"
+  if [[ "$arg" == "${PROJECT_ROOT}/"* ]]; then
+    arg="${arg#${PROJECT_ROOT}/}"
   fi
   if [ "$DOCROOT" != "web" ] && [[ "$arg" == web/* ]]; then
     arg="${DOCROOT}/${arg#web/}"
@@ -249,7 +250,7 @@ DEFAULT_CONFIG=""
 if [ -f "${PROJECT_ROOT}/.prettierrc.json" ]; then
   DEFAULT_CONFIG="${PROJECT_ROOT}/.prettierrc.json"
 elif [ "$has_config" = false ]; then
-  echo "Prettier config file is missing. Create .prettierrc.json in the project root (for example by reinstalling the add-on)." >&2
+  echo "Prettier config file is missing. Create .prettierrc.json in the Composer root (for example by reinstalling the add-on)." >&2
   exit 2
 fi
 

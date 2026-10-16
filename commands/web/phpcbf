@@ -5,6 +5,7 @@ set -u
 
 PHPCBF_BIN="vendor/bin/phpcbf"
 source /mnt/ddev_config/commands/helpers/path-map.sh
+cd "$COMPOSER_ROOT"
 
 if [ ! -x "$PHPCBF_BIN" ]; then
   echo "phpcbf not found at $PHPCBF_BIN. Run 'ddev composer install' to install vendor/bin/phpcbf." >&2
@@ -29,27 +30,27 @@ while [ "$index" -lt "$arg_count" ]; do
     --standard=*)
       value="${arg#*=}"
       # Rewrite host paths for standards into container paths.
-      rewrite_args+=("--standard=$(map_path "$value")")
+      rewrite_args+=("--standard=$(map_composer_path "$value")")
       ;;
     --standard)
       next_arg="${args[$((index + 1))]:-}"
       # Rewrite host paths for standards into container paths.
-      rewrite_args+=("--standard" "$(map_path "$next_arg")")
+      rewrite_args+=("--standard" "$(map_composer_path "$next_arg")")
       index=$((index + 1))
       ;;
     --stdin-path=*)
       value="${arg#*=}"
       # Rewrite stdin file paths so PHPCBF can resolve them in the container.
-      rewrite_args+=("--stdin-path=$(map_path "$value")")
+      rewrite_args+=("--stdin-path=$(map_composer_path "$value")")
       ;;
     --stdin-path)
       next_arg="${args[$((index + 1))]:-}"
       # Rewrite stdin file paths so PHPCBF can resolve them in the container.
-      rewrite_args+=("--stdin-path" "$(map_path "$next_arg")")
+      rewrite_args+=("--stdin-path" "$(map_composer_path "$next_arg")")
       index=$((index + 1))
       ;;
     *)
-      rewrite_args+=("$(map_path "$arg")")
+      rewrite_args+=("$(map_composer_path "$arg")")
       ;;
   esac
   index=$((index + 1))

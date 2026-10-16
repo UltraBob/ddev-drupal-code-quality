@@ -22,9 +22,10 @@ has_positional=false
 has_config=false
 seen_double_dash=false
 explicit_paths=false
-PROJECT_ROOT="/var/www/html"
-DOCROOT="${DCQ_DOCROOT:-web}"
+PROJECT_ROOT="$COMPOSER_ROOT"
+DOCROOT="$COMPOSER_DOCROOT"
 DOCROOT_PATH="${PROJECT_ROOT}/${DOCROOT}"
+cd "$PROJECT_ROOT"
 TOOLCHAIN_BIN=""
 NODE_PATH=""
 RESOLVE_PLUGINS_DIR=""
@@ -79,8 +80,8 @@ if ! command -v node >/dev/null 2>&1; then
 fi
 
 if ! resolve_node_tool "eslint/bin/eslint.js"; then
-  echo "ESLint is not installed at the project root (${PROJECT_ROOT}/node_modules)." >&2
-  echo "Re-run the DDEV add-on installer and accept Node dependency installation, or install eslint manually in the project root (npm install / yarn install)." >&2
+  echo "ESLint is not installed at the Composer root (${PROJECT_ROOT}/node_modules)." >&2
+  echo "Re-run the DDEV add-on installer and accept Node dependency installation, or install eslint manually in the Composer root (npm install / yarn install)." >&2
   exit 127
 fi
 RESOLVE_PLUGINS_DIR="$NODE_PATH"
@@ -113,7 +114,7 @@ fi
 if [ "$has_config" = false ] && [ "$ESLINT_CONFIG_MODE" != "nearest" ]; then
   # Fixed mode: prefer project passing config, then project base config.
   if [ -z "$FIXED_CONFIG" ]; then
-    echo "ESLint config file is missing. Create .eslintrc.passing.json (or .eslintrc.json) in the project root, or pass --config." >&2
+    echo "ESLint config file is missing. Create .eslintrc.passing.json (or .eslintrc.json) in the Composer root, or pass --config." >&2
     exit 2
   fi
   CMD+=(--config="$FIXED_CONFIG")
@@ -170,8 +171,8 @@ normalize_path() {
   local path="$1"
   # Convert container/short paths into repo-relative paths for consistent matching.
   path="$(map_path "$path")"
-  if [[ "$path" == /var/www/html/* ]]; then
-    path="${path#/var/www/html/}"
+  if [[ "$path" == "${PROJECT_ROOT}/"* ]]; then
+    path="${path#${PROJECT_ROOT}/}"
   fi
   if [ "$DOCROOT" != "web" ] && [[ "$path" == web/* ]]; then
     path="${DOCROOT}/${path#web/}"
@@ -194,8 +195,8 @@ normalize_config_path() {
   local path="$1"
   # ESLint --config paths need to be relative to the repo root in the container.
   path="$(map_path "$path")"
-  if [[ "$path" == /var/www/html/* ]]; then
-    path="${path#/var/www/html/}"
+  if [[ "$path" == "${PROJECT_ROOT}/"* ]]; then
+    path="${path#${PROJECT_ROOT}/}"
   fi
   if [ "$DOCROOT" != "web" ] && [[ "$path" == web/* ]]; then
     path="${DOCROOT}/${path#web/}"

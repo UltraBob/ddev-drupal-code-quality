@@ -2,6 +2,9 @@
 #ddev-generated
 set -u
 
+source /mnt/ddev_config/commands/helpers/path-map.sh
+cd "$COMPOSER_ROOT"
+
 print_help() {
   cat <<'USAGE'
 Usage: ddev composer-validate [args]

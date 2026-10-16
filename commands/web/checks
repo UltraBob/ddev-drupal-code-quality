@@ -49,13 +49,18 @@ for tool in "${TOOLS[@]}"; do
     continue
   fi
 
-  if [ "$tool" = "php-parallel-lint" ] && \
-    [ ! -x "vendor/bin/parallel-lint" ] && \
-    [ ! -x "vendor/bin/php-parallel-lint" ]; then
+  if [ "$tool" = "php-parallel-lint" ]; then
+    composer_root="$(cat /mnt/ddev_config/.dcq-composer-root 2>/dev/null || printf '.')"
+    composer_root="${composer_root#/}"
+    composer_root="${composer_root%/}"
+    [ -n "$composer_root" ] || composer_root="."
+    if [ ! -x "${composer_root}/vendor/bin/parallel-lint" ] && \
+      [ ! -x "${composer_root}/vendor/bin/php-parallel-lint" ]; then
     # Skip when the binary isn't installed; keeps the run useful for new projects.
     echo "SKIP: php-parallel-lint is not installed in vendor/bin." | tee -a "$log_file"
     STATUS["$tool"]=SKIP
     continue
+    fi
   fi
 
   # Use compact formatter for stylelint in checks mode to avoid RangeError

@@ -32,30 +32,6 @@ truthy() {
   return 1
 }
 
-detect_docroot() {
-  local config_path="$1"
-  local value=""
-
-  if [ -f "$config_path" ]; then
-    value="$(awk -F: '/^[[:space:]]*docroot:/ {
-      val=$2
-      sub(/^[[:space:]]+/, "", val)
-      sub(/[[:space:]]+$/, "", val)
-      gsub(/^"|"$/, "", val)
-      gsub(/^'\''|'\''$/, "", val)
-      print val
-      exit
-    }' "$config_path")"
-  fi
-
-  value="${value#/}"
-  value="${value%/}"
-  if [ -z "$value" ]; then
-    value="web"
-  fi
-  printf '%s' "$value"
-}
-
 detect_nodejs_version() {
   # Read the nodejs_version value from .ddev/config.yaml.
   # Returns the version string (e.g. "16", "20") or empty if not set.
@@ -2079,7 +2055,7 @@ if [ -z "$app_root" ]; then
   app_root="$(cd "$cwd/.." && pwd)"
 fi
 
-dcq_docroot="$(detect_docroot "${app_root%/}/.ddev/config.yaml")"
+dcq_docroot="${DDEV_DOCROOT-web}"
 DCQ_DOCROOT="$dcq_docroot"
 DOCROOT_CONTAINER="/var/www/html/${DCQ_DOCROOT}"
 DOCROOT_COREDIR="${DOCROOT_CONTAINER}/core"

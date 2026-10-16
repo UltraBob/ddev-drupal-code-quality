@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #ddev-generated
-# Root-only Node toolchain resolver shared by every Node wrapper.
+# Composer-root Node toolchain resolver shared by every Node wrapper.
 #
-# Policy: the add-on installs Node tooling at the project root only. No other
-# locations are consulted. See docs/decisions/node-deps-root-only-2026-01-22.md.
+# Policy: the add-on installs Node tooling at the Composer root only. No other
+# locations are consulted.
 #
 # Usage:
 #   source /mnt/ddev_config/commands/helpers/node-toolchain.sh
@@ -19,7 +19,7 @@ resolve_node_tool() {
     return 1
   fi
   # Compute at call time so the wrapper's PROJECT_ROOT assignment is respected.
-  local nm_root="${PROJECT_ROOT:-/var/www/html}/node_modules"
+  local nm_root="${PROJECT_ROOT:-${COMPOSER_ROOT:-/var/www/html}}/node_modules"
   local candidate="${nm_root}/${subpath}"
   if [ -e "$candidate" ]; then
     TOOLCHAIN_BIN="$candidate"

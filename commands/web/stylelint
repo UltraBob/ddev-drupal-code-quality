@@ -5,7 +5,7 @@ set -u
 source /mnt/ddev_config/commands/helpers/path-map.sh
 source /mnt/ddev_config/commands/helpers/node-toolchain.sh
 
-PROJECT_ROOT="/var/www/html"
+PROJECT_ROOT="$COMPOSER_ROOT"
 TOOLCHAIN_BIN=""
 NODE_PATH=""
 
@@ -25,7 +25,7 @@ if [ "${NODE_MAJOR:-0}" -lt 18 ]; then
 fi
 
 if ! resolve_node_tool "stylelint/bin/stylelint.mjs"; then
-  echo "Stylelint is not installed at the project root (${PROJECT_ROOT}/node_modules)." >&2
+  echo "Stylelint is not installed at the Composer root (${PROJECT_ROOT}/node_modules)." >&2
   echo "Re-run the DDEV add-on installer and accept Node dependency installation," >&2
   echo "or install stylelint manually (npm install / yarn install)." >&2
   exit 127

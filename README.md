@@ -68,24 +68,24 @@ the project type each one is designed for.
 - `install.yaml`: DDEV add-on install definition.
 
 During installation, the add-on copies Drupal.org GitLab CI template default
-config files into the project root. If conflicts are detected, you can choose to
-back up and replace, skip, or abort. Skipping a config may diverge from the
-Drupal.org GitLab CI template defaults. The installer will prompt for:
+config files into DDEV's Composer root. If conflicts are detected, you can
+choose to back up and replace, skip, or abort. Skipping a config may diverge
+from the Drupal.org GitLab CI template defaults. The installer will prompt for:
 - A pre-prompt summary of recommended defaults.
 - Accept recommended settings (default: yes). Press Enter to apply the
   recommended defaults without further prompts.
 - Conflict handling (default: skip unless you choose replace/abort).
 - PHP tooling dependencies (install `drupal/core-dev` or run `ddev composer install`).
 - PHPStan default level (keep GitLab CI template level 0 or choose a local level 0-10; recommend 3).
-- Node toolchain install in the project root and package manager selection.
-- Missing Drupal JS dependencies when a root `package.json` exists.
+- Node toolchain install in the Composer root and package manager selection.
+- Missing Drupal JS dependencies when a Composer-root `package.json` exists.
 - Optional `.gitignore` update for `dcq-reports/` (default: yes).
 - IDE settings (merge/overwrite/skip when templates are available).
 The installer runs in bash so it does not require host PHP.
 
 Recommended settings apply these defaults without further prompts:
 replace conflicts (with backups), install PHP dev tools, install JS deps in the
-project root, set PHPStan level 3, merge IDE settings, and add `dcq-reports/`
+Composer root, set PHPStan level 3, merge IDE settings, and add `dcq-reports/`
 to `.gitignore`. Non-interactive runs with no overrides apply the recommended
 settings automatically.
 
@@ -93,6 +93,26 @@ If PHPStan/PHPCS/PHPCBF binaries are missing, the installer prompts to add
 `drupal/core-dev` (or to run `ddev composer install` if it is already required).
 It uses `ddev composer require --with-all-dependencies` to avoid lockfile
 conflicts.
+
+### Non-standard layouts
+
+The add-on supports DDEV projects whose Composer project is below the DDEV app
+root. It resolves the effective `docroot` from `DDEV_DOCROOT` and prefers
+`DDEV_COMPOSER_ROOT` when DDEV provides it. When that variable is unavailable,
+the installer falls back to `composer_root` in `.ddev/config.yaml`.
+
+For example, this superproject layout is supported:
+
+```yaml
+# .ddev/config.yaml
+docroot: drupal/web
+composer_root: drupal
+```
+
+For this layout, the installer writes `phpstan.neon` and `.phpcs.xml` to
+`drupal/`, and PHP commands run with `drupal/` as their working directory.
+The JavaScript toolchain and all generated code-quality configuration remain in
+the Composer root.
 
 ## Usage
 
@@ -147,7 +167,9 @@ and filter by `@recommended` to find them.
 ## Requirements
 
 - DDEV project with Drupal core in the configured docroot (default `web/`).
-  The installer records the docroot in `.ddev/.dcq-docroot` for wrappers.
+  The installer records resolved docroot and Composer-root values in
+  `.ddev/.dcq-docroot` and `.ddev/.dcq-composer-root` as fallbacks for
+  wrappers when DDEV does not expose the relevant environment variables.
 - Composer dependencies installed (`ddev composer install`).
 - Node toolchain for JS linting (npm or yarn; the installer selects based on
   lockfiles and can create a root `package.json` from Drupal core when missing).
@@ -156,16 +178,16 @@ and filter by `@recommended` to find them.
 ## Configuration notes
 
 - Reports:
-  - `dcq-reports/` is created at the project root when running `checks`
+  - `dcq-reports/` is created at the DDEV project root when running `checks`
     or the `*-fix` commands (logs + patch previews).
   - Add `dcq-reports/` to `.gitignore` if you do not want to track it.
-- ESLint toolchain: Node tooling is installed at the project root only
+- ESLint toolchain: Node tooling is installed at the Composer root only
   (see `docs/decisions/node-deps-root-only-2026-01-22.md`). All wrappers resolve
-  tools from `node_modules/` at the project root.
+  tools from `node_modules/` at the Composer root.
 - ESLint config mode:
   - `ESLINT_CONFIG_MODE=nearest` (default) groups by nearest config file.
   - `ESLINT_CONFIG_MODE=fixed` prefers `.eslintrc.passing.json`, then
-    `.eslintrc.json` in the project root.
+    `.eslintrc.json` in the Composer root.
 - ESLint warning visibility (GitLab CI parity):
   - `DCQ_ESLINT_QUIET=1` (default) adds `--quiet` to `ddev eslint` and
     `ddev eslint-fix`, so warnings are suppressed.
@@ -226,8 +248,8 @@ and filter by `@recommended` to find them.
     debt so only new regressions fail (see PHPStan baseline below).
 - PHPStan baseline:
   - Generate a baseline with `ddev phpstan --generate-baseline`.
-  - This writes `phpstan-baseline.neon` at the project root and updates
-    `phpstan.neon` to include it.
+  - This writes `phpstan-baseline.neon` in the Composer root and updates
+    `phpstan.neon` there to include it.
   - Use a baseline to suppress known issues in legacy code or core defaults
     (for example, the shipped `settings.php` files), then work it down over
     time. Avoid using it to hide new regressions.
@@ -248,11 +270,11 @@ and filter by `@recommended` to find them.
   `.ddev/config.yaml` under `web_environment`.
 - `DCQ_INSTALL_DEPS`: `install`/`true` to auto-install missing `drupal/core-dev`,
   `skip`/`false` to skip, or unset to prompt when interactive.
-- `DCQ_INSTALL_NODE_DEPS`: `root` to install JS deps in the project root (creates
-  a root `package.json` from core if missing; name uses the DDEV project name,
-  and prompts to add missing Drupal deps when a root `package.json` already
-  exists), `install`/`true` to auto-install in the project root, `skip`/`false`
-  to skip, or unset to prompt (default: install in the project root). The
+- `DCQ_INSTALL_NODE_DEPS`: `root` to install JS deps in the Composer root (creates
+  a Composer-root `package.json` from core if missing; name uses the DDEV project
+  name, and prompts to add missing Drupal deps when a Composer-root `package.json`
+  already exists), `install`/`true` to auto-install in the Composer root,
+  `skip`/`false` to skip, or unset to prompt (default: install in the Composer root). The
   installer selects npm/yarn based on existing lockfiles.
 - `DCQ_SCSS_SUPPORT`: `install`/`true` to configure Stylelint SCSS support when
   `.scss`/`.sass` files are detected (adds `stylelint-config-standard-scss` to

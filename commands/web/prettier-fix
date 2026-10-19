@@ -12,8 +12,8 @@ Usage: ddev prettier-fix [args]
 
 Applies Prettier formatting directly to files (matches standard prettier --write behavior).
 
-Use --preview to see a patch preview and confirm before applying fixes.
-This generates a patch in dcq-reports/ and prompts for confirmation.
+Use --preview to write a patch of the pending changes to dcq-reports/ and
+confirm before applying them.
 
 Examples:
   ddev prettier-fix                    # Apply formatting directly
@@ -24,61 +24,23 @@ USAGE
 
 PROJECT_ROOT="/var/www/html"
 DOCROOT="${DCQ_DOCROOT:-web}"
-DOCROOT_PATH="${PROJECT_ROOT}/${DOCROOT}"
 TOOLCHAIN_BIN=""
 NODE_PATH=""
 
-has_help=false
-has_version=false
-has_positional=false
-has_config=false
-seen_double_dash=false
-explicit_paths=false
 preview_mode=false
 clean_args=()
+strip_after_double_dash=false
 
 for arg in "$@"; do
-  if [ "$arg" = "--preview" ]; then
+  if [ "$strip_after_double_dash" = false ] && [ "$arg" = "--preview" ]; then
     preview_mode=true
     continue
   fi
+  if [ "$arg" = "--" ]; then
+    strip_after_double_dash=true
+  fi
   clean_args+=("$arg")
 done
-
-for arg in "${clean_args[@]}"; do
-  if [ "$seen_double_dash" = true ]; then
-    has_positional=true
-    explicit_paths=true
-    break
-  fi
-  case "$arg" in
-    --)
-      seen_double_dash=true
-      ;;
-    -h|--help)
-      has_help=true
-      ;;
-    -V|--version)
-      has_version=true
-      ;;
-    -c|--config|--config=*)
-      has_config=true
-      ;;
-    -* )
-      ;;
-    *)
-      has_positional=true
-      explicit_paths=true
-      ;;
-  esac
-  if [ "$has_help" = true ] || [ "$has_version" = true ]; then
-    break
-  fi
-done
-
-if [ "$has_help" = true ]; then
-  print_help
-fi
 
 if ! command -v node >/dev/null 2>&1; then
   echo "Node.js is not available in the DDEV web container." >&2
@@ -92,223 +54,217 @@ if ! resolve_node_tool "prettier/bin/prettier.cjs"; then
   exit 127
 fi
 
-if [ "$has_help" = true ]; then
-  node "$TOOLCHAIN_BIN" --help
-  exit $?
-fi
+# --- Argument translation ---
+# Map host-absolute paths (from IDE invocations) to container paths. User
+# supplied relative paths are passed through untouched and resolve against
+# the project root, matching the rest of the wrapper suite.
+#
+# flag_args: options and any values they consume.
+# path_args: file targets, passed after -- so that a leading dash in a
+#            filename is not read as an option.
 
-if [ "$has_version" = true ]; then
-  node "$TOOLCHAIN_BIN" --version
-  exit $?
-fi
+flag_args=()
+path_args=()
+has_config=false
+has_stdin_filepath=false
+after_double_dash=false
+map_next=false
+pass_next=false
 
-normalize_path() {
-  local path="$1"
-  path="$(map_path "$path")"
-  if [[ "$path" == /var/www/html/* ]]; then
-    path="${path#/var/www/html/}"
+for arg in "${clean_args[@]}"; do
+  if [ "$after_double_dash" = true ]; then
+    path_args+=("$(map_path "$arg")")
+    continue
   fi
-  if [ "$DOCROOT" != "web" ] && [[ "$path" == web/* ]]; then
-    path="${DOCROOT}/${path#web/}"
+  if [ "$map_next" = true ]; then
+    flag_args+=("$(map_path "$arg")")
+    map_next=false
+    continue
   fi
-  if [[ "$path" == "${DOCROOT}/"* ]]; then
-    echo "$path"
-    return
-  fi
-  if [[ "$path" == modules/* || "$path" == themes/* || "$path" == profiles/* ]]; then
-    echo "${DOCROOT}/$path"
-    return
-  fi
-  echo "$path"
-}
-
-TARGET_PREFIXES=()
-RAW_PATHS=()
-seen_double_dash=false
-args=("${clean_args[@]}")
-arg_count=${#args[@]}
-index=0
-while [ "$index" -lt "$arg_count" ]; do
-  arg="${args[$index]}"
-  if [ "$seen_double_dash" = true ]; then
-    RAW_PATHS+=("$arg")
-    index=$((index + 1))
+  if [ "$pass_next" = true ]; then
+    flag_args+=("$arg")
+    pass_next=false
     continue
   fi
   case "$arg" in
-    --)
-      seen_double_dash=true
+    -h|--help)
+      print_help
+      exec env NODE_PATH="$NODE_PATH" node "$TOOLCHAIN_BIN" --help
       ;;
-    -c|--config)
-      index=$((index + 1))
+    -V|--version)
+      exec env NODE_PATH="$NODE_PATH" node "$TOOLCHAIN_BIN" --version
+      ;;
+    --)
+      after_double_dash=true
+      ;;
+    --config)
+      has_config=true
+      flag_args+=("$arg")
+      map_next=true
       ;;
     --config=*)
+      has_config=true
+      flag_args+=("--config=$(map_path "${arg#*=}")")
+      ;;
+    --ignore-path|--find-config-path)
+      flag_args+=("$arg")
+      map_next=true
+      ;;
+    --ignore-path=*|--find-config-path=*)
+      flag_args+=("${arg%%=*}=$(map_path "${arg#*=}")")
+      ;;
+    --stdin-filepath)
+      has_stdin_filepath=true
+      flag_args+=("$arg")
+      map_next=true
+      ;;
+    --stdin-filepath=*)
+      has_stdin_filepath=true
+      flag_args+=("--stdin-filepath=$(map_path "${arg#*=}")")
+      ;;
+    --parser|--plugin|--log-level|--loglevel|--config-precedence|--cursor-offset|--range-start|--range-end|--cache-location|--cache-strategy)
+      flag_args+=("$arg")
+      pass_next=true
       ;;
     -*)
+      flag_args+=("$arg")
       ;;
     *)
-      RAW_PATHS+=("$arg")
+      path_args+=("$(map_path "$arg")")
       ;;
   esac
-  index=$((index + 1))
 done
 
-if [ "${#RAW_PATHS[@]}" -gt 0 ]; then
-  for raw in "${RAW_PATHS[@]}"; do
-    TARGET_PREFIXES+=("$(normalize_path "$raw")")
-  done
-else
-  TARGET_PREFIXES+=("$DOCROOT")
+# Base command shared by every prettier run below, so the preview and the
+# apply can never resolve config, ignore rules, or targets differently.
+BASE_CMD=(env "NODE_PATH=$NODE_PATH" node "$TOOLCHAIN_BIN")
+if [ "$has_config" = false ]; then
+  if [ ! -f "${PROJECT_ROOT}/.prettierrc.json" ]; then
+    echo "Prettier config file is missing. Create .prettierrc.json in the project root (for example by reinstalling the add-on)." >&2
+    exit 2
+  fi
+  BASE_CMD+=(--config "${PROJECT_ROOT}/.prettierrc.json")
+  # Match the check wrapper: scope by the project .prettierignore alone, so
+  # check and fix agree on the file set.
+  if [ -f "${PROJECT_ROOT}/.prettierignore" ]; then
+    BASE_CMD+=(--ignore-path "${PROJECT_ROOT}/.prettierignore")
+  fi
 fi
+BASE_CMD+=("${flag_args[@]}")
 
-FINAL_ARGS=()
-normalize_config_path() {
-  local path="$1"
-  path="$(map_path "$path")"
-  if [[ "$path" == /var/www/html/* ]]; then
-    path="${path#/var/www/html/}"
-  fi
-  if [ "$DOCROOT" != "web" ] && [[ "$path" == web/* ]]; then
-    path="${DOCROOT}/${path#web/}"
-  fi
-  echo "$path"
-}
-
-normalize_docroot_arg() {
-  local arg="$1"
-  arg="$(map_path "$arg")"
-  if [[ "$arg" == /var/www/html/* ]]; then
-    arg="${arg#/var/www/html/}"
-  fi
-  if [ "$DOCROOT" != "web" ] && [[ "$arg" == web/* ]]; then
-    arg="${DOCROOT}/${arg#web/}"
-  fi
-  if [[ "$arg" == "${DOCROOT}/"* ]]; then
-    arg="${arg#${DOCROOT}/}"
-  elif [ "$arg" = "$DOCROOT" ]; then
-    arg="."
-  fi
-  printf '%s' "$arg"
-}
-
-if [ "$explicit_paths" = true ]; then
-  args=("${clean_args[@]}")
-  arg_count=${#args[@]}
-  index=0
-  seen_double_dash=false
-  while [ "$index" -lt "$arg_count" ]; do
-    arg="${args[$index]}"
-    if [ "$seen_double_dash" = true ]; then
-      arg="$(normalize_docroot_arg "$arg")"
-      FINAL_ARGS+=("$arg")
-      index=$((index + 1))
-      continue
-    fi
-    case "$arg" in
-      --)
-        seen_double_dash=true
-        FINAL_ARGS+=("$arg")
-        ;;
-      -c|--config)
-        next_arg="${args[$((index + 1))]:-}"
-        FINAL_ARGS+=("$arg" "$(normalize_config_path "$next_arg")")
-        index=$((index + 1))
-        ;;
-      --config=*)
-        config_value="${arg#*=}"
-        FINAL_ARGS+=("--config=$(normalize_config_path "$config_value")")
-        ;;
-      -*)
-        FINAL_ARGS+=("$arg")
-        ;;
-      *)
-        FINAL_ARGS+=("$(normalize_path "$arg")")
-        ;;
-    esac
-    index=$((index + 1))
-  done
-fi
-
-DEFAULT_FILES=()
-if [ "$explicit_paths" = false ]; then
-  if [ ! -d "$DOCROOT" ]; then
+# Inject the docroot as the default target when no file paths are supplied,
+# so bare `ddev prettier-fix` formats the project's custom code via
+# .prettierignore exclusions. Nothing is injected when prettier will read
+# stdin instead, or when a value-taking flag is left dangling at the end of
+# the arguments (the injected target would be consumed as that flag's value;
+# let prettier report the missing value instead).
+if [ "${#path_args[@]}" -eq 0 ] && [ "$has_stdin_filepath" = false ] && \
+   [ "$map_next" = false ] && [ "$pass_next" = false ]; then
+  case "$DOCROOT" in
+    /*|..|../*|*/../*|*/..)
+      echo "Configured docroot '$DOCROOT' is not inside the project root. Fix .ddev/.dcq-docroot." >&2
+      exit 2
+      ;;
+  esac
+  if [ ! -d "${PROJECT_ROOT}/${DOCROOT}" ]; then
     echo "Configured docroot '$DOCROOT' does not exist. Nothing to format." >&2
     exit 2
   fi
-  DEFAULT_FILES=("$DOCROOT")
+  path_args+=("$DOCROOT")
 fi
 
-FILES=()
-if [ "$explicit_paths" = false ]; then
-  FILES=("${DEFAULT_FILES[@]}")
-else
-  FILES=("${FINAL_ARGS[@]}")
-fi
-
-DEFAULT_CONFIG=""
-if [ -f "${PROJECT_ROOT}/.prettierrc.json" ]; then
-  DEFAULT_CONFIG="${PROJECT_ROOT}/.prettierrc.json"
-elif [ "$has_config" = false ]; then
-  echo "Prettier config file is missing. Create .prettierrc.json in the project root (for example by reinstalling the add-on)." >&2
-  exit 2
-fi
+cd "$PROJECT_ROOT"
 
 # ============================================================================
-# PREVIEW MODE: Generate patch, show preview, prompt to apply
+# PREVIEW MODE: Write a patch of the pending changes, then confirm
 # ============================================================================
 if [ "$preview_mode" = true ]; then
-  REPORT_DIR="dcq-reports"
-  mkdir -p "$REPORT_DIR"
-  PATCH_FILE="${REPORT_DIR}/_prettier.patch"
-
-  tmp_root="$(mktemp -d)"
-  trap 'rm -rf "$tmp_root"' EXIT
-
-  cd "$PROJECT_ROOT"
-  tar -cf - \
-    --exclude=./.git \
-    --exclude=./.trunk \
-    --exclude=./node_modules \
-    --exclude="./${DOCROOT}/*/node_modules" \
-    --exclude=./vendor \
-    --exclude=./dcq-reports \
-    --exclude='*/.git' \
-    --exclude='*/.git/*' \
-    . | (cd "$tmp_root" && tar -xf -)
-
-  preview_cmd=(env "NODE_PATH=$NODE_PATH" node "$TOOLCHAIN_BIN")
-  if [ -n "$DEFAULT_CONFIG" ] && [ "$has_config" = false ]; then
-    preview_cmd+=(--config "$DEFAULT_CONFIG")
+  if [ "$has_stdin_filepath" = true ]; then
+    echo "Cannot combine --preview with --stdin-filepath." >&2
+    exit 2
   fi
-  preview_cmd+=(--write)
-  
-  (cd "$tmp_root" && "${preview_cmd[@]}" "${FILES[@]}")
-  preview_exit=$?
-
-  if [ "${preview_exit:-0}" -ne 0 ]; then
-    echo "Prettier preview failed (exit ${preview_exit})." >&2
-    exit "$preview_exit"
-  fi
-
-  : > "${PATCH_FILE}.raw"
-  for prefix in "${TARGET_PREFIXES[@]}"; do
-    [ -z "$prefix" ] && continue
-    if [ ! -e "$PROJECT_ROOT/$prefix" ] && [ ! -e "$tmp_root/$prefix" ]; then
-      continue
-    fi
-    diff -ruN \
-      --exclude=.git \
-      --exclude='.git/*' \
-      "$PROJECT_ROOT/$prefix" "$tmp_root/$prefix" >> "${PATCH_FILE}.raw" || true
+  # An explicit output-mode flag would make the listing run write files or
+  # print nothing to diff.
+  for arg in "${flag_args[@]}"; do
+    case "$arg" in
+      -w|--write|-c|--check|-l|--list-different)
+        echo "Cannot combine --preview with ${arg}." >&2
+        exit 2
+        ;;
+    esac
   done
 
-  sed -E "s/diff -ruN( '--exclude=[^']+')+/diff -ruN/" "${PATCH_FILE}.raw" > "$PATCH_FILE"
-  rm -f "${PATCH_FILE}.raw"
-
-  change_count=$(grep -c '^diff -ruN ' "$PATCH_FILE" || true)
-  if [ "$change_count" -eq 0 ]; then
-    change_count=$(grep -c '^--- ' "$PATCH_FILE" || true)
+  REPORT_DIR="dcq-reports"
+  if ! mkdir -p "$REPORT_DIR"; then
+    echo "Cannot create the ${REPORT_DIR}/ report directory." >&2
+    exit 2
   fi
+  PATCH_FILE="${REPORT_DIR}/_prettier.patch"
+  # Truncate up front so a failure below can never leave an earlier run's
+  # patch in place to be mistaken for this one.
+  if ! : > "$PATCH_FILE"; then
+    echo "Cannot write ${PATCH_FILE}." >&2
+    exit 2
+  fi
+
+  if ! tmp_dir="$(mktemp -d)" || [ -z "$tmp_dir" ]; then
+    echo "Cannot create a temporary directory for the preview." >&2
+    exit 2
+  fi
+  trap 'rm -rf "$tmp_dir"' EXIT
+  changed_list="${tmp_dir}/changed"
+  formatted="${tmp_dir}/formatted"
+
+  # Ask prettier which files the apply run would rewrite, using exactly the
+  # arguments that run will use. Nothing is copied and nothing is written,
+  # so the preview cannot resolve config, ignore rules, or targets any
+  # differently than the apply does.
+  if [ "${#path_args[@]}" -gt 0 ]; then
+    "${BASE_CMD[@]}" --list-different -- "${path_args[@]}" > "$changed_list"
+  else
+    "${BASE_CMD[@]}" --list-different > "$changed_list"
+  fi
+  list_exit=$?
+  if [ "$list_exit" -gt 1 ]; then
+    echo "Prettier preview failed (exit ${list_exit})." >&2
+    exit "$list_exit"
+  fi
+
+  # GNU patch reads an unquoted diff header filename only up to the first
+  # whitespace, so quote the way git does when the name needs it.
+  diff_label() {
+    local name="${1}${2}"
+    case "$2" in
+      *[[:space:]\"\\]*)
+        name="${name//\\/\\\\}"
+        name="${name//\"/\\\"}"
+        printf '"%s"' "$name"
+        ;;
+      *)
+        printf '%s' "$name"
+        ;;
+    esac
+  }
+
+  change_count=0
+  while IFS= read -r changed_file; do
+    [ -z "$changed_file" ] && continue
+    change_count=$((change_count + 1))
+    # Prettier prints the formatted result to stdout when --write is absent,
+    # so the diff below is exactly the edit the apply run would make.
+    if ! "${BASE_CMD[@]}" -- "$changed_file" > "$formatted"; then
+      echo "Could not format ${changed_file} for the preview." >&2
+      exit 2
+    fi
+    diff -u --label "$(diff_label "a/" "$changed_file")" \
+      --label "$(diff_label "b/" "$changed_file")" \
+      "$changed_file" "$formatted" >> "$PATCH_FILE"
+    diff_exit=$?
+    if [ "$diff_exit" -gt 1 ]; then
+      echo "Failed to diff ${changed_file} for the preview." >&2
+      exit 2
+    fi
+  done < "$changed_list"
 
   if [ "$change_count" -eq 0 ]; then
     echo "No Prettier formatting changes to apply." >&2
@@ -329,40 +285,14 @@ if [ "$preview_mode" = true ]; then
     echo "No TTY available. Not applying changes." >&2
     exit 0
   fi
-
-  # Apply fixes
-  cd "$PROJECT_ROOT"
-  fix_cmd=(env "NODE_PATH=$NODE_PATH" node "$TOOLCHAIN_BIN")
-  if [ -n "$DEFAULT_CONFIG" ] && [ "$has_config" = false ]; then
-    fix_cmd+=(--config "$DEFAULT_CONFIG")
-  fi
-  fix_cmd+=(--write)
-  
-  "${fix_cmd[@]}" "${FILES[@]}"
-  fix_exit=$?
-
-  if [ "$fix_exit" -eq 0 ]; then
-    echo "Prettier formatting applied." >&2
-  else
-    echo "Prettier exited with status ${fix_exit}." >&2
-  fi
-
-  echo "Running Prettier check to verify..." >&2
-  ./.ddev/commands/web/prettier "${clean_args[@]}"
-  check_exit=$?
-  exit "$check_exit"
 fi
 
 # ============================================================================
-# DEFAULT MODE: Apply formatting directly (standard prettier --write behavior)
+# APPLY: standard prettier --write behavior
 # ============================================================================
-cd "$PROJECT_ROOT"
-
-fix_cmd=(env "NODE_PATH=$NODE_PATH" node "$TOOLCHAIN_BIN")
-if [ -n "$DEFAULT_CONFIG" ] && [ "$has_config" = false ]; then
-  fix_cmd+=(--config "$DEFAULT_CONFIG")
+if [ "${#path_args[@]}" -gt 0 ]; then
+  "${BASE_CMD[@]}" --write -- "${path_args[@]}"
+else
+  "${BASE_CMD[@]}" --write
 fi
-fix_cmd+=(--write)
-
-"${fix_cmd[@]}" "${FILES[@]}"
 exit $?

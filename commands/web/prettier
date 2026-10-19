@@ -5,63 +5,12 @@ set -u
 source /mnt/ddev_config/commands/helpers/path-map.sh
 source /mnt/ddev_config/commands/helpers/node-toolchain.sh
 
-print_help() {
-  cat <<'USAGE'
-Usage: ddev prettier [args]
-
-Runs Prettier in check mode inside the DDEV web container with Drupal CI config.
-USAGE
-}
-
-has_help=false
-has_version=false
-has_positional=false
-has_config=false
-seen_double_dash=false
-explicit_paths=false
-
-for arg in "$@"; do
-  if [ "$seen_double_dash" = true ]; then
-    has_positional=true
-    explicit_paths=true
-    break
-  fi
-  case "$arg" in
-    --)
-      seen_double_dash=true
-      ;;
-    -h|--help)
-      has_help=true
-      ;;
-    -V|--version)
-      has_version=true
-      ;;
-    -c|--config|--config=*)
-      has_config=true
-      ;;
-    --)
-      ;;
-    -* )
-      ;;
-    *)
-      has_positional=true
-      explicit_paths=true
-      ;;
-  esac
-  if [ "$has_help" = true ] || [ "$has_version" = true ]; then
-    break
-  fi
-done
-
-if [ "$has_help" = true ]; then
-  print_help
-fi
-
 PROJECT_ROOT="/var/www/html"
 DOCROOT="${DCQ_DOCROOT:-web}"
-DOCROOT_PATH="${PROJECT_ROOT}/${DOCROOT}"
 TOOLCHAIN_BIN=""
 NODE_PATH=""
+
+# --- Toolchain resolution (root only) ---
 
 if ! command -v node >/dev/null 2>&1; then
   echo "Node.js is not available in the DDEV web container." >&2
@@ -69,104 +18,138 @@ if ! command -v node >/dev/null 2>&1; then
   exit 127
 fi
 
-if ! resolve_node_tool ".bin/prettier"; then
+if ! resolve_node_tool "prettier/bin/prettier.cjs"; then
   echo "Prettier is not installed at the project root (${PROJECT_ROOT}/node_modules)." >&2
   echo "Re-run the DDEV add-on installer and accept Node dependency installation, or install prettier manually in the project root (npm install / yarn install)." >&2
   exit 127
 fi
 
-if [ "$has_help" = true ]; then
-  "$TOOLCHAIN_BIN" --help
-  exit $?
-fi
+# --- Argument translation ---
+# Map host-absolute paths (from IDE invocations) to container paths. User
+# supplied relative paths are passed through untouched and resolve against
+# the project root, matching the rest of the wrapper suite.
+#
+# flag_args: options and any values they consume.
+# path_args: file targets, passed after -- so that a leading dash in a
+#            filename is not read as an option.
 
-if [ "$has_version" = true ]; then
-  "$TOOLCHAIN_BIN" --version
-  exit $?
-fi
+flag_args=()
+path_args=()
+has_config=false
+has_stdin_filepath=false
+after_double_dash=false
+map_next=false
+pass_next=false
 
-# Run from the Drupal docroot so config resolution matches CI expectations.
-cd "$DOCROOT"
+for arg in "$@"; do
+  if [ "$after_double_dash" = true ]; then
+    path_args+=("$(map_path "$arg")")
+    continue
+  fi
+  if [ "$map_next" = true ]; then
+    flag_args+=("$(map_path "$arg")")
+    map_next=false
+    continue
+  fi
+  if [ "$pass_next" = true ]; then
+    flag_args+=("$arg")
+    pass_next=false
+    continue
+  fi
+  case "$arg" in
+    -h|--help)
+      cat <<'USAGE'
+Usage: ddev prettier [args]
 
-CMD=(env "NODE_PATH=$NODE_PATH" "$TOOLCHAIN_BIN" --check)
+Runs Prettier in check mode inside the DDEV web container with Drupal CI config.
+USAGE
+      exec env NODE_PATH="$NODE_PATH" node "$TOOLCHAIN_BIN" --help
+      ;;
+    -V|--version)
+      exec env NODE_PATH="$NODE_PATH" node "$TOOLCHAIN_BIN" --version
+      ;;
+    --)
+      after_double_dash=true
+      ;;
+    --preview)
+      echo "Error: --preview is not supported by ddev prettier." >&2
+      echo "Use 'ddev prettier-fix --preview' to preview formatting fixes." >&2
+      exit 1
+      ;;
+    --config)
+      has_config=true
+      flag_args+=("$arg")
+      map_next=true
+      ;;
+    --config=*)
+      has_config=true
+      flag_args+=("--config=$(map_path "${arg#*=}")")
+      ;;
+    --ignore-path|--find-config-path)
+      flag_args+=("$arg")
+      map_next=true
+      ;;
+    --ignore-path=*|--find-config-path=*)
+      flag_args+=("${arg%%=*}=$(map_path "${arg#*=}")")
+      ;;
+    --stdin-filepath)
+      has_stdin_filepath=true
+      flag_args+=("$arg")
+      map_next=true
+      ;;
+    --stdin-filepath=*)
+      has_stdin_filepath=true
+      flag_args+=("--stdin-filepath=$(map_path "${arg#*=}")")
+      ;;
+    --parser|--plugin|--log-level|--loglevel|--config-precedence|--cursor-offset|--range-start|--range-end|--cache-location|--cache-strategy)
+      flag_args+=("$arg")
+      pass_next=true
+      ;;
+    -*)
+      flag_args+=("$arg")
+      ;;
+    *)
+      path_args+=("$(map_path "$arg")")
+      ;;
+  esac
+done
+
+CMD=(env "NODE_PATH=$NODE_PATH" node "$TOOLCHAIN_BIN" --check)
 if [ "$has_config" = false ]; then
   if [ ! -f "${PROJECT_ROOT}/.prettierrc.json" ]; then
     echo "Prettier config file is missing. Create .prettierrc.json in the project root (for example by reinstalling the add-on)." >&2
     exit 2
   fi
-  CMD+=(--config="${PROJECT_ROOT}/.prettierrc.json")
+  CMD+=(--config "${PROJECT_ROOT}/.prettierrc.json")
   if [ -f "${PROJECT_ROOT}/.prettierignore" ]; then
-    CMD+=(--ignore-path="${PROJECT_ROOT}/.prettierignore")
+    CMD+=(--ignore-path "${PROJECT_ROOT}/.prettierignore")
   fi
 fi
 
-normalize_prettier_path() {
-  local path="$1"
-  path="$(map_path "$path")"
-  if [[ "$path" == /var/www/html/* ]]; then
-    path="${path#/var/www/html/}"
-  fi
-  if [ "$DOCROOT" != "web" ] && [[ "$path" == web/* ]]; then
-    path="${DOCROOT}/${path#web/}"
-  fi
-  if [ "$path" = "$DOCROOT" ]; then
-    echo "."
-    return
-  fi
-  if [[ "$path" == "${DOCROOT}/"* ]]; then
-    path="${path#${DOCROOT}/}"
-  fi
-  echo "$path"
-}
-
-FINAL_ARGS=()
-if [ "$explicit_paths" = true ]; then
-  args=("$@")
-  arg_count=${#args[@]}
-  index=0
-  seen_double_dash=false
-  while [ "$index" -lt "$arg_count" ]; do
-    arg="${args[$index]}"
-    if [ "$seen_double_dash" = true ]; then
-      FINAL_ARGS+=("$(normalize_prettier_path "$arg")")
-      index=$((index + 1))
-      continue
-    fi
-    case "$arg" in
-      --)
-        seen_double_dash=true
-        FINAL_ARGS+=("$arg")
-        ;;
-      -c|--config|--ignore-path)
-        FINAL_ARGS+=("$arg")
-        next_arg="${args[$((index + 1))]:-}"
-        if [ -n "$next_arg" ]; then
-          next_arg="$(map_path "$next_arg")"
-          FINAL_ARGS+=("$next_arg")
-          index=$((index + 1))
-        fi
-        ;;
-      --config=*|--ignore-path=*)
-        key="${arg%%=*}"
-        value="${arg#*=}"
-        value="$(map_path "$value")"
-        FINAL_ARGS+=("${key}=${value}")
-        ;;
-      -*)
-        FINAL_ARGS+=("$arg")
-        ;;
-      *)
-        FINAL_ARGS+=("$(normalize_prettier_path "$arg")")
-        ;;
-    esac
-    index=$((index + 1))
-  done
+# Inject the docroot as the default target when no file paths are supplied,
+# so bare `ddev prettier` scans the project's custom code via .prettierignore
+# exclusions. Nothing is injected when prettier will read stdin instead, or
+# when a value-taking flag is left dangling at the end of the arguments (the
+# injected target would be consumed as that flag's value; let prettier report
+# the missing value instead).
+if [ "${#path_args[@]}" -eq 0 ] && [ "$has_stdin_filepath" = false ] && \
+   [ "$map_next" = false ] && [ "$pass_next" = false ]; then
+  case "$DOCROOT" in
+    /*|..|../*|*/../*|*/..)
+      echo "Configured docroot '$DOCROOT' is not inside the project root. Fix .ddev/.dcq-docroot." >&2
+      exit 2
+      ;;
+  esac
+  path_args+=("$DOCROOT")
 fi
 
-if [ "$explicit_paths" = false ]; then
-  "${CMD[@]}" "$@" "."
-  exit $?
+# Run from the project root so relative path arguments mean the same thing
+# in every wrapper. Config and ignore files are passed as absolute paths, so
+# config resolution does not depend on the CWD.
+cd "$PROJECT_ROOT"
+
+if [ "${#path_args[@]}" -gt 0 ]; then
+  exec "${CMD[@]}" "${flag_args[@]}" -- "${path_args[@]}"
 fi
 
-"${CMD[@]}" "${FINAL_ARGS[@]}"
-exit $?
+exec "${CMD[@]}" "${flag_args[@]}"

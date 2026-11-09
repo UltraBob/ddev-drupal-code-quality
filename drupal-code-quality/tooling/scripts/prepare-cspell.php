@@ -12,14 +12,15 @@
  *                  writing out. Useful when running locally during development
  *                  to avoid overwriting the input .cspell.json file.
  *
- *   -v --verbose   Show verbose debug output.
+ *   -v --verbose   Show verbose debug output. This can also be enabled by
+ *                  setting environment variable SCRIPT_VERBOSE to 1
  */
 
 // Get the arguments.
-$options = getopt('s:v', ['suffix', 'verbose']);
-$quiet = !array_key_exists('v', $options) && !array_key_exists('verbose', $options);
+$options = getopt('s:v', ['suffix:', 'verbose']);
+$verbose = array_key_exists('v', $options) || array_key_exists('verbose', $options) || getenv('SCRIPT_VERBOSE') == '1';
 $suffix = $options['s'] ?? $options['suffix'] ?? '';
-$quiet ?: print '$suffix=' . $suffix . PHP_EOL;
+$verbose && print '$suffix=' . $suffix . PHP_EOL;
 
 // Get the contents of .cspell.json into an array. This file will be either the
 // projects own .cspell.json or the default copied from /assets.
@@ -28,7 +29,7 @@ $cspell_json = json_decode(file_get_contents($cspell_filename), TRUE);
 if (empty($cspell_json)) {
   throw new RuntimeException("Unable to read $cspell_filename");
 }
-$quiet ?: print 'At start cspell_json=' . print_r($cspell_json, TRUE) . PHP_EOL;
+$verbose && print 'At start cspell_json=' . print_r($cspell_json, TRUE) . PHP_EOL;
 
 // Some directories in the project root are not part of the project.
 $webRoot = getenv('_WEB_ROOT') ?: 'web';
@@ -47,9 +48,9 @@ $non_project_directories = [
 if (($composer_bin_dir = getenv('COMPOSER_BIN_DIR')) && ($ci_project_dir = getenv('CI_PROJECT_DIR'))) {
   $relative_bin_dir = str_replace("$ci_project_dir/", "", $composer_bin_dir);
   $non_project_directories[] = $relative_bin_dir;
-  $quiet ?: print '$ci_project_dir=' . $ci_project_dir . PHP_EOL;
-  $quiet ?: print '$composer_bin_dir=' . $composer_bin_dir . PHP_EOL;
-  $quiet ?: print '$relative_bin_dir=' . $relative_bin_dir . PHP_EOL;
+  $verbose && print '$ci_project_dir=' . $ci_project_dir . PHP_EOL;
+  $verbose && print '$composer_bin_dir=' . $composer_bin_dir . PHP_EOL;
+  $verbose && print '$relative_bin_dir=' . $relative_bin_dir . PHP_EOL;
 }
 
 // Specify the files that are always ignored.
@@ -64,7 +65,7 @@ $ignore_files = [
   '_cspell_unrecognized_words.txt',
   '_cspell_updated_project_words.txt',
 ];
-$quiet ?: print 'Initial $ignore_files=' . print_r($ignore_files, TRUE) . PHP_EOL;
+$verbose && print 'Initial $ignore_files=' . print_r($ignore_files, TRUE) . PHP_EOL;
 
 // Specify the standard files to ignore if _CSPELL_IGNORE_STANDARD_FILES=1.
 $ignore_standard_files = [
@@ -91,12 +92,15 @@ $filenames_to_find = [
 //
 // Get the words from $_CSPELL_WORDS.
 if ($cspell_words = getenv('_CSPELL_WORDS')) {
-  $quiet ?: print 'Initial $cspell_words=' . $cspell_words . PHP_EOL;
+  $verbose && print 'Initial $cspell_words=' . $cspell_words . PHP_EOL;
   // Remove all double quotes and spaces.
-  $cspell_words = str_replace(['"', ' '], ['', ''], $cspell_words);
-  // Remove single quotes from start and end of words, but not from the middle.
-  $words = str_replace([",'", "',"], [',', ','], ',' . $cspell_words . ',');
-  $quiet ?: print '$words=' . $words . PHP_EOL;
+  $words = str_replace(['"', ' '], ['', ''], $cspell_words);
+  // Remove single quotes from the very start or very end of the string.
+  $words = preg_replace("/^(')|(')$/n", '', $words);
+  // Replace ,' and ', with just a , to remove quotes from around words but not
+  // from the middle of a word.
+  $words = str_replace([",'", "',"], [',', ','], $words);
+  $verbose && print 'Modified $words=' . $words . PHP_EOL;
 }
 
 // The module's machine name might not be a real word, so add this. The value of
@@ -127,7 +131,7 @@ foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator('.', Recur
     $ignore_standard_files[] = $file->getPathname();
   }
 }
-$quiet ?: print '$module_name_parts=' . print_r($module_name_parts, TRUE) . PHP_EOL;
+$verbose && print '$module_name_parts=' . print_r($module_name_parts, TRUE) . PHP_EOL;
 
 // Merge into the existing json 'words' value, but cater for that being empty.
 // array_values() is needed after array_unique() to restore the keys to numeric.
@@ -152,10 +156,12 @@ $cspell_json['words'] = array_values(array_filter(array_unique(array_merge(
   // pre-configured dictionaries.
   ['blocklisted'],
   // Add words used in environment variable names.
-  // See https://git.drupalcode.org/project/gitlab_templates/-/issues/3572383
-  ['flagwords', 'mkdocs', 'autorun', 'runtests'],
+  [
+    'flagwords', 'mkdocs', 'autorun', 'runtests', 'dcms', 'browsertest', 'chromedriver', 'dockerhub', 'drupalorg',
+    'drush', 'simpletest', 'minwordlength', 'iid', 'xdg',
+  ],
 ))));
-$quiet ?: print '$cspell_json[\'words\']=' . print_r($cspell_json['words'], TRUE) . PHP_EOL;
+$verbose && print '$cspell_json[\'words\']=' . print_r($cspell_json['words'], TRUE) . PHP_EOL;
 
 // ----------
 // Flag Words
@@ -175,7 +181,7 @@ $project_flagwords = $cspell_json['flagWords'] ?? [];
 array_walk($project_flagwords, function (&$value) {
   $value = strtok(str_replace('->', ':', $value), ':');
 });
-$quiet ?: print '$project_flagwords=' . print_r($project_flagwords, TRUE);
+$verbose && print '$project_flagwords=' . print_r($project_flagwords, TRUE);
 if ($missing_flagwords = array_diff($default_flagwords, $project_flagwords)) {
   $divider = str_repeat('*', 120);
   print "$divider\n[WARNING] This project's CSpell configuration does not contain all of the default flagged words. The missing words are:\n \n  "
@@ -185,14 +191,43 @@ if ($missing_flagwords = array_diff($default_flagwords, $project_flagwords)) {
 
 // Get any flagged words from $_CSPELL_FLAGWORDS.
 if ($cspell_flagwords = getenv('_CSPELL_FLAGWORDS')) {
-  $quiet ?: print 'Input $cspell_flagwords=' . $cspell_flagwords . PHP_EOL;
-  // Remove any quotes and spaces. Double quotes are added in json_encode.
-  $cspell_flagwords = str_replace(["'", '"', ' '], ['', '', ''], $cspell_flagwords);
+  $verbose && print 'Input $cspell_flagwords=' . $cspell_flagwords . PHP_EOL;
+  // Remove all double quotes and spaces.
+  $cspell_flagwords = str_replace(['"', ' '], ['', ''], $cspell_flagwords);
+  // Remove single quotes from the very start or very end of the string.
+  $cspell_flagwords = preg_replace("/^(')|(')$/n", '', $cspell_flagwords);
+  // Replace ,' and ', with just a , to remove quotes from around words but not
+  // from the middle of a word.
+  $cspell_flagwords_array = explode(',', str_replace([",'", "',"], [',', ','], $cspell_flagwords));
+  $verbose && print '$cspell_flagwords_array=' . print_r($cspell_flagwords_array, TRUE) . PHP_EOL;
+
+  // Words starting with '-' are to be removed from the final flagwords list.
+  $flagwords_to_remove = preg_grep('/^-/', $cspell_flagwords_array);
+  $flagwords_to_add = array_diff($cspell_flagwords_array, $flagwords_to_remove);
+  // Delete the leading '-' to give just the actual word.
+  array_walk($flagwords_to_remove, function (&$value) {
+    $value = substr($value, 1);
+  });
+  $verbose && print '$flagwords_to_add=' . print_r($flagwords_to_add, TRUE) . PHP_EOL
+    . '$flagwords_to_remove=' . print_r($flagwords_to_remove, TRUE) . PHP_EOL;
+
   $cspell_json['flagWords'] = array_values(array_unique(array_merge(
-    $cspell_json['flagWords'] ?? [],
-    array_filter(explode(',', $cspell_flagwords)),
+    // Remove the unwanted words.
+    array_diff($cspell_json['flagWords'] ?? [], $flagwords_to_remove),
+    // Add the new words.
+    $flagwords_to_add,
   )));
-  $quiet ?: print '$cspell_json[\'flagWords\']=' . print_r($cspell_json['flagWords'], TRUE) . PHP_EOL;
+  $verbose && print '$cspell_json[\'flagWords\']=' . print_r($cspell_json['flagWords'], TRUE) . PHP_EOL;
+}
+
+// -------------------
+// Minimum word length
+// -------------------
+//
+// The default minimum length of words to check is 4.
+if ($minwordlength = getenv('_CSPELL_MINWORDLENGTH')) {
+  $verbose && print '$minwordlength=' . $minwordlength . PHP_EOL;
+  $cspell_json['minWordLength'] = $minwordlength;
 }
 
 // ------------
@@ -210,7 +245,7 @@ $cspell_ignore_standard_files = getenv('_CSPELL_IGNORE_STANDARD_FILES');
 if ("$cspell_ignore_standard_files" != "0") {
   $paths = array_merge($paths, $ignore_standard_files);
 }
-$quiet ?: print '$paths=' . print_r($paths, TRUE) . PHP_EOL;
+$verbose && print '$paths=' . print_r($paths, TRUE) . PHP_EOL;
 
 // Add the values from $_CSPELL_IGNORE_PATHS, removing quotes and spaces.
 if ($cspell_ignore_paths = getenv('_CSPELL_IGNORE_PATHS')) {
@@ -236,14 +271,14 @@ $dictionary_definitions = [
   ],
 ];
 if ($project_dictionary = getenv('_CSPELL_DICTIONARY')) {
-  $quiet ?: print '$project_dictionary=' . $project_dictionary . PHP_EOL;
+  $verbose && print '$project_dictionary=' . $project_dictionary . PHP_EOL;
   $dictionary_definitions[] = [
     'name' => 'project-words',
     'path' => './' . $project_dictionary,
     'description' => "The project's own custom dictionary (optional)",
   ];
 }
-$quiet ?: print 'Initial $dictionary_definitions=' . print_r($dictionary_definitions, TRUE) . PHP_EOL;
+$verbose && print 'Initial $dictionary_definitions=' . print_r($dictionary_definitions, TRUE) . PHP_EOL;
 
 $dictionary_names = [];
 foreach ($dictionary_definitions as $key => $data) {
@@ -255,7 +290,7 @@ foreach ($dictionary_definitions as $key => $data) {
     unset($dictionary_definitions[$key]);
   }
 }
-$quiet ?: print 'After checking files, $dictionary_definitions=' . print_r($dictionary_definitions, TRUE) . PHP_EOL;
+$verbose && print 'After checking files, $dictionary_definitions=' . print_r($dictionary_definitions, TRUE) . PHP_EOL;
 
 // These dictionaries are provided by CSpell.
 $built_in_dictionaries = [
@@ -282,20 +317,20 @@ $cspell_json['dictionaries'] = array_values(array_unique(array_merge(
 )));
 
 // Remove any matching entries so that the updated versions take precedence.
-foreach ($cspell_json['dictionaryDefinitions'] ?? [] as $key => $dic) {
-  if (in_array($dic['name'], $dictionary_names)) {
+foreach ($cspell_json['dictionaryDefinitions'] ?? [] as $key => $dictionary) {
+  if (in_array($dictionary['name'], $dictionary_names)) {
     unset($cspell_json['dictionaryDefinitions'][$key]);
   }
 }
 $cspell_json['dictionaryDefinitions'] = merge_deep($dictionary_definitions, $cspell_json['dictionaryDefinitions'] ?? []);
-$quiet ?: print '$cspell_json[\'dictionaryDefinitions\']=' . print_r($cspell_json['dictionaryDefinitions'], TRUE) . PHP_EOL;
+$verbose && print '$cspell_json[\'dictionaryDefinitions\']=' . print_r($cspell_json['dictionaryDefinitions'], TRUE) . PHP_EOL;
 
 // ---------------------------
 // Write out the modified file
 // ---------------------------
 // Allow for easy testing by avoiding overwriting the input file.
 $cspell_filename .= $suffix;
-$quiet ?: print 'At end $cspell_json=' . print_r($cspell_json, TRUE) . PHP_EOL;
+$verbose && print 'At end $cspell_json=' . print_r($cspell_json, TRUE) . PHP_EOL;
 print "Writing json array to {$cspell_filename}" . PHP_EOL;
 file_put_contents($cspell_filename, json_encode($cspell_json, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
 
